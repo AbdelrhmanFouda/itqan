@@ -29,6 +29,15 @@ export default function Navbar() {
           <a href="#about" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
             {tr.nav.about}
           </a>
+          <a href="#team" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            {tr.nav.team}
+          </a>
+          <a href="#products" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            {tr.nav.products}
+          </a>
+          <a href="#tools" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            {tr.nav.tools}
+          </a>
           <a href="#contact" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
             {tr.nav.contact}
           </a>
@@ -63,15 +72,12 @@ export default function Navbar() {
       {/* Mobile menu */}
       {open && (
         <div className="md:hidden border-t border-gray-100 bg-white px-6 py-4 flex flex-col gap-4">
-          <a href="#services" onClick={() => setOpen(false)} className="text-sm text-gray-700">
-            {tr.nav.services}
-          </a>
-          <a href="#about" onClick={() => setOpen(false)} className="text-sm text-gray-700">
-            {tr.nav.about}
-          </a>
-          <a href="#contact" onClick={() => setOpen(false)} className="text-sm text-gray-700">
-            {tr.nav.contact}
-          </a>
+          <a href="#services" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.services}</a>
+          <a href="#about" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.about}</a>
+          <a href="#team" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.team}</a>
+          <a href="#products" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.products}</a>
+          <a href="#tools" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.tools}</a>
+          <a href="#contact" onClick={() => setOpen(false)} className="text-sm text-gray-700">{tr.nav.contact}</a>
           <Link href="/dashboard" onClick={() => setOpen(false)} className="text-sm text-gray-700">
             {tr.nav.dashboard}
           </Link>
