@@ -1,9 +1,8 @@
 "use client";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { ArrowRight, ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown, Cog, Zap } from "lucide-react";
 import { motion } from "framer-motion";
-import Image from "next/image";
 
 export default function Hero() {
   const { lang } = useLang();
@@ -109,27 +108,80 @@ export default function Hero() {
             </motion.div>
           </div>
 
-          {/* Machine image */}
+          {/* Machine visual panel */}
           <motion.div
             initial={{ opacity: 0, x: isAr ? -60 : 60 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.9, delay: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+            transition={{ duration: 0.9, delay: 0.2, ease: "easeOut" as const }}
             className="relative hidden lg:block"
           >
             {/* Glow */}
-            <div className="absolute inset-0 bg-blue-500/10 rounded-3xl blur-3xl scale-110" />
-            <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl shadow-black/50 bg-gray-900">
-              <Image
-                src="/machines/injection.jpg"
-                alt="Injection Molding Machine"
-                width={600}
-                height={420}
-                className="w-full object-cover"
-                priority
-              />
+            <div className="absolute inset-0 bg-blue-500/15 rounded-3xl blur-3xl scale-110" />
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl shadow-black/60 bg-gray-900">
+              {/* Industrial machine visual */}
+              <div className="relative h-[420px] flex items-center justify-center overflow-hidden"
+                style={{
+                  background: "linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #0f172a 100%)",
+                }}>
+                {/* Grid lines */}
+                <div className="absolute inset-0 opacity-[0.06]"
+                  style={{
+                    backgroundImage: "linear-gradient(rgba(96,165,250,1) 1px, transparent 1px), linear-gradient(90deg, rgba(96,165,250,1) 1px, transparent 1px)",
+                    backgroundSize: "40px 40px",
+                  }} />
+                {/* Center glow */}
+                <div className="absolute inset-0 bg-blue-600/10 rounded-full blur-3xl" />
+                {/* Animated rings */}
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                  className="absolute w-72 h-72 rounded-full border border-blue-500/10"
+                />
+                <motion.div
+                  animate={{ rotate: -360 }}
+                  transition={{ duration: 14, repeat: Infinity, ease: "linear" }}
+                  className="absolute w-52 h-52 rounded-full border border-blue-400/15"
+                  style={{ borderStyle: "dashed" }}
+                />
+                {/* Central icon */}
+                <div className="relative flex flex-col items-center gap-4">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                    className="w-20 h-20 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center"
+                  >
+                    <Cog size={40} className="text-blue-400" />
+                  </motion.div>
+                  <div className="flex gap-3 mt-2">
+                    {[...Array(3)].map((_, i) => (
+                      <motion.div
+                        key={i}
+                        animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                        transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.4 }}
+                        className="w-2 h-2 rounded-full bg-blue-400"
+                      />
+                    ))}
+                  </div>
+                  {/* Stats floating */}
+                  <div className="flex gap-6 mt-4">
+                    {[{ v: "16+", l: isAr ? "ماكينة" : "Machines" }, { v: "24/7", l: isAr ? "تشغيل" : "Operation" }].map((s) => (
+                      <div key={s.l} className="text-center">
+                        <div className="text-xl font-bold text-white">{s.v}</div>
+                        <div className="text-xs text-gray-500">{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Corner accents */}
+                <div className="absolute top-4 left-4 w-8 h-8 border-l-2 border-t-2 border-blue-500/30 rounded-tl-lg" />
+                <div className="absolute top-4 right-4 w-8 h-8 border-r-2 border-t-2 border-blue-500/30 rounded-tr-lg" />
+                <div className="absolute bottom-16 left-4 w-8 h-8 border-l-2 border-b-2 border-blue-500/30 rounded-bl-lg" />
+                <div className="absolute bottom-16 right-4 w-8 h-8 border-r-2 border-b-2 border-blue-500/30 rounded-br-lg" />
+              </div>
               {/* Overlay label */}
               <div className="absolute bottom-4 left-4 right-4 bg-gray-950/80 backdrop-blur rounded-xl px-4 py-3 border border-white/10">
-                <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide mb-0.5">
+                <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide mb-0.5 flex items-center gap-1.5">
+                  <Zap size={10} className="inline" />
                   {isAr ? "قسم الحقن" : "Injection Division"}
                 </p>
                 <p className="text-sm text-white font-medium">
