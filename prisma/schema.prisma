@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+model Machine {
+  id         Int           @id @default(autoincrement())
+  name       String
+  type       String
+  status     String        @default("Operational")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  notes      MachineNote[]
+
+  @@map("machines")
+}
+
+model MachineNote {
+  id         Int      @id @default(autoincrement())
+  machineId  Int      @map("machine_id")
+  note       String
+  noteDate   DateTime @map("note_date") @db.Date
+  createdAt  DateTime @default(now()) @map("created_at")
+  machine    Machine  @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@map("machine_notes")
+}
+
+model MonthlyReport {
+  id              Int      @id @default(autoincrement())
+  month           Int
+  year            Int
+  jobsCompleted   Int?     @map("jobs_completed")
+  notes           String?
+  issues          String?
+  recommendations String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("monthly_reports")
+}
+
+model ContactInquiry {
+  id          Int      @id @default(autoincrement())
+  name        String?
+  company     String?
+  phone       String?
+  email       String?
+  inquiryType String?  @map("inquiry_type")
+  message     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("contact_inquiries")
+}

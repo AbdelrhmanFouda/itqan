@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getReports, addReport, setupDb } from "@/lib/db";
+import { getReports, addReport } from "@/lib/db";
 
 export async function GET() {
   try {
-    await setupDb();
     const reports = await getReports();
     return NextResponse.json(reports);
   } catch (err) {
@@ -14,7 +13,6 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await setupDb();
     const { month, year, jobs_completed, notes, issues, recommendations } = await req.json();
     const report = await addReport(
       Number(month),
