@@ -1,6 +1,28 @@
 "use client";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
+import { motion } from "framer-motion";
+import { staggerContainer, fadeInUp } from "@/lib/animations";
+
+const tagColors: Record<string, string> = {
+  "Injection Molding": "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  "Counterweights": "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  "Injection Molding + CNC": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  "Prototyping + Molding": "bg-teal-500/10 text-teal-400 border-teal-500/20",
+  "قولبة بالحقن": "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  "أثقال موازنة": "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  "قولبة + CNC": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  "نمذجة + قولبة": "bg-teal-500/10 text-teal-400 border-teal-500/20",
+};
+
+const bgPatterns = [
+  "from-blue-900/30 to-gray-900",
+  "from-violet-900/30 to-gray-900",
+  "from-cyan-900/30 to-gray-900",
+  "from-indigo-900/30 to-gray-900",
+  "from-teal-900/30 to-gray-900",
+  "from-blue-900/20 to-gray-900",
+];
 
 export default function Products() {
   const { lang } = useLang();
@@ -8,37 +30,62 @@ export default function Products() {
   const isAr = lang === "ar";
 
   return (
-    <section id="products" dir={isAr ? "rtl" : "ltr"} className="py-24 bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-gray-900 mb-3">{tr.products.title}</h2>
-          <p className="text-gray-500">{tr.products.subtitle}</p>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    <section id="products" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-900 relative overflow-hidden">
+      <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+
+      <div className="max-w-7xl mx-auto px-6">
+        <motion.div
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-80px" }}
+          variants={fadeInUp}
+          className="text-center mb-16"
+        >
+          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+            {isAr ? "ما صنعناه" : "Our Work"}
+          </p>
+          <h2 className="text-4xl font-bold text-white mb-4">{tr.products.title}</h2>
+          <p className="text-gray-500 max-w-xl mx-auto">{tr.products.subtitle}</p>
+        </motion.div>
+
+        <motion.div
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-60px" }}
+          variants={staggerContainer}
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"
+        >
           {tr.products.items.map((item, i) => (
-            <div
+            <motion.div
               key={i}
-              className="bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all overflow-hidden group"
+              variants={fadeInUp}
+              whileHover={{ y: -6, transition: { duration: 0.25 } }}
+              className="group bg-gray-950 rounded-2xl border border-white/5 hover:border-blue-500/20 overflow-hidden transition-colors"
             >
-              {/* Placeholder visual */}
-              <div className="h-36 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                <div className="w-16 h-16 rounded-lg bg-white/60 border border-gray-200 flex items-center justify-center">
-                  <div className="w-8 h-8 rounded bg-blue-100" />
+              {/* Visual placeholder */}
+              <div className={`h-40 bg-gradient-to-br ${bgPatterns[i]} relative overflow-hidden`}>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/40 to-cyan-500/40" />
+                  </div>
                 </div>
+                {/* Shimmer effect */}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/3 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
               </div>
+
               <div className="p-5">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="font-semibold text-gray-900 leading-snug">{item.title}</h3>
-                  <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
+                <div className={`flex items-start justify-between gap-3 mb-2 ${isAr ? "flex-row-reverse" : ""}`}>
+                  <h3 className="font-semibold text-white leading-snug text-[15px]">{item.title}</h3>
+                  <span className={`text-xs px-2.5 py-1 rounded-full border whitespace-nowrap shrink-0 ${tagColors[item.tag] ?? "bg-blue-500/10 text-blue-400 border-blue-500/20"}`}>
                     {item.tag}
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 mb-2">{item.category}</p>
+                <p className="text-xs text-gray-600 mb-2">{item.category}</p>
                 <p className="text-sm text-gray-500 leading-relaxed">{item.desc}</p>
               </div>
-            </div>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );

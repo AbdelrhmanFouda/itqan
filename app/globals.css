@@ -6,4 +6,29 @@
 
 html {
   scroll-behavior: smooth;
+  background-color: #030712;
+}
+
+body {
+  background-color: #030712;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+::-webkit-scrollbar-thumb {
+  background: #1d4ed8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+
+/* Smooth image loading */
+img {
+  transition: opacity 0.3s ease;
 }
