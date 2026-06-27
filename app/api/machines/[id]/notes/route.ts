@@ -3,13 +3,13 @@ import { getMachineNotes, addMachineNote } from "@/lib/db";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const notes = await getMachineNotes(Number(id));
+  const notes = await getMachineNotes(id);
   return NextResponse.json(notes);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { note, note_date } = await req.json();
-  const result = await addMachineNote(Number(id), note, note_date);
+  const result = await addMachineNote(id, note, note_date);
   return NextResponse.json(result);
 }

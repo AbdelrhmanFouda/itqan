@@ -3,16 +3,18 @@ import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
 
 type Report = {
-  id: number;
+  id: string;
   month: number;
   year: number;
   jobs_completed: number | null;
   notes: string;
   issues: string;
   recommendations: string;
-  created_at: string;
+  created_at: string | null;
 };
 
 const monthNames = [
@@ -26,6 +28,7 @@ const monthNamesAr = [
 
 export default function ReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
@@ -38,6 +41,12 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
       .catch(() => {});
   }, [id]);
 
+  async function handleDelete() {
+    if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
+    await fetch(`/api/reports/${id}`, { method: "DELETE" });
+    router.push("/dashboard/reports");
+  }
+
   if (!report) return <div className="text-sm text-gray-400">Loading...</div>;
 
   const months = isAr ? monthNamesAr : monthNames;
@@ -48,15 +57,27 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         {isAr ? "→ التقارير" : "← Reports"}
       </Link>
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          {tr.dashboard.reportFor} {months[report.month - 1]} {report.year}
-        </h1>
-        <p className="text-xs text-gray-400 mt-1">
-          {new Date(report.created_at).toLocaleDateString(isAr ? "ar-EG" : "en-GB", {
-            year: "numeric", month: "long", day: "numeric",
-          })}
-        </p>
+      <div className={`flex items-start justify-between gap-3 mb-6 ${isAr ? "flex-row-reverse" : ""}`}>
+        <div dir={isAr ? "rtl" : "ltr"}>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {tr.dashboard.reportFor} {months[report.month - 1]} {report.year}
+          </h1>
+          {report.created_at && (
+            <p className="text-xs text-gray-400 mt-1">
+              {new Date(report.created_at).toLocaleDateString(isAr ? "ar-EG" : "en-GB", {
+                year: "numeric", month: "long", day: "numeric",
+              })}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={handleDelete}
+          title={isAr ? "حذف" : "Delete"}
+          className="flex items-center gap-1.5 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2.5 py-1.5 rounded-lg transition-colors"
+        >
+          <Trash2 size={13} />
+          {isAr ? "حذف" : "Delete"}
+        </button>
       </div>
 
       <div className="space-y-5">

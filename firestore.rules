@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ⚠️  DEVELOPMENT RULES — open read/write so the scaffold works immediately.
+    // The public site reads `clients`, and the dashboard reads/writes everything.
+    // Before going to production, lock this down (e.g. require Firebase Auth for
+    // writes, keep only `clients` publicly readable). See FIREBASE_SETUP.md.
+
+    match /clients/{doc} {
+      allow read: if true;            // shown on the public marketing site
+      allow write: if true;           // TODO: restrict to authenticated admins
+    }
+
+    match /{document=**} {
+      allow read, write: if true;     // TODO: restrict before production
+    }
+  }
+}

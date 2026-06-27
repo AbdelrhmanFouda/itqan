@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Plus, ChevronRight, Circle } from "lucide-react";
 
 type Machine = {
-  id: number;
+  id: string;
   name: string;
   type: string;
   status: string;

@@ -24,6 +24,7 @@ export default function Navbar() {
     { href: "#about", label: tr.nav.about },
     { href: "#team", label: tr.nav.team },
     { href: "#products", label: tr.nav.products },
+    { href: "#clients", label: tr.nav.clients },
     { href: "#tools", label: tr.nav.tools },
     { href: "#contact", label: tr.nav.contact },
   ];

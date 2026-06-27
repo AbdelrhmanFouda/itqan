@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { motion } from "framer-motion";
@@ -62,15 +63,20 @@ export default function Products() {
               whileHover={{ y: -6, transition: { duration: 0.25 } }}
               className="group bg-gray-950 rounded-2xl border border-white/5 hover:border-blue-500/20 overflow-hidden transition-colors"
             >
-              {/* Visual placeholder */}
+              {/* Work photo (gradient shows underneath as a fallback) */}
               <div className={`h-40 bg-gradient-to-br ${bgPatterns[i]} relative overflow-hidden`}>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/40 to-cyan-500/40" />
-                  </div>
-                </div>
-                {/* Shimmer effect */}
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/3 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                {item.image && (
+                  <Image
+                    src={item.image}
+                    alt={item.title}
+                    fill
+                    sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                )}
+                {/* Subtle gradient for legibility + shimmer on hover */}
+                <div className="absolute inset-0 bg-gradient-to-t from-gray-950/60 to-transparent pointer-events-none" />
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
               </div>
 
               <div className="p-5">

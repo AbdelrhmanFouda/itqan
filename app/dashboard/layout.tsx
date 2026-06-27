@@ -3,18 +3,24 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Settings, FileText, LayoutDashboard, Globe } from "lucide-react";
+import { pd } from "@/lib/i18n.prod";
+import { Settings, FileText, LayoutDashboard, Globe, Building2, Box, BarChart3 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { lang, setLang } = useLang();
   const tr = t[lang];
+  const p = pd[lang];
   const pathname = usePathname();
   const isAr = lang === "ar";
 
   const navItems = [
-    { href: "/dashboard", label: tr.dashboard.overview, icon: LayoutDashboard, exact: true },
-    { href: "/dashboard/machines", label: tr.dashboard.machines, icon: Settings },
+    { href: "/dashboard", label: p.nav.overview, icon: LayoutDashboard, exact: true },
+    { href: "/dashboard/machines", label: p.nav.machines, icon: Settings },
+    { href: "/dashboard/molds", label: p.nav.molds, icon: Box },
+    { href: "/dashboard/jobs", label: p.nav.jobs, icon: FileText },
+    { href: "/dashboard/production", label: p.nav.production, icon: BarChart3 },
     { href: "/dashboard/reports", label: tr.dashboard.reports, icon: FileText },
+    { href: "/dashboard/clients", label: tr.dashboard.clients, icon: Building2 },
   ];
 
   return (

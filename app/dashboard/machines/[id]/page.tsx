@@ -3,13 +3,15 @@ import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Trash2 } from "lucide-react";
 
-type Machine = { id: number; name: string; type: string; status: string };
-type Note = { id: number; note: string; note_date: string };
+type Machine = { id: string; name: string; type: string; status: string };
+type Note = { id: string; note: string; note_date: string };
 
 export default function MachinePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
@@ -64,6 +66,12 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
     loadMachine();
   }
 
+  async function handleDelete() {
+    if (!confirm(isAr ? "حذف هذه الماكينة وكل ملاحظاتها؟" : "Delete this machine and all its notes?")) return;
+    await fetch(`/api/machines/${id}`, { method: "DELETE" });
+    router.push("/dashboard/machines");
+  }
+
   if (!machine) return <div className="text-gray-400 text-sm">Loading...</div>;
 
   return (
@@ -76,7 +84,17 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
       </Link>
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
-        <h1 className="text-xl font-bold text-gray-900 mb-4">{machine.name}</h1>
+        <div className={`flex items-start justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
+          <h1 className="text-xl font-bold text-gray-900">{machine.name}</h1>
+          <button
+            onClick={handleDelete}
+            title={isAr ? "حذف" : "Delete"}
+            className="flex items-center gap-1.5 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            <Trash2 size={13} />
+            {isAr ? "حذف" : "Delete"}
+          </button>
+        </div>
         <div className="grid sm:grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-gray-500">{tr.dashboard.machineType}: </span>

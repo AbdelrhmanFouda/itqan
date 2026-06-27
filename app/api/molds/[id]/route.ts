@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMachine, updateMachineStatus, deleteMachine } from "@/lib/db";
+import { getMold, updateMold, deleteMold } from "@/lib/db";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const machine = await getMachine(id);
-  if (!machine) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json(machine);
+  const mold = await getMold(id);
+  if (!mold) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json(mold);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { status } = await req.json();
-  await updateMachineStatus(id, status);
+  const patch = await req.json();
+  await updateMold(id, patch);
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await deleteMachine(id);
+  await deleteMold(id);
   return NextResponse.json({ ok: true });
 }

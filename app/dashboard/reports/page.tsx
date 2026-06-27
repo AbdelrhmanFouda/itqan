@@ -3,9 +3,9 @@ import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, Trash2 } from "lucide-react";
 
-type Report = { id: number; month: number; year: number; jobs_completed: number | null; notes: string };
+type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
 
 const monthNames = [
   "January","February","March","April","May","June",
@@ -50,6 +50,12 @@ export default function ReportsPage() {
     });
     setShowForm(false);
     setSaving(false);
+    load();
+  }
+
+  async function handleDelete(rid: string) {
+    if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
+    await fetch(`/api/reports/${rid}`, { method: "DELETE" });
     load();
   }
 
@@ -159,14 +165,16 @@ export default function ReportsPage() {
       ) : (
         <div className="space-y-3">
           {reports.map((r) => (
-            <Link
+            <div
               key={r.id}
-              href={`/dashboard/reports/${r.id}`}
               className="bg-white border border-gray-100 hover:border-blue-300 rounded-xl px-5 py-4 flex items-center justify-between group transition-colors"
             >
-              <div className={`flex items-center gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
+              <Link
+                href={`/dashboard/reports/${r.id}`}
+                className={`flex items-center gap-3 flex-1 ${isAr ? "flex-row-reverse" : ""}`}
+              >
                 <FileText size={16} className="text-gray-300" />
-                <div>
+                <div dir={isAr ? "rtl" : "ltr"}>
                   <p className="font-medium text-gray-900">
                     {months[r.month - 1]} {r.year}
                   </p>
@@ -176,9 +184,20 @@ export default function ReportsPage() {
                     </p>
                   )}
                 </div>
+              </Link>
+              <div className={`flex items-center gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
+                <Link href={`/dashboard/reports/${r.id}`} className="text-xs text-blue-600 hover:underline">
+                  {tr.dashboard.viewReport}
+                </Link>
+                <button
+                  onClick={() => handleDelete(r.id)}
+                  title={isAr ? "حذف" : "Delete"}
+                  className="text-gray-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
-              <span className="text-xs text-blue-600 group-hover:underline">{tr.dashboard.viewReport}</span>
-            </Link>
+            </div>
           ))}
         </div>
       )}

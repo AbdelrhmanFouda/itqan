@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Itqan
 
-## Getting Started
+Bilingual (English / Arabic) marketing site and internal dashboard for **Itqan**,
+an Egyptian contract manufacturer (plastic injection molding, fan counterweights,
+and in-house CNC mold manufacturing).
 
-First, run the development server:
+Built with **Next.js 16 (App Router)**, **Tailwind CSS v4**, **Framer Motion**,
+and **Firebase Firestore** for dynamic data.
+
+## Features
+
+- **Marketing site** — hero, services, about, team, **previous work with photos**,
+  **"Companies We Worked With"**, equipment, and a contact form. Full RTL/Arabic support.
+- **Dashboard** (`/dashboard`) — manage machines (status + notes), monthly reports,
+  and clients, with add/delete actions. Contact form submissions are saved to Firestore.
+
+## Quick start
 
 ```bash
+npm install
+cp .env.example .env.local   # then add your Firebase keys
+npm run seed                 # populate Firestore with sample data
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000>.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+👉 **First time?** Follow [`FIREBASE_SETUP.md`](./FIREBASE_SETUP.md) to create the
+Firebase project and get the config keys (takes a few minutes).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Data
 
-## Learn More
+All dynamic data lives in Firestore. The data-access layer is in
+[`lib/db.ts`](./lib/db.ts) and the client config in [`lib/firebase.ts`](./lib/firebase.ts).
+Sample data (machines, notes, reports, inquiries, clients) is seeded by
+[`scripts/seed.mjs`](./scripts/seed.mjs).
 
-To learn more about Next.js, take a look at the following resources:
+Images: product photos in `public/products/`, client logos in `public/clients/` —
+swap in real assets using the same filenames anytime.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deploy on Vercel and set the `NEXT_PUBLIC_FIREBASE_*` environment variables in the
+project settings. See the end of [`FIREBASE_SETUP.md`](./FIREBASE_SETUP.md).
