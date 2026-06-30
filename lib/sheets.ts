@@ -232,7 +232,7 @@ export async function getRecords(entity: string): Promise<RecordsResult> {
   for (let r = h + 1; r < values.length; r++) {
     const row = values[r];
     if (!row || row.length === 0) continue;
-    const rec: SheetRecord = { row: r + 1 };
+    const rec = { row: r + 1 } as unknown as SheetRecord;
     let any = false;
     for (const f of present) {
       const v = clean(row[idx[f.key]]);
