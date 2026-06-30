@@ -207,6 +207,27 @@ export async function addInquiry(input: InquiryInput) {
   return { ok: true };
 }
 
+type InquiryDoc = {
+  name?: string; company?: string; phone?: string;
+  email?: string; inquiryType?: string; message?: string; createdAt?: number;
+};
+
+export async function getInquiries() {
+  const snap = await getDocs(collection(db, COL.inquiries));
+  return rows<InquiryDoc>(snap)
+    .map((d) => ({
+      id: d.id,
+      name: d.name ?? "",
+      company: d.company ?? "",
+      phone: d.phone ?? "",
+      email: d.email ?? "",
+      inquiryType: d.inquiryType ?? "",
+      message: d.message ?? "",
+      createdAt: d.createdAt ?? 0,
+    }))
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+}
+
 /* ------------------------------ Clients ----------------------------- */
 
 type ClientDoc = {

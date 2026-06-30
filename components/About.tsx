@@ -1,29 +1,9 @@
 "use client";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { motion, useInView, useMotionValue, useSpring } from "framer-motion";
-import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { fadeInLeft, fadeInRight } from "@/lib/animations";
 import { Settings, Layers, BarChart3, Wrench } from "lucide-react";
-
-function AnimatedCounter({ value, suffix = "" }: { value: number; suffix?: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const motionVal = useMotionValue(0);
-  const spring = useSpring(motionVal, { duration: 1500, bounce: 0 });
-  const inView = useInView(ref, { once: true });
-
-  useEffect(() => {
-    if (inView) motionVal.set(value);
-  }, [inView, motionVal, value]);
-
-  useEffect(() => {
-    return spring.on("change", (v) => {
-      if (ref.current) ref.current.textContent = Math.round(v) + suffix;
-    });
-  }, [spring, suffix]);
-
-  return <span ref={ref}>0{suffix}</span>;
-}
 
 export default function About() {
   const { lang } = useLang();
@@ -148,31 +128,7 @@ export default function About() {
               {isAr ? "من نحن" : "About Us"}
             </p>
             <h2 className="text-4xl font-bold text-white mb-6">{tr.about.title}</h2>
-            <p className="text-gray-400 leading-relaxed text-lg mb-10">{tr.about.body}</p>
-
-            {/* Animated stats */}
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { raw: 16, suffix: "+", label: tr.about.facts[0].label },
-                { raw: 100, suffix: "%", label: tr.about.facts[1].label },
-                { raw: 0, suffix: "CNC", label: tr.about.facts[2].label, text: "CNC" },
-                { raw: 2, suffix: "", label: tr.about.facts[3].label },
-              ].map((fact, i) => (
-                <div
-                  key={i}
-                  className="bg-gray-950 rounded-xl p-5 border border-white/5 hover:border-blue-500/20 transition-colors"
-                >
-                  <div className="text-3xl font-bold text-blue-400 mb-1">
-                    {fact.text ? (
-                      fact.text
-                    ) : (
-                      <AnimatedCounter value={fact.raw} suffix={fact.suffix} />
-                    )}
-                  </div>
-                  <div className="text-sm text-gray-500">{fact.label}</div>
-                </div>
-              ))}
-            </div>
+            <p className="text-gray-400 leading-relaxed text-lg">{tr.about.body}</p>
           </motion.div>
         </div>
       </div>

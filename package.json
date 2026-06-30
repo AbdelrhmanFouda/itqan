@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "node scripts/seed.mjs",
+    "clear": "node scripts/clear.mjs",
     "images": "node scripts/generate-images.mjs"
   },
   "dependencies": {

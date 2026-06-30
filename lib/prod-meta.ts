@@ -9,6 +9,9 @@ export const MOLD_STATUSES = ["Active", "In Repair", "Retired"];
 export const JOB_STATUSES = ["Quoted", "In Production", "Completed", "Delivered", "On Hold"];
 export const JOB_PRIORITIES = ["Low", "Normal", "High"];
 export const DOWNTIME_REASONS = ["None", "Mold change", "Breakdown", "Material", "No order", "Quality hold", "Other"];
+// Shift definitions. Canonical English value stored in the sheet; UI label is
+// localised via lib/i18n.prod.ts `runs.shifts` (index-aligned with this array).
+export const SHIFTS = ["Day", "Night"];
 
 export type Tone = "green" | "amber" | "red" | "gray" | "blue";
 

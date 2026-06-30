@@ -26,7 +26,7 @@ export const t = {
       items: [
         {
           title: "Plastic Injection Molding",
-          desc: "Custom plastic parts for electrical, automotive, and industrial applications using a fleet of 16+ machines.",
+          desc: "Custom plastic parts for electrical, automotive, and industrial applications.",
         },
         {
           title: "Fan Counterweights",
@@ -45,143 +45,28 @@ export const t = {
     about: {
       title: "About Itqan",
       body: "Itqan is a contract-based industrial manufacturer based in Egypt. We specialize in plastic injection molding and fan counterweight production, serving the household electrical, automotive, and general industrial sectors. Our in-house CNC mold capability gives clients a single point of contact from tooling to production.",
-      facts: [
-        { value: "16+", label: "Injection Machines" },
-        { value: "100%", label: "Local Manufacturing" },
-        { value: "CNC", label: "In-House Tooling" },
-        { value: "2", label: "Core Divisions" },
-      ],
+      facts: [],
     },
     team: {
       title: "Our Team",
       subtitle: "The engineers behind Itqan's production capability",
-      members: [
-        {
-          name: "Ahmed Hassan",
-          role: "Production Engineer",
-          email: "ahmed.hassan@itqan.eg",
-          phone: "+20 100 123 4567",
-          bio: "Oversees daily injection molding operations and machine scheduling across both production divisions.",
-        },
-        {
-          name: "Mohamed Ali",
-          role: "CNC & Tooling Engineer",
-          email: "mohamed.ali@itqan.eg",
-          phone: "+20 101 234 5678",
-          bio: "Responsible for mold design, CNC machining, mold repair, and tooling lifecycle management.",
-        },
-        {
-          name: "Sara Ibrahim",
-          role: "Quality Control Engineer",
-          email: "sara.ibrahim@itqan.eg",
-          phone: "+20 102 345 6789",
-          bio: "Manages incoming material inspection, in-process checks, and final part verification.",
-        },
-        {
-          name: "Omar Khaled",
-          role: "Maintenance Engineer",
-          email: "omar.khaled@itqan.eg",
-          phone: "+20 103 456 7890",
-          bio: "Handles preventive and corrective maintenance for the full machine fleet and auxiliary equipment.",
-        },
-      ],
+      members: [],
     },
     products: {
       title: "Previous Work",
       subtitle: "A selection of parts produced for clients across multiple industries",
       items: [
-        {
-          title: "Fan Housing Shells",
-          category: "Household Electrical",
-          desc: "High-volume injection-molded ABS housings for ceiling and stand fans. Multi-cavity molds, 500k+ units delivered.",
-          tag: "Injection Molding",
-          image: "/products/fan-housing.jpg",
-        },
-        {
-          title: "Fan Counterweight Sets",
-          category: "Household Electrical",
-          desc: "Precision plastic counterweights for fan blade balancing. Client-supplied molds, weight tolerance ±0.5g.",
-          tag: "Counterweights",
-          image: "/products/counterweights.jpg",
-        },
-        {
-          title: "Automotive Cable Clips",
-          category: "Automotive",
-          desc: "PA66 wire-harness retention clips for an Egyptian automotive supplier. 8-cavity mold, 1M+ units.",
-          tag: "Injection Molding",
-          image: "/products/cable-clips.jpg",
-        },
-        {
-          title: "Electrical Junction Boxes",
-          category: "Industrial",
-          desc: "Custom PP enclosures for industrial wiring panels. Designed and tooled in-house on our CNC.",
-          tag: "Injection Molding + CNC",
-          image: "/products/junction-boxes.jpg",
-        },
-        {
-          title: "Appliance Control Bezels",
-          category: "Household Electrical",
-          desc: "Decorative and functional ABS bezels for home appliance control panels — tight surface finish requirements.",
-          tag: "Injection Molding",
-          image: "/products/control-bezels.jpg",
-        },
-        {
-          title: "Industrial Mounting Brackets",
-          category: "General Industrial",
-          desc: "Glass-filled nylon structural brackets for machine mounting. Prototype validated via 3D printing before tooling.",
-          tag: "Prototyping + Molding",
-          image: "/products/mounting-brackets.jpg",
-        },
       ],
     },
     clients: {
       title: "Companies We Worked With",
       subtitle: "Trusted by manufacturers and suppliers across Egypt's industrial sector",
-      items: [
-        { name: "Nile Appliances", industry: "Home Appliances", logo: "/clients/nile-appliances.png" },
-        { name: "Delta Electric", industry: "Electrical", logo: "/clients/delta-electric.png" },
-        { name: "Cairo Auto Parts", industry: "Automotive", logo: "/clients/cairo-auto.png" },
-        { name: "Pharaoh Plastics", industry: "Plastics", logo: "/clients/pharaoh-plastics.png" },
-        { name: "Giza Home Systems", industry: "Consumer Electronics", logo: "/clients/giza-home.png" },
-        { name: "Suez Industrial Group", industry: "Industrial", logo: "/clients/suez-industrial.png" },
-      ],
+      items: [],
     },
     tools: {
       title: "Equipment",
       subtitle: "Our production and tooling assets",
-      categories: [
-        {
-          name: "Injection Molding Machines",
-          items: [
-            { name: "Injection Molding Machines ×16", detail: "Various tonnages — manual operation, multi-cavity capable" },
-            { name: "Material Dryers ×4", detail: "Hopper dryers for hygroscopic materials (PA, PC, ABS)" },
-            { name: "Mold Temperature Controllers ×6", detail: "Water-based cooling circuits for cycle stability" },
-          ],
-        },
-        {
-          name: "Tooling & CNC",
-          items: [
-            { name: "3-Axis CNC Machining Center ×1", detail: "In-house mold production, repair, and modification" },
-            { name: "Bench Grinder & Polisher", detail: "Mold cavity surface finishing" },
-            { name: "EDM Drill (Hole Popper) ×1", detail: "Electrode drilling for mold cooling channels" },
-          ],
-        },
-        {
-          name: "Prototyping",
-          items: [
-            { name: "FDM 3D Printer ×1", detail: "PLA/PETG prototypes for design validation before tooling" },
-          ],
-        },
-        {
-          name: "Measurement & QC",
-          items: [
-            { name: "Vernier Calipers ×8", detail: "0.02mm resolution, distributed across inspection stations" },
-            { name: "Micrometers ×4", detail: "External measurement for critical dimensions" },
-            { name: "Precision Scales ×3", detail: "0.1g resolution — counterweight and shot-weight checks" },
-            { name: "Height Gauge ×2", detail: "Flat-surface dimensional verification" },
-          ],
-        },
-      ],
+      categories: [],
     },
     contact: {
       title: "Contact Us",
@@ -269,7 +154,7 @@ export const t = {
       items: [
         {
           title: "قولبة البلاستيك بالحقن",
-          desc: "قطع بلاستيكية مخصصة للتطبيقات الكهربائية والسيارات والصناعية باستخدام 16+ ماكينة.",
+          desc: "قطع بلاستيكية مخصصة للتطبيقات الكهربائية والسيارات والصناعية.",
         },
         {
           title: "أثقال موازنة المراوح",
@@ -288,143 +173,27 @@ export const t = {
     about: {
       title: "عن إتقان",
       body: "إتقان شركة تصنيع صناعي بالعقود مقرها مصر. متخصصون في قولبة البلاستيك بالحقن وإنتاج الأثقال الموازنة للمراوح، نخدم قطاعات الأجهزة الكهربائية المنزلية والسيارات والصناعة العامة. قدرتنا على تصنيع القوالب داخلياً تجعلنا نقطة اتصال واحدة من العدة حتى الإنتاج.",
-      facts: [
-        { value: "+16", label: "ماكينة حقن" },
-        { value: "100%", label: "تصنيع محلي" },
-        { value: "CNC", label: "قوالب داخلية" },
-        { value: "2", label: "قسما إنتاج" },
-      ],
+      facts: [],
     },
     team: {
       title: "فريقنا",
       subtitle: "المهندسون الذين يقودون قدرات إنتاج إتقان",
-      members: [
-        {
-          name: "أحمد حسن",
-          role: "مهندس إنتاج",
-          email: "ahmed.hassan@itqan.eg",
-          phone: "+20 100 123 4567",
-          bio: "يشرف على عمليات الحقن اليومية وجدولة الماكينات في قسمي الإنتاج.",
-        },
-        {
-          name: "محمد علي",
-          role: "مهندس CNC وعُدة",
-          email: "mohamed.ali@itqan.eg",
-          phone: "+20 101 234 5678",
-          bio: "مسؤول عن تصميم القوالب والتشغيل بالـ CNC وإصلاح القوالب وإدارة دورة حياة العدة.",
-        },
-        {
-          name: "سارة إبراهيم",
-          role: "مهندسة مراقبة الجودة",
-          email: "sara.ibrahim@itqan.eg",
-          phone: "+20 102 345 6789",
-          bio: "تدير فحص المواد الواردة والمراجعات أثناء الإنتاج والتحقق النهائي من القطع.",
-        },
-        {
-          name: "عمر خالد",
-          role: "مهندس صيانة",
-          email: "omar.khaled@itqan.eg",
-          phone: "+20 103 456 7890",
-          bio: "يتولى الصيانة الوقائية والتصحيحية لكامل أسطول الماكينات والمعدات المساعدة.",
-        },
-      ],
+      members: [],
     },
     products: {
       title: "أعمال سابقة",
       subtitle: "مختارات من القطع المُنتَجة لعملاء في قطاعات متعددة",
-      items: [
-        {
-          title: "هياكل مراوح",
-          category: "أجهزة كهربائية منزلية",
-          desc: "هياكل ABS مقولبة بالحقن وبكميات كبيرة للمراوح السقفية والمكتبية. قوالب متعددة التجاويف، 500 ألف+ وحدة.",
-          tag: "قولبة بالحقن",
-          image: "/products/fan-housing.jpg",
-        },
-        {
-          title: "أثقال موازنة مراوح",
-          category: "أجهزة كهربائية منزلية",
-          desc: "أثقال بلاستيكية دقيقة لموازنة ريش المراوح. قوالب مُوردة من العميل، تفاوت الوزن ±0.5 جرام.",
-          tag: "أثقال موازنة",
-          image: "/products/counterweights.jpg",
-        },
-        {
-          title: "مشابك كابلات سيارات",
-          category: "السيارات",
-          desc: "مشابك تثبيت حزم الأسلاك من PA66 لمورد سيارات مصري. قالب 8 تجاويف، مليون+ وحدة.",
-          tag: "قولبة بالحقن",
-          image: "/products/cable-clips.jpg",
-        },
-        {
-          title: "صناديق توصيل كهربائية",
-          category: "صناعي",
-          desc: "هياكل PP مخصصة للوحات توصيل الأسلاك الصناعية. تصميم وتصنيع العدة داخلياً بالـ CNC.",
-          tag: "قولبة + CNC",
-          image: "/products/junction-boxes.jpg",
-        },
-        {
-          title: "إطارات تحكم أجهزة",
-          category: "أجهزة كهربائية منزلية",
-          desc: "إطارات ABS تزيينية ووظيفية للوحات تحكم الأجهزة المنزلية — متطلبات دقيقة للتشطيب السطحي.",
-          tag: "قولبة بالحقن",
-          image: "/products/control-bezels.jpg",
-        },
-        {
-          title: "قواعد تثبيت صناعية",
-          category: "صناعي عام",
-          desc: "قواعد هيكلية من نايلون مقوى بالزجاج لتثبيت الماكينات. النموذج الأولي تم التحقق منه بالطباعة ثلاثية الأبعاد.",
-          tag: "نمذجة + قولبة",
-          image: "/products/mounting-brackets.jpg",
-        },
-      ],
+      items: [],
     },
     clients: {
       title: "شركات عملنا معها",
       subtitle: "موضع ثقة المصنّعين والموردين في القطاع الصناعي المصري",
-      items: [
-        { name: "أجهزة النيل", industry: "أجهزة منزلية", logo: "/clients/nile-appliances.png" },
-        { name: "دلتا للكهرباء", industry: "كهرباء", logo: "/clients/delta-electric.png" },
-        { name: "القاهرة لقطع غيار السيارات", industry: "سيارات", logo: "/clients/cairo-auto.png" },
-        { name: "بلاستيك الفراعنة", industry: "بلاستيك", logo: "/clients/pharaoh-plastics.png" },
-        { name: "الجيزة للأنظمة المنزلية", industry: "إلكترونيات استهلاكية", logo: "/clients/giza-home.png" },
-        { name: "مجموعة السويس الصناعية", industry: "صناعي", logo: "/clients/suez-industrial.png" },
-      ],
+      items: [],
     },
     tools: {
       title: "المعدات",
       subtitle: "أصول الإنتاج والعدة لدينا",
-      categories: [
-        {
-          name: "ماكينات الحقن",
-          items: [
-            { name: "ماكينة حقن بلاستيك ×16", detail: "أحجام متنوعة — تشغيل يدوي، تدعم قوالب متعددة التجاويف" },
-            { name: "مجففات مواد ×4", detail: "مجففات قادوس للمواد الماصة للرطوبة (PA, PC, ABS)" },
-            { name: "وحدات تحكم في درجة حرارة القالب ×6", detail: "دوائر تبريد مائية لاستقرار زمن الدورة" },
-          ],
-        },
-        {
-          name: "العدة والـ CNC",
-          items: [
-            { name: "مركز تشغيل CNC ثلاثي المحاور ×1", detail: "إنتاج وإصلاح وتعديل القوالب داخلياً" },
-            { name: "جلاخة وصقالة مكتبية", detail: "تشطيب سطح تجاويف القوالب" },
-            { name: "مثقاب EDM ×1", detail: "حفر الأقطرة لقنوات تبريد القوالب" },
-          ],
-        },
-        {
-          name: "النمذجة الأولية",
-          items: [
-            { name: "طابعة ثلاثية الأبعاد FDM ×1", detail: "نماذج PLA/PETG للتحقق من التصميم قبل تصنيع القالب" },
-          ],
-        },
-        {
-          name: "القياس ومراقبة الجودة",
-          items: [
-            { name: "ورنية ×8", detail: "دقة 0.02 مم، موزعة على محطات الفحص" },
-            { name: "ميكرومتر ×4", detail: "قياس خارجي للأبعاد الحرجة" },
-            { name: "موازين دقيقة ×3", detail: "دقة 0.1 جرام — فحص وزن الأثقال ووزن اللقطة" },
-            { name: "مسطرة ارتفاع ×2", detail: "التحقق الأبعادي على السطح المستوي" },
-          ],
-        },
-      ],
+      categories: [],
     },
     contact: {
       title: "تواصل معنا",

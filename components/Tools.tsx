@@ -18,6 +18,8 @@ export default function Tools() {
   const tr = t[lang];
   const isAr = lang === "ar";
 
+  if (!tr.tools.categories.length) return null;
+
   return (
     <section id="tools" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />

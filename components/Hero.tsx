@@ -1,13 +1,22 @@
 "use client";
+import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { ArrowRight, ChevronDown, Cog, Zap } from "lucide-react";
+import { ArrowRight, ChevronDown, Cog } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function Hero() {
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
+  const [stats, setStats] = useState<{ molds: number; products: number; clients: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/public/showcase")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.stats) setStats(d.stats); })
+      .catch(() => {});
+  }, []);
 
   return (
     <section
@@ -88,24 +97,25 @@ export default function Hero() {
               </a>
             </motion.div>
 
-            {/* Stats row */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 1, delay: 0.6 }}
-              className={`flex gap-8 mt-12 pt-8 border-t border-white/5 ${isAr ? "flex-row-reverse" : ""}`}
-            >
-              {[
-                { v: "16+", l: isAr ? "ماكينة" : "Machines" },
-                { v: "2", l: isAr ? "قسم" : "Divisions" },
-                { v: "100%", l: isAr ? "مصري" : "Egyptian" },
-              ].map((s) => (
-                <div key={s.l}>
-                  <div className="text-2xl font-bold text-white">{s.v}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{s.l}</div>
-                </div>
-              ))}
-            </motion.div>
+            {stats && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 1, delay: 0.6 }}
+                className={`flex gap-8 mt-12 pt-8 border-t border-white/5 ${isAr ? "flex-row-reverse" : ""}`}
+              >
+                {[
+                  { v: stats.molds, l: isAr ? "اسطمبة" : "Molds" },
+                  { v: stats.products, l: isAr ? "منتج" : "Products" },
+                  { v: stats.clients, l: isAr ? "عميل" : "Clients" },
+                ].map((s) => (
+                  <div key={s.l}>
+                    <div className="text-2xl font-bold text-white">{s.v.toLocaleString(isAr ? "ar-EG" : "en-US")}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{s.l}</div>
+                  </div>
+                ))}
+              </motion.div>
+            )}
           </div>
 
           {/* Machine visual panel */}
@@ -162,31 +172,12 @@ export default function Hero() {
                       />
                     ))}
                   </div>
-                  {/* Stats floating */}
-                  <div className="flex gap-6 mt-4">
-                    {[{ v: "16+", l: isAr ? "ماكينة" : "Machines" }, { v: "24/7", l: isAr ? "تشغيل" : "Operation" }].map((s) => (
-                      <div key={s.l} className="text-center">
-                        <div className="text-xl font-bold text-white">{s.v}</div>
-                        <div className="text-xs text-gray-500">{s.l}</div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
                 {/* Corner accents */}
                 <div className="absolute top-4 left-4 w-8 h-8 border-l-2 border-t-2 border-blue-500/30 rounded-tl-lg" />
                 <div className="absolute top-4 right-4 w-8 h-8 border-r-2 border-t-2 border-blue-500/30 rounded-tr-lg" />
                 <div className="absolute bottom-16 left-4 w-8 h-8 border-l-2 border-b-2 border-blue-500/30 rounded-bl-lg" />
                 <div className="absolute bottom-16 right-4 w-8 h-8 border-r-2 border-b-2 border-blue-500/30 rounded-br-lg" />
-              </div>
-              {/* Overlay label */}
-              <div className="absolute bottom-4 left-4 right-4 bg-gray-950/80 backdrop-blur rounded-xl px-4 py-3 border border-white/10">
-                <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide mb-0.5 flex items-center gap-1.5">
-                  <Zap size={10} className="inline" />
-                  {isAr ? "قسم الحقن" : "Injection Division"}
-                </p>
-                <p className="text-sm text-white font-medium">
-                  {isAr ? "16+ ماكينة حقن بلاستيك" : "16+ Plastic Injection Machines"}
-                </p>
               </div>
             </div>
           </motion.div>

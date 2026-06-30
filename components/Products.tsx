@@ -1,20 +1,11 @@
 "use client";
-import Image from "next/image";
+import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { staggerContainer, fadeInUp } from "@/lib/animations";
 
-const tagColors: Record<string, string> = {
-  "Injection Molding": "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  "Counterweights": "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  "Injection Molding + CNC": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  "Prototyping + Molding": "bg-teal-500/10 text-teal-400 border-teal-500/20",
-  "قولبة بالحقن": "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  "أثقال موازنة": "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  "قولبة + CNC": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  "نمذجة + قولبة": "bg-teal-500/10 text-teal-400 border-teal-500/20",
-};
+type P = { name: string; material: string };
 
 const bgPatterns = [
   "from-blue-900/30 to-gray-900",
@@ -29,6 +20,16 @@ export default function Products() {
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
+  const [items, setItems] = useState<P[]>([]);
+
+  useEffect(() => {
+    fetch("/api/public/showcase")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (Array.isArray(d?.products)) setItems(d.products.slice(0, 9)); })
+      .catch(() => {});
+  }, []);
+
+  if (items.length === 0) return null;
 
   return (
     <section id="products" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-900 relative overflow-hidden">
@@ -56,38 +57,30 @@ export default function Products() {
           variants={staggerContainer}
           className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"
         >
-          {tr.products.items.map((item, i) => (
+          {items.map((item, i) => (
             <motion.div
-              key={i}
+              key={`${item.name}-${i}`}
               variants={fadeInUp}
               whileHover={{ y: -6, transition: { duration: 0.25 } }}
               className="group bg-gray-950 rounded-2xl border border-white/5 hover:border-blue-500/20 overflow-hidden transition-colors"
             >
-              {/* Work photo (gradient shows underneath as a fallback) */}
-              <div className={`h-40 bg-gradient-to-br ${bgPatterns[i]} relative overflow-hidden`}>
-                {item.image && (
-                  <Image
-                    src={item.image}
-                    alt={item.title}
-                    fill
-                    sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                    className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                )}
-                {/* Subtle gradient for legibility + shimmer on hover */}
-                <div className="absolute inset-0 bg-gradient-to-t from-gray-950/60 to-transparent pointer-events-none" />
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
-              </div>
-
-              <div className="p-5">
-                <div className={`flex items-start justify-between gap-3 mb-2 ${isAr ? "flex-row-reverse" : ""}`}>
-                  <h3 className="font-semibold text-white leading-snug text-[15px]">{item.title}</h3>
-                  <span className={`text-xs px-2.5 py-1 rounded-full border whitespace-nowrap shrink-0 ${tagColors[item.tag] ?? "bg-blue-500/10 text-blue-400 border-blue-500/20"}`}>
-                    {item.tag}
-                  </span>
+              <div className={`h-40 bg-gradient-to-br ${bgPatterns[i % bgPatterns.length]} relative overflow-hidden`}>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/40 to-cyan-500/40" />
+                  </div>
                 </div>
-                <p className="text-xs text-gray-600 mb-2">{item.category}</p>
-                <p className="text-sm text-gray-500 leading-relaxed">{item.desc}</p>
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/3 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+              </div>
+              <div className="p-5">
+                <div className={`flex items-start justify-between gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
+                  <h3 className="font-semibold text-white leading-snug text-[15px]">{item.name}</h3>
+                  {item.material && (
+                    <span className="text-xs px-2.5 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400 whitespace-nowrap shrink-0">
+                      {item.material}
+                    </span>
+                  )}
+                </div>
               </div>
             </motion.div>
           ))}

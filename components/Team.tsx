@@ -17,6 +17,8 @@ export default function Team() {
   const tr = t[lang];
   const isAr = lang === "ar";
 
+  if (!tr.team.members.length) return null;
+
   return (
     <section id="team" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />

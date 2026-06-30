@@ -3,18 +3,55 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ⚠️  DEVELOPMENT RULES — open read/write so the scaffold works immediately.
-    // The public site reads `clients`, and the dashboard reads/writes everything.
-    // Before going to production, lock this down (e.g. require Firebase Auth for
-    // writes, keep only `clients` publicly readable). See FIREBASE_SETUP.md.
+    function isSignedIn() { return request.auth != null; }
+    function ownerEmail() { return 'abdelrhman.2003.16@gmail.com'; }
+    function isOwner() { return isSignedIn() && request.auth.token.email == ownerEmail(); }
+    // Admins = the owner email OR any signed-in user whose granted role is "manager".
+    // (Managers can run approvals; the owner is always an admin via email.)
+    function isManager() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    }
+    function isAdmin() { return isOwner() || isManager(); }
 
-    match /clients/{doc} {
-      allow read: if true;            // shown on the public marketing site
-      allow write: if true;           // TODO: restrict to authenticated admins
+    // -- User profiles: who is allowed in, their requested vs granted role, and
+    //    approval status. This collection is genuinely protected.
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+
+      // A user may create only their OWN profile. The owner email may bootstrap
+      // itself as owner/approved; everyone else must start pending with no role.
+      allow create: if isSignedIn() && request.auth.uid == uid && (
+        request.auth.token.email == ownerEmail() ||
+        (request.resource.data.status == 'pending' && request.resource.data.role == null)
+      );
+
+      // A user may edit their own profile but NOT change role/status.
+      // Admins (owner + managers) may change anything — this is how approvals happen.
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.status == resource.data.status
+      );
+
+      allow delete: if isAdmin();
     }
 
-    match /{document=**} {
-      allow read, write: if true;     // TODO: restrict before production
-    }
+    // -- Operational + public collections.
+    // These are read/written through the app's /api routes using the
+    // (unauthenticated) Firebase client SDK, so they stay open in this phase.
+    // NOTE: there is deliberately NO `match /{document=**}` catch-all here —
+    // an open catch-all would also open /users and defeat the rules above.
+    // TODO (hardening): move /api to the Admin SDK with verified ID tokens,
+    // then require auth + role here instead of `if true`.
+    match /clients/{doc}          { allow read, write: if true; }
+    match /machines/{doc}         { allow read, write: if true; }
+    match /machineNotes/{doc}     { allow read, write: if true; }
+    match /monthlyReports/{doc}   { allow read, write: if true; }
+    match /contactInquiries/{doc} { allow read, write: if true; }
+    match /molds/{doc}            { allow read, write: if true; }
+    match /jobs/{doc}             { allow read, write: if true; }
+    match /productionRuns/{doc}   { allow read, write: if true; }
   }
 }
