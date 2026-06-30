@@ -50,7 +50,7 @@ export const t = {
     team: {
       title: "Our Team",
       subtitle: "The engineers behind Itqan's production capability",
-      members: [],
+      members: [] as { name: string; role: string; bio: string; email: string; phone: string }[],
     },
     products: {
       title: "Previous Work",
@@ -66,7 +66,7 @@ export const t = {
     tools: {
       title: "Equipment",
       subtitle: "Our production and tooling assets",
-      categories: [],
+      categories: [] as { name: string; items: { name: string; detail: string }[] }[],
     },
     contact: {
       title: "Contact Us",
@@ -178,7 +178,7 @@ export const t = {
     team: {
       title: "فريقنا",
       subtitle: "المهندسون الذين يقودون قدرات إنتاج إتقان",
-      members: [],
+      members: [] as { name: string; role: string; bio: string; email: string; phone: string }[],
     },
     products: {
       title: "أعمال سابقة",
@@ -193,7 +193,7 @@ export const t = {
     tools: {
       title: "المعدات",
       subtitle: "أصول الإنتاج والعدة لدينا",
-      categories: [],
+      categories: [] as { name: string; items: { name: string; detail: string }[] }[],
     },
     contact: {
       title: "تواصل معنا",
