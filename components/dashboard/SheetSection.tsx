@@ -49,10 +49,15 @@ export default function SheetSection({
     }
   }
   useEffect(() => { setData(null); load(true); }, [entity]);
-  // Auto-refresh so sheet edits appear without a manual reload (paused while editing).
+  // Auto-refresh so sheet edits appear without a manual reload — paused while
+  // editing AND while the tab is hidden (long-lived background tabs otherwise
+  // keep fetching and become targets for the browser's memory-saver tab kill).
+  // Coming back to the tab refreshes immediately.
   useEffect(() => {
-    const id = setInterval(() => { if (!editing) load(); }, 20000);
-    return () => clearInterval(id);
+    const id = setInterval(() => { if (!editing && !document.hidden) load(); }, 20000);
+    const onVis = () => { if (!document.hidden && !editing) load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
   }, [editing, entity]);
 
   const label = (f: string) => {
