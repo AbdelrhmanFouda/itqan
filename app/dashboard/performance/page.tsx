@@ -3,6 +3,8 @@ import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { DOWNTIME_REASONS, localize } from "@/lib/prod-meta";
 import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } from "@/components/dashboard/charts";
+import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 
 type OEE = {
@@ -10,6 +12,7 @@ type OEE = {
   performanceKnown: boolean; standardCoverage: number;
   plannedMin: number; runtimeMin: number; downtimeMin: number;
   goodUnits: number; scrapUnits: number; totalUnits: number;
+  lossDowntimeMin: number; lossPerformanceMin: number; lossQualityMin: number;
   weakest: "availability" | "performance" | "quality" | null;
 };
 type MachineRow = OEE & { machine: string };
@@ -23,13 +26,25 @@ type Bottleneck = {
   recoverablePct: number | null;
   topDowntimeReason: string | null;
 };
+type TrendPoint = {
+  date: string; availability: number; performance: number | null; quality: number;
+  oee: number | null; good: number; scrap: number; scrapRate: number; downtimeMin: number;
+};
+type Readiness = {
+  runs: number; stubs: number; withMold: number; withScrap: number; withDowntime: number;
+  plannedSource: { column: number; machines: number; default: number };
+  machinesTabFound: boolean; defaultShiftMin: number;
+  standardsInMaster: number; moldsSeen: number; moldsSeenWithStd: number;
+};
 type Data = {
   overall: OEE | null;
   bottlenecks: Bottleneck[];
   machines: MachineRow[];
   downtime: { reason: string; minutes: number }[];
-  daily: { date: string; good: number; scrap: number; scrapRate: number }[];
+  trend: TrendPoint[];
   months: string[];
+  readiness: Readiness | null;
+  standardsGap: { mold: string; units: number }[];
   runCount: number;
   configured: boolean;
 };
@@ -45,7 +60,6 @@ const L = {
     empty: "No production runs in this period yet. Log runs to see OEE.",
     tryAll: "There may be data in other months — view All time.",
     unreachable: "Couldn't reach the data sheet. Check the connection and reload.",
-    noPerf: "Performance and OEE need each mold's cycle time + cavities in Master. Fill those for active molds.",
     factor: { availability: "Availability", performance: "Performance", quality: "Quality" },
     bottleneck: "Bottleneck Board", fixFirst: "fix this first",
     lostCap: "lost", recover: "recover", ofOutput: "of this machine's output",
@@ -55,6 +69,23 @@ const L = {
       performance: (m: string) => `${m} is running slower than its standard — check tooling, material and operator.`,
       quality: (m: string) => `High scrap on ${m} — review the mold's known defects.`,
     },
+    trend: "Daily trend", trendHint: "availability · quality · OEE",
+    lossTitle: "Where capacity is lost", lossHint: "minutes per machine",
+    lossNames: { down: "Downtime", perf: "Slow cycle", qual: "Scrap" },
+    assumed: "assumed — scrap not logged yet",
+    noDowntimeLogged: "no downtime logged yet",
+    needsMold: "needs product names on runs",
+    needsStd: "needs cycle+cavities in Master",
+    readiness: "Data readiness — what to log to make OEE true",
+    readinessIntro: "Each OEE factor only counts what is actually logged. Missing pieces:",
+    rMold: (n: number, t: number) => `${n}/${t} runs name their product or mold — required for Performance and full OEE`,
+    rScrap: (n: number, t: number) => `${n}/${t} runs log scrap units — Quality is assumed 100% where missing`,
+    rDown: (n: number, t: number) => `${n}/${t} runs log downtime — Availability assumes no stops where missing`,
+    rMachines: (d: number) => `Machines tab not found — planned time uses the default ${d} min shift`,
+    rMachinesPartial: (n: number, d: number) => `${n} runs fell back to the default ${d} min shift — add those machines to the Machines tab`,
+    rStd: (k: number, s: number) => `${k}/${s} logged molds have a cycle standard in Master`,
+    rStubs: (n: number) => `${n} empty rows in the Production tab were ignored`,
+    fillMaster: "Fill cycle + cavities in Master for:", units: "pcs",
   },
   ar: {
     title: "الأداء — OEE", subtitle: "الفعالية الكلية للمعدات، لكل ماكينة",
@@ -66,7 +97,6 @@ const L = {
     empty: "لا توجد تشغيلات إنتاج في هذه الفترة بعد. سجّل التشغيلات لرؤية OEE.",
     tryAll: "قد توجد بيانات في أشهر أخرى — اعرض كل الوقت.",
     unreachable: "تعذّر الوصول إلى جدول البيانات. تحقق من الاتصال وأعد التحميل.",
-    noPerf: "يحتاج الأداء وOEE إلى زمن الدورة وعدد الكافيتي لكل اسطمبة في Master. أكملها للاسطمبات النشطة.",
     factor: { availability: "الإتاحة", performance: "الأداء", quality: "الجودة" },
     bottleneck: "لوحة الاختناقات", fixFirst: "ابدأ بإصلاح هذا",
     lostCap: "مفقودة", recover: "استرجاع", ofOutput: "من إنتاج هذه الماكينة",
@@ -76,6 +106,23 @@ const L = {
       performance: (m: string) => `${m} تعمل أبطأ من المعدل القياسي — افحص الاسطمبة والخامة والعامل.`,
       quality: (m: string) => `هالك مرتفع على ${m} — راجع عيوب الاسطمبة المعروفة.`,
     },
+    trend: "الاتجاه اليومي", trendHint: "الإتاحة · الجودة · OEE",
+    lossTitle: "أين تُفقد الطاقة الإنتاجية", lossHint: "دقائق لكل ماكينة",
+    lossNames: { down: "توقف", perf: "بطء الدورة", qual: "هالك" },
+    assumed: "افتراضي — الهالك غير مسجَّل بعد",
+    noDowntimeLogged: "لا يوجد توقف مسجَّل بعد",
+    needsMold: "يحتاج اسم المنتج في التشغيلات",
+    needsStd: "يحتاج زمن الدورة والكافيتي في Master",
+    readiness: "جاهزية البيانات — ما يجب تسجيله ليكون OEE حقيقيًا",
+    readinessIntro: "كل عامل في OEE يُحسب فقط مما يُسجَّل فعلاً. الناقص:",
+    rMold: (n: number, t: number) => `${n}/${t} تشغيلات بها اسم المنتج أو كود الاسطمبة — مطلوب لحساب الأداء وOEE الكامل`,
+    rScrap: (n: number, t: number) => `${n}/${t} تشغيلات مسجَّل بها الهالك — الجودة تُفترض 100% عند غيابه`,
+    rDown: (n: number, t: number) => `${n}/${t} تشغيلات مسجَّل بها التوقف — الإتاحة تفترض عدم وجود توقف عند غيابه`,
+    rMachines: (d: number) => `تبويب Machines غير موجود — الزمن المخطط يستخدم وردية افتراضية ${d} دقيقة`,
+    rMachinesPartial: (n: number, d: number) => `${n} تشغيلات استخدمت الوردية الافتراضية ${d} دقيقة — أضف هذه الماكينات إلى تبويب Machines`,
+    rStd: (k: number, s: number) => `${k}/${s} من الاسطمبات المسجَّلة لها معيار دورة في Master`,
+    rStubs: (n: number) => `تم تجاهل ${n} صفوف فارغة في تبويب Production`,
+    fillMaster: "أكمل زمن الدورة + الكافيتي في Master لـ:", units: "قطعة",
   },
 };
 
@@ -85,7 +132,7 @@ const oeeText = (x: number) => (x >= 0.85 ? "text-green-600" : x >= 0.6 ? "text-
 function Bar({ value, max, tone }: { value: number; max: number; tone: string }) {
   const w = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+    <div className="h-2 rounded-full bg-gray-100 overflow-hidden" dir="ltr">
       <div className={`h-full rounded-full ${tone}`} style={{ width: `${w}%` }} />
     </div>
   );
@@ -121,7 +168,6 @@ export default function PerformancePage() {
 
   const reasonLabel = (r: string) => localize(r, DOWNTIME_REASONS, p.runs.reasons);
   const pf0 = (x: number) => `${Math.round(x * 100)}%`;
-  const fmtN = (x: number) => x.toLocaleString(isAr ? "ar-EG" : "en-US");
   const action = (b: Bottleneck) =>
     b.factor === "downtime"
       ? t.act.downtime(b.machine, b.topDowntimeReason ? reasonLabel(b.topDowntimeReason) : "—")
@@ -142,8 +188,31 @@ export default function PerformancePage() {
   if (!data) return <Spinner text={p.common.loading} />;
 
   const o = data.overall;
-  const maxDown = Math.max(1, ...data.downtime.map((d) => d.minutes));
-  const maxRate = Math.max(0.0001, ...data.daily.map((d) => d.scrapRate));
+  const r = data.readiness;
+
+  // Readiness checklist — only imperfect items are listed.
+  const readinessItems: { ok: boolean; text: string }[] = [];
+  if (r && r.runs > 0) {
+    if (r.withMold < r.runs) readinessItems.push({ ok: false, text: t.rMold(r.withMold, r.runs) });
+    if (r.withScrap < r.runs) readinessItems.push({ ok: false, text: t.rScrap(r.withScrap, r.runs) });
+    if (r.withDowntime < r.runs) readinessItems.push({ ok: false, text: t.rDown(r.withDowntime, r.runs) });
+    if (!r.machinesTabFound) readinessItems.push({ ok: false, text: t.rMachines(r.defaultShiftMin) });
+    else if (r.plannedSource.default > 0) readinessItems.push({ ok: false, text: t.rMachinesPartial(r.plannedSource.default, r.defaultShiftMin) });
+    if (r.moldsSeen > 0 && r.moldsSeenWithStd < r.moldsSeen) readinessItems.push({ ok: false, text: t.rStd(r.moldsSeenWithStd, r.moldsSeen) });
+    if (r.stubs > 0) readinessItems.push({ ok: true, text: t.rStubs(r.stubs) });
+  }
+
+  const trendLabels = data.trend.map((d) => formatDate(d.date, lang));
+  const maxScrapRate = Math.max(0.05, ...data.trend.map((d) => d.scrapRate * 1.25));
+  const lossRows = data.machines
+    .map((m) => ({
+      label: m.machine,
+      down: m.lossDowntimeMin,
+      perf: m.lossPerformanceMin,
+      qual: m.lossQualityMin,
+    }))
+    .filter((x) => x.down + x.perf + x.qual > 0)
+    .sort((a, b) => b.down + b.perf + b.qual - (a.down + a.perf + a.qual));
 
   return (
     <div className="max-w-5xl">
@@ -176,26 +245,68 @@ export default function PerformancePage() {
         </div>
       ) : (
         <>
-          {/* Headline OEE + A / P / Q */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
-            <Stat
-              label={t.oee}
-              value={<span className={oeeText(o.oee)}>{o.performanceKnown ? pf(o.oee) : "—"}</span>}
-              sub={o.weakest ? `${t.limiting}: ${t.factor[o.weakest]}` : undefined}
-            />
-            <Stat label={t.availability} value={pf(o.availability)} tone={o.weakest === "availability" ? "red" : undefined} />
-            <Stat
-              label={t.performance}
-              value={o.performanceKnown ? pf(o.performance) : "—"}
-              tone={o.weakest === "performance" ? "red" : undefined}
-            />
-            <Stat label={t.quality} value={pf(o.quality)} tone={o.weakest === "quality" ? "red" : undefined} />
+          {/* Headline: OEE gauge + A / P / Q */}
+          <div className={`grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 mb-3 ${isAr ? "sm:grid-cols-[1fr_auto]" : ""}`}>
+            <div className={`bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-center ${isAr ? "sm:order-2" : ""}`}>
+              <DonutGauge
+                value={o.oee}
+                known={o.performanceKnown}
+                label={t.oee}
+                sublabel={o.weakest ? `${t.limiting}: ${t.factor[o.weakest]}` : undefined}
+                isAr={isAr}
+              />
+            </div>
+            <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 ${isAr ? "sm:order-1" : ""}`}>
+              <Stat
+                label={t.availability}
+                value={pf(o.availability)}
+                tone={o.weakest === "availability" ? "red" : undefined}
+                sub={r && r.withDowntime === 0 ? t.noDowntimeLogged : undefined}
+              />
+              <Stat
+                label={t.performance}
+                value={o.performanceKnown ? pf(o.performance) : "—"}
+                tone={o.weakest === "performance" ? "red" : undefined}
+                sub={!o.performanceKnown ? (r && r.moldsSeen === 0 ? t.needsMold : t.needsStd) : undefined}
+              />
+              <Stat
+                label={t.quality}
+                value={pf(o.quality)}
+                tone={o.weakest === "quality" ? "red" : undefined}
+                sub={r && r.withScrap === 0 ? t.assumed : undefined}
+              />
+            </div>
           </div>
-          {!o.performanceKnown && (
-            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-8">{t.noPerf}</p>
-          )}
           {o.performanceKnown && o.standardCoverage < 1 && (
-            <p className="text-xs text-gray-400 mb-8">{t.coverage}: {pf(o.standardCoverage)}</p>
+            <p className="text-xs text-gray-400 mb-3">{t.coverage}: {pf(o.standardCoverage)}</p>
+          )}
+
+          {/* Data readiness — the honesty panel */}
+          {readinessItems.length > 0 && (
+            <div className="mb-10 bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <h2 className={`text-sm font-semibold text-amber-800 mb-1 ${isAr ? "text-right" : ""}`}>{t.readiness}</h2>
+              <p className={`text-xs text-amber-700 mb-2 ${isAr ? "text-right" : ""}`}>{t.readinessIntro}</p>
+              <ul className="space-y-1.5">
+                {readinessItems.map((it, i) => (
+                  <li key={i} className={`flex items-start gap-2 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                    <span className={`mt-0.5 shrink-0 ${it.ok ? "text-green-600" : "text-amber-600"}`}>{it.ok ? "✓" : "●"}</span>
+                    <span className="text-gray-700">{it.text}</span>
+                  </li>
+                ))}
+              </ul>
+              {data.standardsGap.length > 0 && (
+                <div className={`mt-3 ${isAr ? "text-right" : ""}`}>
+                  <span className="text-xs font-medium text-amber-800">{t.fillMaster}</span>
+                  <div className={`flex flex-wrap gap-1.5 mt-1.5 ${isAr ? "flex-row-reverse" : ""}`}>
+                    {data.standardsGap.map((g) => (
+                      <span key={g.mold} className="text-xs bg-white border border-amber-200 text-gray-700 rounded-full px-2.5 py-0.5">
+                        {g.mold} · {fmtNum(g.units, isAr)} {t.units}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Bottleneck Board — fix this first */}
@@ -215,7 +326,7 @@ export default function PerformancePage() {
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${i === 0 ? "border-red-200 bg-red-100 text-red-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>{t.factorName[b.factor]}</span>
                       </div>
                       <div className={`shrink-0 ${isAr ? "text-start" : "text-end"}`}>
-                        <div className="text-sm font-semibold text-red-600 whitespace-nowrap">{fmtN(b.factorMin)} {t.min} {t.lostCap}</div>
+                        <div className="text-sm font-semibold text-red-600 whitespace-nowrap">{fmtNum(b.factorMin, isAr)} {t.min} {t.lostCap}</div>
                         {b.recoverablePct != null && (
                           <div className="text-xs text-gray-400 whitespace-nowrap">{t.recover} ≈ {pf0(b.recoverablePct)} {t.ofOutput}</div>
                         )}
@@ -226,6 +337,28 @@ export default function PerformancePage() {
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Daily trend — availability / quality / OEE */}
+          {data.trend.length > 1 && (
+            <ChartCard title={t.trend} hint={t.trendHint} isAr={isAr}>
+              <TrendChart
+                isAr={isAr}
+                labels={trendLabels}
+                series={[
+                  { name: t.availability, color: "#6b7280", values: data.trend.map((d) => d.availability) },
+                  { name: t.quality, color: "#16a34a", values: data.trend.map((d) => d.quality) },
+                  { name: t.oee, color: "#2563eb", values: data.trend.map((d) => d.oee) },
+                ]}
+              />
+            </ChartCard>
+          )}
+
+          {/* Where capacity is lost — stacked minutes per machine */}
+          {lossRows.length > 0 && (
+            <ChartCard title={t.lossTitle} hint={t.lossHint} isAr={isAr}>
+              <LossBars rows={lossRows} isAr={isAr} unit={t.min} names={t.lossNames} />
+            </ChartCard>
           )}
 
           {/* OEE by machine — constraint first */}
@@ -265,36 +398,26 @@ export default function PerformancePage() {
 
           {/* Downtime Pareto */}
           {data.downtime.length > 0 && (
-            <div className="mb-10">
-              <h2 className="text-sm font-semibold text-gray-900 mb-3">{t.downtime}</h2>
-              <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
-                {data.downtime.map((d) => (
-                  <div key={d.reason}>
-                    <div className={`flex items-center justify-between text-xs mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-                      <span className="text-gray-600">{reasonLabel(d.reason)}</span>
-                      <span className="text-gray-400">{d.minutes.toLocaleString(isAr ? "ar-EG" : "en-US")} {t.min}</span>
-                    </div>
-                    <Bar value={d.minutes} max={maxDown} tone="bg-blue-500" />
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ChartCard title={t.downtime} isAr={isAr}>
+              <Pareto
+                isAr={isAr}
+                unit={t.min}
+                items={data.downtime.map((d) => ({ label: reasonLabel(d.reason), value: d.minutes }))}
+              />
+            </ChartCard>
           )}
 
           {/* Scrap-rate trend */}
-          {data.daily.length > 0 && (
-            <div className="mb-6">
-              <h2 className="text-sm font-semibold text-gray-900 mb-3">{t.scrapTrend}</h2>
-              <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-2">
-                {data.daily.map((d) => (
-                  <div key={d.date} className={`flex items-center gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                    <span className="text-xs text-gray-400 w-24 shrink-0 whitespace-nowrap">{d.date}</span>
-                    <div className="flex-1"><Bar value={d.scrapRate} max={maxRate} tone={d.scrapRate > 0.03 ? "bg-red-500" : "bg-gray-300"} /></div>
-                    <span className={`text-xs w-12 text-end shrink-0 ${d.scrapRate > 0.03 ? "text-red-600" : "text-gray-500"}`}>{pf(d.scrapRate)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {data.trend.length > 1 && r && r.withScrap > 0 && (
+            <ChartCard title={t.scrapTrend} isAr={isAr}>
+              <TrendChart
+                isAr={isAr}
+                labels={trendLabels}
+                yMax={maxScrapRate}
+                yFmt={(v) => fmtPct(v, isAr, 1)}
+                series={[{ name: t.scrapTrend, color: "#dc2626", values: data.trend.map((d) => d.scrapRate) }]}
+              />
+            </ChartCard>
           )}
         </>
       )}

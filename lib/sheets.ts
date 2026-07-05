@@ -81,6 +81,11 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "shift", keywords: ["shift", "الوردية"] },
       { key: "machine", keywords: ["machine", "الماكينة"] },
       { key: "mold", keywords: ["mold", "الاسطمبة", "القالب"] },
+      // Supervisors identify the part by PRODUCT NAME more often than by mold
+      // code — read it so OEE can join Master standards by name too.
+      { key: "product", keywords: ["أسم المنتج", "اسم المنتج", "prod name", "product"] },
+      { key: "client", keywords: ["العميل", "client"] },
+      { key: "material", keywords: ["نوع الخام", "الخام", "material"] },
       { key: "plannedMin", keywords: ["planned", "الزمن المخطط", "المخطط"] },
       { key: "goodUnits", keywords: ["good", "سليم"] },
       { key: "scrapUnits", keywords: ["scrap", "هالك"] },
@@ -90,13 +95,20 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "note", keywords: ["note", "ملاحظ"], long: true },
     ],
   },
-  // Small reference table: machine list + each machine's shift length (minutes).
+  // The machines tab is a DAILY PLAN: one row per machine per date with that
+  // day's shift and planned shift length (minutes) + Active/Inactive status.
+  // NOTE: shiftLength is declared BEFORE shift so appends can't drop the shift
+  // name into the length column ("الوردية" is a substring of "طول الوردية").
   machines: {
-    tab: "Machines", titleEn: "Machines", titleAr: "الماكينات",
+    tab: "machines", titleEn: "Machines", titleAr: "الماكينات",
     fields: [
-      { key: "name", keywords: ["machine", "الماكينة", "name", "الاسم"] },
-      { key: "shiftLength", keywords: ["shift length", "طول الوردية", "shift", "الوردية"] },
-      { key: "active", keywords: ["active", "نشط", "status", "الحالة"] },
+      { key: "code", keywords: ["كود الماكينة", "machine code"] },
+      { key: "name", keywords: ["الماكينة", "machine"] },
+      { key: "date", keywords: ["التاريخ", "date"] },
+      { key: "product", keywords: ["أسم المنتج", "اسم المنتج", "prod name", "product"] },
+      { key: "shiftLength", keywords: ["طول الوردية", "shift length", "دقيقة"] },
+      { key: "shift", keywords: ["الوردية", "shift"] },
+      { key: "active", keywords: ["الحالة", "status", "نشط", "active"] },
     ],
   },
   // The single source of truth. Read directly when we need the per-mold standards
@@ -139,16 +151,23 @@ async function resolveTabTitle(want: string): Promise<string> {
 
 async function fetchSheet(tab: string): Promise<{ title: string; values: string[][] }> {
   // Preferred: Apps Script (works on a private sheet, no API key).
+  // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
+  // have drifted between "Production"/"production" etc., so retry casings.
   if (SCRIPT_URL && SCRIPT_SECRET) {
-    try {
-      const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(tab)}`;
-      const res = await fetch(u, { cache: "no-store", redirect: "follow" });
-      if (res.ok) {
-        const json = (await res.json()) as { values?: string[][] };
-        return { title: tab, values: json.values ?? [] };
+    const lower = tab.toLowerCase();
+    const cap = lower.charAt(0).toUpperCase() + lower.slice(1);
+    const candidates = Array.from(new Set([tab, lower, cap, tab.toUpperCase()]));
+    for (const name of candidates) {
+      try {
+        const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
+        const res = await fetch(u, { cache: "no-store", redirect: "follow" });
+        if (res.ok) {
+          const json = (await res.json()) as { values?: string[][] };
+          if (json.values && json.values.length > 0) return { title: name, values: json.values };
+        }
+      } catch {
+        /* try the next casing, then fall through to the API-key path */
       }
-    } catch {
-      /* fall through to the API-key path if available */
     }
   }
   // Fallback: public read via API key.
@@ -336,14 +355,14 @@ async function mapToMaster(
     updates.push({ row: masterRow, col: ci + 1, value: value ?? "" });
   }
   if (updates.length === 0) return { reason: "no_master_fields" };
-  return { tab: MASTER_TAB, updates };
+  return { tab: master.title, updates };
 }
 
 // Map fields → columns of the entity's OWN tab (for manual tabs like Clients).
 async function mapInTab(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
 ): Promise<{ tab: string; updates: Cell[] } | { reason: string }> {
-  const { values } = await fetchSheet(cfg.tab);
+  const { values, title } = await fetchSheet(cfg.tab);
   if (values.length < 2) return { reason: "empty_sheet" };
   const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
   const updates: Cell[] = [];
@@ -355,7 +374,7 @@ async function mapInTab(
     updates.push({ row, col: ci + 1, value: value ?? "" });
   }
   if (updates.length === 0) return { reason: "no_fields" };
-  return { tab: cfg.tab, updates };
+  return { tab: title, updates };
 }
 
 async function postUpdates(tab: string, updates: Cell[]): Promise<UpdateResult> {
@@ -389,7 +408,7 @@ export async function appendRecord(entity: string, values: Record<string, string
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
 
-  const { values: sheetVals } = await fetchSheet(cfg.tab);
+  const { values: sheetVals, title } = await fetchSheet(cfg.tab);
   if (sheetVals.length === 0) return { ok: false, reason: "no_tab" };
   const headers = sheetVals[findHeaderRow(sheetVals, cfg.fields)] ?? [];
   if (headers.length === 0) return { ok: false, reason: "no_headers" };
@@ -401,7 +420,7 @@ export async function appendRecord(entity: string, values: Record<string, string
     const f = cfg.fields.find((x) => x.keywords.some((k) => h.includes(k)));
     return f ? (values[f.key] ?? "") : "";
   });
-  return postAction({ tab: cfg.tab, append: row });
+  return postAction({ tab: title, append: row });
 }
 
 export async function deleteRecord(entity: string, row: number): Promise<UpdateResult> {
@@ -409,5 +428,6 @@ export async function deleteRecord(entity: string, row: number): Promise<UpdateR
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   if (!Number.isFinite(row) || row < 2) return { ok: false, reason: "bad_row" };
-  return postAction({ tab: cfg.tab, deleteRow: row });
+  const { title } = await fetchSheet(cfg.tab); // resolve the tab's real casing
+  return postAction({ tab: title, deleteRow: row });
 }
