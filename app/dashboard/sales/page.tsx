@@ -11,10 +11,9 @@ type Inquiry = {
   email: string; inquiryType: string; message: string; createdAt: number;
 };
 type Job = {
-  id: string; code: string; client: string; partName: string;
-  qtyOrdered: number; dueDate: string; status: string;
+  id: string; code: string; client: string; product: string;
+  qtyOrdered: number; dueDate: string; status: string; produced: number;
 };
-type Run = { jobId: string; goodUnits: number };
 
 const DONE = ["Completed", "Delivered"];
 
@@ -32,13 +31,13 @@ export default function SalesPage() {
     Promise.all([
       fetch("/api/inquiries").then((r) => r.json()),
       fetch("/api/jobs").then((r) => r.json()),
-      fetch("/api/runs").then((r) => r.json()),
     ])
-      .then(([i, j, runs]) => {
-        setInquiries(i);
-        setJobs(j);
+      .then(([i, j]) => {
+        setInquiries(Array.isArray(i) ? i : []);
+        const list: Job[] = j.jobs ?? [];
+        setJobs(list);
         const by: Record<string, number> = {};
-        for (const r of runs as Run[]) by[r.jobId] = (by[r.jobId] ?? 0) + (r.goodUnits || 0);
+        for (const jb of list) by[jb.id] = jb.produced || 0;
         setProduced(by);
       })
       .catch(() => setInquiries([]));
@@ -119,7 +118,7 @@ export default function SalesPage() {
                       return (
                         <tr key={j.id} className="hover:bg-gray-50/60">
                           <td className="px-5 py-2.5 font-medium text-gray-900">{j.code}</td>
-                          <td className="px-5 py-2.5 text-gray-600">{j.partName}</td>
+                          <td className="px-5 py-2.5 text-gray-600">{j.product}</td>
                           <td className="px-5 py-2.5 text-gray-700">{fmt(Number(j.qtyOrdered) || 0)}</td>
                           <td className="px-5 py-2.5 text-green-600">{fmt(made)}</td>
                           <td className="px-5 py-2.5 text-gray-700">{fmt(remaining)}</td>

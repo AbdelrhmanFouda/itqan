@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, type SheetRecord } from "@/lib/sheets";
+import { normalizeDate } from "@/lib/dates";
 
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
 // data model). Each run is one row; the sheet row number is its id.
@@ -12,10 +13,11 @@ function num(v: string | undefined): number {
 function shape(r: SheetRecord) {
   return {
     id: String(r.row),
-    date: r.date ?? "",
+    date: normalizeDate(r.date) || (r.date ?? ""),
     shift: r.shift ?? "",
     machine: r.machine ?? "",
     mold: r.mold ?? "",
+    product: r.product ?? "",
     plannedMin: num(r.plannedMin),
     goodUnits: num(r.goodUnits),
     scrapUnits: num(r.scrapUnits),
@@ -50,6 +52,7 @@ export async function POST(req: NextRequest) {
       shift: b.shift ?? "",
       machine: b.machine ?? "",
       mold: b.mold ?? "",
+      product: b.product ?? "",
       plannedMin: String(num(b.plannedMin) || 720),
       goodUnits: String(num(b.goodUnits)),
       scrapUnits: String(num(b.scrapUnits)),

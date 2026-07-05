@@ -7,22 +7,33 @@ import { useParams, useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { Stat, Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
 import {
-  JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS,
+  JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
   priorityTone, localize, options,
 } from "@/lib/prod-meta";
 
+/**
+ * One job (sheet row in the `jobs` tab) + the production runs credited to it
+ * (matched by product name on/after the start date). Logging a run here
+ * appends a production row pre-filled with the job's product.
+ */
+
 type Job = {
-  id: string; code: string; client: string; partName: string;
-  moldId: string; machineId: string; qtyOrdered: number;
-  dueDate: string; status: string; priority: string; notes: string;
+  id: string; code: string; client: string; product: string; moldCode: string;
+  qtyOrdered: number; startDate: string; dueDate: string;
+  status: string; priority: string; machine: string;
+  materialIssued: string; masterbatch: string; instructions: string; notes: string;
+  produced: number; scrapped: number;
 };
-type Mold = { id: string; code: string; partName: string };
-type Machine = { id: string; name: string };
+type Standard = {
+  weight: string; material: string; cavities: number | null; cycleSec: number | null;
+  defects: string; ratePerHour: number | null; ratePerShift12h: number | null;
+};
 type Run = {
-  id: string; jobId: string; machineId: string; date: string;
+  id: string; date: string; machine: string;
   goodUnits: number; scrapUnits: number; downtimeMin: number;
   downtimeReason: string; operator: string; note: string;
 };
+type MachineAgg = { name: string };
 
 export default function JobDetailPage() {
   const { lang } = useLang();
@@ -33,17 +44,17 @@ export default function JobDetailPage() {
   const id = String(params.id);
 
   const [job, setJob] = useState<Job | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [molds, setMolds] = useState<Mold[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
   const [runs, setRuns] = useState<Run[] | null>(null);
+  const [standard, setStandard] = useState<Standard | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [machines, setMachines] = useState<MachineAgg[]>([]);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const blankRun = useCallback(
     () => ({
-      date: today, machineId: "", goodUnits: "", scrapUnits: "",
+      date: today, shift: SHIFTS[0], machine: "", goodUnits: "", scrapUnits: "",
       downtimeMin: "", downtimeReason: "None", operator: "", note: "",
     }),
     [today]
@@ -51,15 +62,16 @@ export default function JobDetailPage() {
   const [form, setForm] = useState(blankRun());
 
   const load = useCallback(async () => {
-    const [jRes, m, mc, r] = await Promise.all([
+    const [jRes, ma] = await Promise.all([
       fetch(`/api/jobs/${id}`),
-      fetch("/api/molds").then((x) => x.json()),
-      fetch("/api/machines").then((x) => x.json()),
-      fetch(`/api/runs?jobId=${id}`).then((x) => x.json()),
+      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
     ]);
     if (!jRes.ok) { setNotFound(true); return; }
-    setJob(await jRes.json());
-    setMolds(m); setMachines(mc); setRuns(r);
+    const j = await jRes.json();
+    setJob(j.job);
+    setRuns(j.runs ?? []);
+    setStandard(j.standard ?? null);
+    setMachines(ma.machines ?? []);
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -68,17 +80,18 @@ export default function JobDetailPage() {
   }
 
   function openLog() {
-    setForm({ ...blankRun(), machineId: job?.machineId ?? "" });
+    setForm({ ...blankRun(), machine: job?.machine ?? "" });
     setOpen(true);
   }
 
   async function handleAddRun(e: React.FormEvent) {
     e.preventDefault();
+    if (!job) return;
     setSaving(true);
     await fetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, jobId: id }),
+      body: JSON.stringify({ ...form, product: job.product }),
     });
     setOpen(false);
     setSaving(false);
@@ -108,11 +121,7 @@ export default function JobDetailPage() {
   }
 
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
-  const machineName = (mid: string) => machines.find((m) => m.id === mid)?.name ?? "—";
-  const moldLabel = (mid: string) => {
-    const m = molds.find((x) => x.id === mid);
-    return m ? `${m.code} — ${m.partName}` : "—";
-  };
+  const startLabel = isAr ? "تاريخ البدء" : "Start date";
 
   if (notFound) {
     return (
@@ -124,8 +133,8 @@ export default function JobDetailPage() {
   }
   if (!job || runs === null) return <Spinner text={p.common.loading} />;
 
-  const good = runs.reduce((s, r) => s + (r.goodUnits || 0), 0);
-  const scrap = runs.reduce((s, r) => s + (r.scrapUnits || 0), 0);
+  const good = job.produced;
+  const scrap = job.scrapped;
   const downtime = runs.reduce((s, r) => s + (r.downtimeMin || 0), 0);
   const scrapRate = good + scrap ? ((scrap / (good + scrap)) * 100).toFixed(1) : "0.0";
   const qty = Number(job.qtyOrdered) || 0;
@@ -144,7 +153,7 @@ export default function JobDetailPage() {
             <h1 className="text-2xl font-bold text-gray-900">{job.code}</h1>
             <Pill text={localize(job.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(job.priority)} />
           </div>
-          <p className="text-sm text-gray-500 mt-1">{job.client} · {job.partName}</p>
+          <p className="text-sm text-gray-500 mt-1">{[job.client, job.product].filter(Boolean).join(" · ")}</p>
         </div>
         <div className={`flex items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
           <select
@@ -162,29 +171,74 @@ export default function JobDetailPage() {
         </div>
       </div>
 
-      {/* Detail card */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm mt-4 mb-6">
-        <Detail label={p.jobs.mold} value={moldLabel(job.moldId)} />
-        <Detail label={p.jobs.machine} value={machineName(job.machineId)} />
-        <Detail
-          label={p.jobs.due}
-          value={job.dueDate ? `${job.dueDate}${overdue ? ` · ${p.jobs.overdue}` : ""}` : "—"}
-          danger={!!overdue}
-        />
-        <Detail label={p.jobs.qtyOrdered} value={fmt(qty)} />
-        <Detail label={p.jobs.produced} value={fmt(good)} />
-        <Detail label={p.jobs.unitsRemaining} value={fmt(remaining)} />
-        {job.notes ? (
-          <div className="sm:col-span-3">
-            <p className="text-xs text-gray-500 mb-0.5">{p.jobs.notes}</p>
-            <p className="text-gray-700">{job.notes}</p>
-          </div>
-        ) : null}
+      {/* Work order — أمر الشغل (matches the paper form; Master fills the standards) */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4 mb-6">
+        <div className={`flex items-center justify-between mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
+          <h2 className="font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
+          <button
+            onClick={() => window.print()}
+            className="text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
+          >
+            {isAr ? "طباعة" : "Print"}
+          </button>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm">
+          <Detail label={p.jobs.part} value={job.product || "—"} />
+          <Detail label={isAr ? "كود الاسطمبة" : "Mold code"} value={job.moldCode || "—"} />
+          <Detail label={p.jobs.machine} value={job.machine || "—"} />
+          <Detail label={startLabel} value={job.startDate || "—"} />
+          <Detail
+            label={p.jobs.due}
+            value={job.dueDate ? `${job.dueDate}${overdue ? ` · ${p.jobs.overdue}` : ""}` : "—"}
+            danger={!!overdue}
+          />
+          <Detail label={p.jobs.qtyOrdered} value={fmt(qty)} />
+          <Detail label={isAr ? "الخامة المصروفة (كجم)" : "Material issued (kg)"} value={job.materialIssued || "—"} />
+          <Detail label={isAr ? "الماستر باتش" : "Masterbatch"} value={job.masterbatch || "—"} />
+          <Detail label={p.jobs.unitsRemaining} value={fmt(remaining)} />
+          {standard ? (
+            <>
+              <Detail label={isAr ? "وزن القطعة (جم)" : "Part weight (g)"} value={standard.weight || "—"} />
+              <Detail label={isAr ? "نوع الخامة" : "Material type"} value={standard.material || "—"} />
+              <Detail
+                label={isAr ? "الكافيتي × الدورة (ث)" : "Cavities × cycle (s)"}
+                value={standard.cavities && standard.cycleSec ? `${standard.cavities} × ${standard.cycleSec}` : "—"}
+              />
+              <Detail
+                label={isAr ? "معدل الإنتاج / الساعة" : "Expected / hour"}
+                value={standard.ratePerHour ? fmt(standard.ratePerHour) : "—"}
+              />
+              <Detail
+                label={isAr ? "معدل الوردية (12 س)" : "Expected / 12h shift"}
+                value={standard.ratePerShift12h ? fmt(standard.ratePerShift12h) : "—"}
+              />
+              <Detail label={isAr ? "العيوب المحتملة" : "Possible defects"} value={standard.defects || "—"} />
+            </>
+          ) : (
+            <div className="sm:col-span-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {isAr
+                ? "لا يوجد معيار لهذا المنتج في Master (الوزن/الخامة/الدورة/الكافيتي) — أكمله لعرض أمر الشغل كاملاً."
+                : "No Master standard for this product (weight/material/cycle/cavities) — fill it to complete the work order."}
+            </div>
+          )}
+          {job.instructions ? (
+            <div className="sm:col-span-3">
+              <p className="text-xs text-gray-500 mb-0.5">{isAr ? "التعليمات" : "Instructions"}</p>
+              <p className="text-gray-700 whitespace-pre-wrap">{job.instructions}</p>
+            </div>
+          ) : null}
+          {job.notes ? (
+            <div className="sm:col-span-3">
+              <p className="text-xs text-gray-500 mb-0.5">{p.jobs.notes}</p>
+              <p className="text-gray-700 whitespace-pre-wrap">{job.notes}</p>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Progress */}
       <div className={`flex items-center gap-3 mb-6 ${isAr ? "flex-row-reverse" : ""}`}>
-        <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden" dir="ltr">
           <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
         </div>
         <span className="text-xs text-gray-500 whitespace-nowrap">{fmt(good)} / {fmt(qty)} ({pct.toFixed(0)}%)</span>
@@ -198,7 +252,7 @@ export default function JobDetailPage() {
         <Stat label={p.runs.totalDowntime} value={`${fmt(downtime)} ${p.overview.minutes}`} />
       </div>
 
-      {/* Runs */}
+      {/* Runs credited to this job */}
       <div className={`flex items-center justify-between mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
         <h2 className="font-semibold text-gray-900">{p.jobs.runsForJob}</h2>
         <Btn onClick={openLog}><Plus size={15} /> {p.runs.add}</Btn>
@@ -224,7 +278,7 @@ export default function JobDetailPage() {
               {runs.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50/60">
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.date}</td>
-                  <td className="px-4 py-3 text-gray-500">{machineName(r.machineId)}</td>
+                  <td className="px-4 py-3 text-gray-500">{r.machine || "—"}</td>
                   <td className="px-4 py-3 text-green-600 font-medium">{fmt(r.goodUnits)}</td>
                   <td className="px-4 py-3 text-red-500">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
                   <td className="px-4 py-3 text-gray-500">
@@ -246,18 +300,25 @@ export default function JobDetailPage() {
         </div>
       )}
 
-      {/* Log run modal */}
+      {/* Log run modal — appends a production row for this job's product */}
       <Modal open={open} title={`${p.runs.add} · ${job.code}`} onClose={() => setOpen(false)} isAr={isAr}>
         <form onSubmit={handleAddRun}>
           <div className="grid sm:grid-cols-2 gap-x-4">
             <Field label={p.runs.date}>
               <input className={inputCls} type="date" required value={form.date} onChange={(e) => set("date", e.target.value)} />
             </Field>
+            <Field label={p.runs.shift}>
+              <select className={inputCls} value={form.shift} onChange={(e) => set("shift", e.target.value)}>
+                {options(SHIFTS, p.runs.shifts).map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </Field>
             <Field label={p.runs.machine}>
-              <select className={inputCls} value={form.machineId} onChange={(e) => set("machineId", e.target.value)}>
+              <select className={inputCls} value={form.machine} onChange={(e) => set("machine", e.target.value)}>
                 <option value="">{p.common.select}</option>
                 {machines.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
+                  <option key={m.name} value={m.name}>{m.name}</option>
                 ))}
               </select>
             </Field>

@@ -111,6 +111,29 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "active", keywords: ["الحالة", "status", "نشط", "active"] },
     ],
   },
+  // Client work orders. One row per job; progress is COMPUTED from production
+  // rows matched by product name + start date (no run⇄job foreign keys).
+  jobs: {
+    tab: "jobs", titleEn: "Jobs", titleAr: "أوامر العمل",
+    fields: [
+      // moldCode BEFORE code: "كود" alone would otherwise claim the mold-code
+      // column during appends.
+      { key: "moldCode", keywords: ["كود الاسطمبة", "mold code"] },
+      { key: "code", keywords: ["كود الأمر", "job code"] },
+      { key: "client", keywords: ["العميل", "client"] },
+      { key: "product", keywords: ["المنتج", "product"] },
+      { key: "qty", keywords: ["الكمية", "qty", "quantity"] },
+      { key: "startDate", keywords: ["تاريخ البدء", "البدء", "start"] },
+      { key: "dueDate", keywords: ["تاريخ التسليم", "التسليم", "due"] },
+      { key: "machine", keywords: ["الماكينة", "machine"] },
+      { key: "materialIssued", keywords: ["الخامة المصروفة", "المصروفة", "material issued"] },
+      { key: "masterbatch", keywords: ["ماستر", "masterbatch"] },
+      { key: "status", keywords: ["الحالة", "status"] },
+      { key: "priority", keywords: ["الأولوية", "priority"] },
+      { key: "instructions", keywords: ["التعليمات", "instruction"], long: true },
+      { key: "notes", keywords: ["ملاحظ", "note"], long: true },
+    ],
+  },
   // The single source of truth. Read directly when we need the per-mold standards
   // (cycle time + cavities) that OEE's Performance factor depends on.
   master: {
@@ -121,6 +144,9 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "code", keywords: ["mold code", "كود الاسطمبة", "code", "كود"] },
       { key: "cavities", keywords: ["cavities", "عدد الكافيتي", "cav", "كافيتي"] },
       { key: "cycle", keywords: ["cycle", "زمن الدورة", "الدورة"] },
+      { key: "weight", keywords: ["الوزن", "weight"] },
+      { key: "material", keywords: ["نوع الخام", "material"] },
+      { key: "defects", keywords: ["العيوب", "defect"], long: true },
       { key: "machine", keywords: ["machine", "الماكينة"] },
       { key: "active", keywords: ["active", "نشط"] },
     ],

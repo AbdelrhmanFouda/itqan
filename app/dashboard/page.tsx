@@ -6,19 +6,20 @@ import Link from "next/link";
 import { Plus, BarChart3 } from "lucide-react";
 import { Stat, EmptyState } from "@/components/dashboard/ui";
 
-type Machine = { id: string; name: string; status: string };
+type Machine = { name: string; status: string };
 type Job = { id: string; code: string; status: string; dueDate: string };
 type Run = {
   id: string;
-  jobId: string;
-  machineId: string;
+  machine: string;
+  mold: string;
+  product: string;
   date: string;
   goodUnits: number;
   scrapUnits: number;
   downtimeMin: number;
 };
 
-const OPERATIONAL = ["Operational", "تعمل"];
+const OPERATIONAL = ["Operational", "تعمل", "Active"];
 const DONE = ["Completed", "Delivered"];
 
 export default function DashboardPage() {
@@ -31,9 +32,9 @@ export default function DashboardPage() {
   const [runs, setRuns] = useState<Run[]>([]);
 
   useEffect(() => {
-    fetch("/api/machines").then((r) => r.json()).then(setMachines).catch(() => {});
-    fetch("/api/jobs").then((r) => r.json()).then(setJobs).catch(() => {});
-    fetch("/api/runs").then((r) => r.json()).then(setRuns).catch(() => {});
+    fetch("/api/machines").then((r) => r.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
+    fetch("/api/jobs").then((r) => r.json()).then((j) => setJobs(j.jobs ?? [])).catch(() => {});
+    fetch("/api/runs").then((r) => r.json()).then((r) => setRuns(Array.isArray(r) ? r : [])).catch(() => {});
   }, []);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -51,12 +52,12 @@ export default function DashboardPage() {
   const downtime = monthRuns.reduce((s, r) => s + (r.downtimeMin || 0), 0);
   const scrapRate = good + scrap ? ((scrap / (good + scrap)) * 100).toFixed(1) : "0.0";
 
-  const machineName = (id: string) => machines.find((m) => m.id === id)?.name ?? "—";
-  const jobCode = (id: string) => jobs.find((j) => j.id === id)?.code ?? "—";
-
   // Top machines this month by good units
   const byMachine: Record<string, number> = {};
-  for (const r of monthRuns) byMachine[r.machineId] = (byMachine[r.machineId] ?? 0) + (r.goodUnits || 0);
+  for (const r of monthRuns) {
+    const key = r.machine || "—";
+    byMachine[key] = (byMachine[key] ?? 0) + (r.goodUnits || 0);
+  }
   const topMachines = Object.entries(byMachine)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
@@ -120,7 +121,7 @@ export default function DashboardPage() {
               {topMachines.map(([mid, units]) => (
                 <div key={mid}>
                   <div className={`flex justify-between text-sm mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-                    <span className="font-medium text-gray-800">{machineName(mid)}</span>
+                    <span className="font-medium text-gray-800">{mid}</span>
                     <span className="text-gray-500">{fmt(units)} {p.overview.units}</span>
                   </div>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -145,8 +146,8 @@ export default function DashboardPage() {
               {recent.map((r) => (
                 <div key={r.id} className={`px-5 py-3 flex items-center justify-between text-sm ${isAr ? "flex-row-reverse" : ""}`}>
                   <div dir={isAr ? "rtl" : "ltr"}>
-                    <span className="font-medium text-gray-800">{jobCode(r.jobId)}</span>
-                    <span className="text-gray-400"> · {machineName(r.machineId)}</span>
+                    <span className="font-medium text-gray-800">{r.product || r.mold || "—"}</span>
+                    <span className="text-gray-400"> · {r.machine || "—"}</span>
                   </div>
                   <div className={`text-gray-500 ${isAr ? "text-left" : "text-right"}`}>
                     <span className="text-green-600 font-medium">{fmt(r.goodUnits)}</span>

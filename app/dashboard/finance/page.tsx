@@ -4,9 +4,8 @@ import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
 
-type Job = { id: string; client: string; status: string; dueDate: string };
-type Run = { jobId: string; machineId: string; date: string; goodUnits: number; scrapUnits: number; downtimeMin: number };
-type Machine = { id: string; name: string };
+type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
+type Run = { machine: string; date: string; goodUnits: number; scrapUnits: number; downtimeMin: number };
 
 const DONE = ["Completed", "Delivered"];
 
@@ -45,15 +44,13 @@ export default function FinancePage() {
   const isAr = lang === "ar";
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/jobs").then((r) => r.json()),
       fetch("/api/runs").then((r) => r.json()),
-      fetch("/api/machines").then((r) => r.json()),
     ])
-      .then(([j, r, m]) => { setJobs(j); setRuns(r); setMachines(m); })
+      .then(([j, r]) => { setJobs(j.jobs ?? []); setRuns(Array.isArray(r) ? r : []); })
       .catch(() => setJobs([]));
   }, []);
 
@@ -88,20 +85,20 @@ export default function FinancePage() {
     return { label: k, value: tot ? Number(((monthMap[k].scrap / tot) * 100).toFixed(1)) : 0 };
   });
 
-  // produced per job → by client / by machine
-  const producedByJob: Record<string, number> = {};
-  for (const r of runs) producedByJob[r.jobId] = (producedByJob[r.jobId] ?? 0) + (r.goodUnits || 0);
+  // produced per job (computed by the API) → by client / by machine
   const clientMap: Record<string, number> = {};
   for (const j of jobs) {
-    const v = producedByJob[j.id] ?? 0;
-    if (v) clientMap[j.client] = (clientMap[j.client] ?? 0) + v;
+    const v = j.produced || 0;
+    if (v && j.client) clientMap[j.client] = (clientMap[j.client] ?? 0) + v;
   }
   const byClient = Object.entries(clientMap).map(([label, value]) => ({ label, value })).sort((x, y) => y.value - x.value).slice(0, 6);
 
-  const machineName = (id: string) => machines.find((m) => m.id === id)?.name ?? "—";
   const machMap: Record<string, number> = {};
-  for (const r of runs) machMap[r.machineId] = (machMap[r.machineId] ?? 0) + (r.goodUnits || 0);
-  const byMachine = Object.entries(machMap).map(([id, value]) => ({ label: machineName(id), value })).sort((x, y) => y.value - x.value).slice(0, 6);
+  for (const r of runs) {
+    const key = r.machine || "—";
+    machMap[key] = (machMap[key] ?? 0) + (r.goodUnits || 0);
+  }
+  const byMachine = Object.entries(machMap).map(([label, value]) => ({ label, value })).sort((x, y) => y.value - x.value).slice(0, 6);
 
   return (
     <div className="max-w-5xl">
