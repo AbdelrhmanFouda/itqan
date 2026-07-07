@@ -1,54 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, sheetsWritable } from "@/lib/sheets";
-import { normalizeDate, latinDigits } from "@/lib/dates";
+import { latinDigits } from "@/lib/dates";
 
 /**
- * Machine fleet, read from the sheet's `machines` DAILY-PLAN tab (one row per
- * machine per day). GET aggregates to one card per machine: latest status,
- * shift length, last plan date and last product. POST appends a plan row.
- * (This replaced the old Firestore-backed list, which the sheet superseded.)
+ * Machine REGISTRY, read from the sheet's `machines` tab — one row per
+ * PHYSICAL machine. The code (PQPI n) is the only unique id: several
+ * tonnages (100/150/180/220/280) exist twice. `label` is the composite
+ * identity ("PQPI 4 — 220") that the production tab's machine-code column
+ * and the hourly board key on — keep the format in sync with the board.
  */
 
 const num = (v: unknown) => {
   const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : 0;
 };
-const normKey = (s: string | undefined) =>
-  latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
-export type MachineAgg = {
-  name: string;
-  status: string;       // "Active" / "Inactive" / "" (as written in the sheet)
-  shiftLength: number;  // minutes, from the latest dated row that has one
-  lastDate: string;     // ISO
-  lastProduct: string;
-  planRows: number;
+export type MachineInfo = {
+  row: number;
+  code: string;         // "PQPI 4" or "" when the sheet row has no code yet
+  name: string;         // tonnage, e.g. "220"
+  label: string;        // "PQPI 4 — 220" / "220 — بدون كود"
+  product: string;      // current product from the registry
+  manufacturer: string;
+  status: string;       // "Active" / "Inactive" / ""
+  shiftLength: number;  // minutes (720 default when blank)
 };
 
 export async function GET() {
   try {
     const tab = await getRecords("machines");
-    const by = new Map<string, MachineAgg>();
+    const machines: MachineInfo[] = [];
     for (const r of tab.records) {
-      const key = normKey(r.name);
-      if (!key) continue;
-      const d = normalizeDate(r.date);
-      const cur =
-        by.get(key) ??
-        { name: latinDigits((r.name || "").trim()), status: "", shiftLength: 0, lastDate: "", lastProduct: "", planRows: 0 };
-      cur.planRows++;
-      if (d >= cur.lastDate) {
-        cur.lastDate = d;
-        if (r.active) cur.status = r.active;
-        if (num(r.shiftLength) > 0) cur.shiftLength = num(r.shiftLength);
-        if (r.product) cur.lastProduct = r.product;
-      }
-      by.set(key, cur);
+      const name = latinDigits((r.name || "").trim());
+      if (!name) continue;
+      const code = (r.code || "").trim();
+      machines.push({
+        row: r.row,
+        code,
+        name,
+        label: code ? `${code} — ${name}` : `${name} — بدون كود`,
+        product: r.product || "",
+        manufacturer: r.manufacturer || "",
+        status: r.active || "",
+        shiftLength: num(r.shiftLength) > 0 ? num(r.shiftLength) : 720,
+      });
     }
-    const machines = Array.from(by.values()).sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true }),
-    );
-    return NextResponse.json({ machines, writable: sheetsWritable(), configured: tab.records.length > 0 || tab.fields.length > 0 });
+    // Coded machines first, in code order; then the code-less ones.
+    machines.sort((a, b) => {
+      const an = a.code ? num(a.code) : Infinity;
+      const bn = b.code ? num(b.code) : Infinity;
+      return an !== bn ? an - bn : a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+    return NextResponse.json({
+      machines,
+      writable: sheetsWritable(),
+      configured: tab.records.length > 0 || tab.fields.length > 0,
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ machines: [], writable: false, configured: false });
@@ -61,11 +68,12 @@ export async function POST(req: NextRequest) {
     const name = String(b.name ?? "").trim();
     if (!name) return NextResponse.json({ ok: false, reason: "no_name" }, { status: 400 });
     const res = await appendRecord("machines", {
+      code: String(b.code ?? "").trim(),
       name,
-      date: normalizeDate(String(b.date ?? "")) || new Date().toISOString().slice(0, 10),
+      product: String(b.product ?? ""),
+      manufacturer: String(b.manufacturer ?? ""),
       shiftLength: String(num(b.shiftLength) > 0 ? num(b.shiftLength) : 720),
       active: String(b.status ?? "Active"),
-      product: String(b.product ?? ""),
     });
     return NextResponse.json(res, { status: res.ok ? 200 : 400 });
   } catch (err) {

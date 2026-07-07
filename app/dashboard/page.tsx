@@ -11,6 +11,7 @@ type Job = { id: string; code: string; status: string; dueDate: string };
 type Run = {
   id: string;
   machine: string;
+  machineCode?: string;
   mold: string;
   product: string;
   date: string;
@@ -55,7 +56,7 @@ export default function DashboardPage() {
   // Top machines this month by good units
   const byMachine: Record<string, number> = {};
   for (const r of monthRuns) {
-    const key = r.machine || "—";
+    const key = r.machineCode || r.machine || "—";
     byMachine[key] = (byMachine[key] ?? 0) + (r.goodUnits || 0);
   }
   const topMachines = Object.entries(byMachine)

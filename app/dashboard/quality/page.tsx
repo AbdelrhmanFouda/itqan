@@ -8,11 +8,11 @@ import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/compon
 import { Plus } from "lucide-react";
 
 type Run = {
-  id: string; date: string; shift: string; machine: string; mold: string;
+  id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
   plannedMin: number; goodUnits: number; scrapUnits: number;
   downtimeMin: number; downtimeReason: string; operator: string; note: string;
 };
-type Machine = { row: number; name?: string; shiftLength?: string };
+type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
 type Mold = { row: number; code?: string; name?: string };
 
 export default function QualityPage() {
@@ -32,7 +32,7 @@ export default function QualityPage() {
 
   const blank = useCallback(
     () => ({
-      date, shift: SHIFTS[0], machine: "", mold: "", plannedMin: "720",
+      date, shift: SHIFTS[0], machine: "", mold: "", product: "", plannedMin: "720",
       goodUnits: "", scrapUnits: "", downtimeMin: "", downtimeReason: "None",
       operator: "", note: "",
     }),
@@ -43,11 +43,11 @@ export default function QualityPage() {
   const load = useCallback(async () => {
     const [r, m, mo] = await Promise.all([
       fetch("/api/runs").then((x) => x.json()).catch(() => []),
-      fetch("/api/sheet/machines").then((x) => x.json()).catch(() => ({ records: [] })),
+      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
       fetch("/api/sheet/molds").then((x) => x.json()).catch(() => ({ records: [] })),
     ]);
     setRuns(Array.isArray(r) ? r : []);
-    setMachines(m.records ?? []);
+    setMachines(m.machines ?? []);
     setMolds(mo.records ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -56,9 +56,12 @@ export default function QualityPage() {
     setForm((f) => {
       const next = { ...f, [k]: v };
       if (k === "machine") {
-        const mc = machines.find((m) => m.name === v);
-        const len = String(mc?.shiftLength ?? "").replace(/[^\d.]/g, "");
-        if (len) next.plannedMin = len;
+        const mc = machines.find((m) => m.label === v);
+        if (mc && mc.shiftLength > 0) next.plannedMin = String(mc.shiftLength);
+      }
+      if (k === "mold") {
+        const md = molds.find((m) => (m.code || m.name) === v);
+        next.product = md?.name ?? "";
       }
       return next;
     });
@@ -74,10 +77,13 @@ export default function QualityPage() {
     }
     setSaving(true);
     try {
+      // machine column = registry label (the machine's identity everywhere)
+      const mac = machines.find((m) => m.label === form.machine);
+      const payload = { ...form, machine: mac ? mac.label : form.machine, machineCode: mac ? mac.label : "" };
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.ok === false) throw new Error("save_failed");
@@ -146,7 +152,7 @@ export default function QualityPage() {
                 const rate = tot ? ((r.scrapUnits / tot) * 100).toFixed(1) : "0.0";
                 return (
                   <tr key={r.id} className="hover:bg-gray-50/60">
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.machine || "—"}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{r.machineCode || r.machine || "—"}</td>
                     <td className="px-4 py-3 text-gray-500">{moldLabel(r.mold)}</td>
                     <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
                     <td className="px-4 py-3 text-green-600 font-medium">{fmt(r.goodUnits)}</td>
@@ -183,7 +189,7 @@ export default function QualityPage() {
             <Field label={a.quality.machine}>
               <select className={inputCls} required value={form.machine} onChange={(e) => set("machine", e.target.value)}>
                 <option value="">{p.common.select}</option>
-                {machines.map((m) => (<option key={m.row} value={m.name ?? ""}>{m.name}</option>))}
+                {machines.map((m) => (<option key={m.row} value={m.label}>{m.label}{m.product ? ` · ${m.product}` : ""}</option>))}
               </select>
             </Field>
             <Field label={p.runs.mold}>

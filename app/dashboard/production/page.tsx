@@ -7,12 +7,14 @@ import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/compon
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 
 type Run = {
-  id: string; date: string; shift: string; machine: string; mold: string;
+  id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
   plannedMin: number; goodUnits: number; scrapUnits: number;
   downtimeMin: number; downtimeReason: string; operator: string; note: string;
 };
 type Mold = { row: number; code?: string; name?: string };
-type Machine = { row: number; name?: string; shiftLength?: string };
+// Physical machine from the registry — `label` ("PQPI 4 — 220") is the unique
+// identity written to the production tab's machine-code column.
+type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
 
 export default function ProductionPage() {
   const { lang } = useLang();
@@ -32,7 +34,7 @@ export default function ProductionPage() {
 
   const blank = useCallback(
     () => ({
-      date: today, shift: SHIFTS[0], machine: "", mold: "", plannedMin: "720",
+      date: today, shift: SHIFTS[0], machine: "", mold: "", product: "", plannedMin: "720",
       goodUnits: "", scrapUnits: "", downtimeMin: "", downtimeReason: "None",
       operator: "", note: "",
     }),
@@ -44,22 +46,28 @@ export default function ProductionPage() {
     const [r, mo, ma] = await Promise.all([
       fetch("/api/runs").then((x) => x.json()).catch(() => []),
       fetch("/api/sheet/molds").then((x) => x.json()).catch(() => ({ records: [] })),
-      fetch("/api/sheet/machines").then((x) => x.json()).catch(() => ({ records: [] })),
+      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
     ]);
     setRuns(Array.isArray(r) ? r : []);
     setMolds(mo.records ?? []);
-    setMachines(ma.records ?? []);
+    setMachines(ma.machines ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => {
       const next = { ...f, [k]: v };
-      // Picking a machine defaults planned minutes to that machine's shift length.
+      // Picking a machine (by its code label) defaults planned minutes to
+      // that machine's shift length.
       if (k === "machine") {
-        const mc = machines.find((m) => m.name === v);
-        const len = String(mc?.shiftLength ?? "").replace(/[^\d.]/g, "");
-        if (len) next.plannedMin = len;
+        const mc = machines.find((m) => m.label === v);
+        if (mc && mc.shiftLength > 0) next.plannedMin = String(mc.shiftLength);
+      }
+      // Picking a mold also records the PRODUCT NAME — the sheet's hourly
+      // board and OEE both join production rows to Master by that name.
+      if (k === "mold") {
+        const md = molds.find((m) => (m.code || m.name) === v);
+        next.product = md?.name ?? "";
       }
       return next;
     });
@@ -75,10 +83,14 @@ export default function ProductionPage() {
     }
     setSaving(true);
     try {
+      // The production tab's machine column holds the registry LABEL
+      // ("PQPI 4 — 220") — the machine's identity everywhere (board included).
+      const mac = machines.find((m) => m.label === form.machine);
+      const payload = { ...form, machine: mac ? mac.label : form.machine, machineCode: mac ? mac.label : "" };
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.ok === false) throw new Error("save_failed");
@@ -166,7 +178,7 @@ export default function ProductionPage() {
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.date}</td>
                   <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-800">{moldLabel(r.mold)}</td>
-                  <td className="px-4 py-3 text-gray-500">{r.machine || "—"}</td>
+                  <td className="px-4 py-3 text-gray-500">{r.machineCode || r.machine || "—"}</td>
                   <td className="px-4 py-3 text-green-600 font-medium">{fmt(r.goodUnits)}</td>
                   <td className="px-4 py-3 text-red-500">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
                   <td className="px-4 py-3 text-gray-500">
@@ -206,7 +218,9 @@ export default function ProductionPage() {
               <select className={inputCls} required value={form.machine} onChange={(e) => set("machine", e.target.value)}>
                 <option value="">{p.common.select}</option>
                 {machines.map((m) => (
-                  <option key={m.row} value={m.name ?? ""}>{m.name}</option>
+                  <option key={m.row} value={m.label}>
+                    {m.label}{m.product ? ` · ${m.product}` : ""}
+                  </option>
                 ))}
               </select>
             </Field>

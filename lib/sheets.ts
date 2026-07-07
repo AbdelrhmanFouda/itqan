@@ -36,6 +36,9 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "code", keywords: ["mold code", "code", "كود"] },
       { key: "name", keywords: ["product / mold", "product", "mold name", "name", "المنتج", "اسم الاسطمبة"] },
       { key: "client", keywords: ["client", "العميل"] },
+      // worstCycle BEFORE cycle: its header contains "زمن الدورة"/"cycle" too,
+      // but only it contains "أسوأ"/"worst".
+      { key: "worstCycle", keywords: ["أسوأ", "worst"] },
       { key: "cycle", keywords: ["cycle", "الدورة"] },
       { key: "operator", keywords: ["worker", "operator", "العامل"] },
       { key: "active", keywords: ["active", "نشط", "status"] },
@@ -49,6 +52,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "weight", keywords: ["weight", "الوزن"] },
       { key: "material", keywords: ["material", "الخام"] },
       { key: "cavities", keywords: ["cav", "كافيتي"] },
+      { key: "worstCycle", keywords: ["أسوأ", "worst"] },
       { key: "cycle", keywords: ["cycle", "الدورة"] },
       { key: "machine", keywords: ["machine", "الماكينة"] },
       { key: "defects", keywords: ["defect", "العيوب"], long: true },
@@ -79,6 +83,11 @@ export const ENTITIES: Record<string, EntityConfig> = {
     fields: [
       { key: "date", keywords: ["date", "التاريخ"] },
       { key: "shift", keywords: ["shift", "الوردية"] },
+      // machineCode BEFORE machine: its column header ("كود الماكينة\nMachine code")
+      // contains both "machine" and "الماكينة", so `machine` would otherwise claim
+      // the code column during appends. Value = the physical-machine label
+      // ("PQPI 4 — 220") that the hourly board's SUMIFS keys on.
+      { key: "machineCode", keywords: ["كود الماكينة", "machine code"] },
       { key: "machine", keywords: ["machine", "الماكينة"] },
       { key: "mold", keywords: ["mold", "الاسطمبة", "القالب"] },
       // Supervisors identify the part by PRODUCT NAME more often than by mold
@@ -95,20 +104,22 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "note", keywords: ["note", "ملاحظ"], long: true },
     ],
   },
-  // The machines tab is a DAILY PLAN: one row per machine per date with that
-  // day's shift and planned shift length (minutes) + Active/Inactive status.
-  // NOTE: shiftLength is declared BEFORE shift so appends can't drop the shift
-  // name into the length column ("الوردية" is a substring of "طول الوردية").
+  // The machines tab is a REGISTRY: one row per PHYSICAL machine — code
+  // (PQPI n, the true unique id: several tonnages exist twice), tonnage,
+  // manufacturer, status, current product and shift length. No dates anymore.
+  // NOTE: code declared BEFORE name — the code column's header contains
+  // "الماكينة" too, so `name` would otherwise claim it during appends.
+  // `active` deliberately omits the bare "active" keyword so the trailing
+  // "Active on" column stays unclaimed.
   machines: {
     tab: "machines", titleEn: "Machines", titleAr: "الماكينات",
     fields: [
       { key: "code", keywords: ["كود الماكينة", "machine code"] },
       { key: "name", keywords: ["الماكينة", "machine"] },
-      { key: "date", keywords: ["التاريخ", "date"] },
       { key: "product", keywords: ["أسم المنتج", "اسم المنتج", "prod name", "product"] },
+      { key: "manufacturer", keywords: ["الشركة المصنعة", "manufactur"] },
       { key: "shiftLength", keywords: ["طول الوردية", "shift length", "دقيقة"] },
-      { key: "shift", keywords: ["الوردية", "shift"] },
-      { key: "active", keywords: ["الحالة", "status", "نشط", "active"] },
+      { key: "active", keywords: ["الحالة", "status"] },
     ],
   },
   // Client work orders. One row per job; progress is COMPUTED from production
@@ -143,6 +154,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "name", keywords: ["product / mold", "المنتج / الاسطمبة", "product", "mold name", "المنتج"] },
       { key: "code", keywords: ["mold code", "كود الاسطمبة", "code", "كود"] },
       { key: "cavities", keywords: ["cavities", "عدد الكافيتي", "cav", "كافيتي"] },
+      { key: "worstCycle", keywords: ["أسوأ", "worst"] },
       { key: "cycle", keywords: ["cycle", "زمن الدورة", "الدورة"] },
       { key: "weight", keywords: ["الوزن", "weight"] },
       { key: "material", keywords: ["نوع الخام", "material"] },

@@ -36,6 +36,16 @@ type Readiness = {
   machinesTabFound: boolean; defaultShiftMin: number;
   standardsInMaster: number; moldsSeen: number; moldsSeenWithStd: number;
 };
+type Suspect = {
+  mold: string; units: number; runtimeMin: number; ratio: number;
+  masterCycleSec: number; cavities: number; impliedCycleSec: number;
+};
+type Explain = {
+  availabilityMeasured: boolean; qualityMeasured: boolean;
+  plannedMin: number; downtimeMin: number; runtimeMin: number;
+  stdRuntimeMin: number; idealMin: number; overspeedMin: number;
+  goodUnits: number; scrapUnits: number;
+};
 type Data = {
   overall: OEE | null;
   bottlenecks: Bottleneck[];
@@ -45,7 +55,20 @@ type Data = {
   months: string[];
   readiness: Readiness | null;
   standardsGap: { mold: string; units: number }[];
+  suspects: Suspect[];
+  explain: Explain | null;
   runCount: number;
+  configured: boolean;
+};
+type Bi = { en: string; ar: string };
+type Finding = { severity: "critical" | "warn" | "good" | "info"; en: string; ar: string };
+type ReviewPayload = {
+  review: { summary: Bi; findings: Finding[]; actions: Bi[] } | null;
+  provider: "gemini" | "anthropic" | "rules" | null;
+  model: string | null;
+  generatedAt: string | null;
+  cached: boolean;
+  llmConfigured: boolean;
   configured: boolean;
 };
 
@@ -86,6 +109,23 @@ const L = {
     rStd: (k: number, s: number) => `${k}/${s} logged molds have a cycle standard in Master`,
     rStubs: (n: number) => `${n} empty rows in the Production tab were ignored`,
     fillMaster: "Fill cycle + cavities in Master for:", units: "pcs",
+    explainTitle: "How is this number calculated?",
+    explainIntro: "OEE = Availability × Performance × Quality. Every input below comes straight from the sheet:",
+    exA: "Availability = run time ÷ planned time",
+    exP: "Performance = ideal time for the units made ÷ run time (only products with a Master standard)",
+    exQ: "Quality = good units ÷ total units",
+    measured: "measured", assumedChip: "assumed — not logged",
+    minutes: "min",
+    overspeedNote: (m: number) =>
+      `${m} “impossible” ideal minutes were capped: some products out-produce their Master standard, which used to inflate this number. Their wrong standards are listed below.`,
+    suspectsTitle: "Wrong cycle standards in Master",
+    suspectsIntro: "These products produced far more than their standard allows — the Master cycle time is wrong (or Good counts are over-reported). Until fixed, their speed score is capped at 100%:",
+    sProduct: "Product", sMasterCyc: "Master cycle", sImplied: "actual implies", sUnits: "units", sRatio: "ran at",
+    aiTitle: "AI Review", aiDaily: "regenerated daily",
+    aiUpdated: "Updated", aiRegen: "Regenerate", aiRegenerating: "Regenerating…",
+    aiActions: "Do next",
+    aiRules: "Built-in analysis (no AI key set — add GEMINI_API_KEY or ANTHROPIC_API_KEY for an AI-written review)",
+    aiUnavailable: "Couldn't load the review.",
   },
   ar: {
     title: "الأداء — OEE", subtitle: "الفعالية الكلية للمعدات، لكل ماكينة",
@@ -123,6 +163,23 @@ const L = {
     rStd: (k: number, s: number) => `${k}/${s} من الاسطمبات المسجَّلة لها معيار دورة في Master`,
     rStubs: (n: number) => `تم تجاهل ${n} صفوف فارغة في تبويب Production`,
     fillMaster: "أكمل زمن الدورة + الكافيتي في Master لـ:", units: "قطعة",
+    explainTitle: "كيف يُحسب هذا الرقم؟",
+    explainIntro: "OEE = الإتاحة × الأداء × الجودة. كل رقم أدناه يأتي مباشرة من الشيت:",
+    exA: "الإتاحة = زمن التشغيل ÷ الزمن المخطط",
+    exP: "الأداء = الزمن المثالي للقطع المنتَجة ÷ زمن التشغيل (فقط المنتجات التي لها معيار في Master)",
+    exQ: "الجودة = القطع السليمة ÷ إجمالي القطع",
+    measured: "مُقاس", assumedChip: "افتراضي — غير مسجَّل",
+    minutes: "د",
+    overspeedNote: (m: number) =>
+      `تم تحييد ${m} دقيقة مثالية «مستحيلة»: بعض المنتجات تنتج أكثر مما يسمح به معيارها في Master، وكان هذا يضخّم الرقم سابقًا. معاييرها الخاطئة مذكورة أدناه.`,
+    suspectsTitle: "معايير دورة خاطئة في Master",
+    suspectsIntro: "هذه المنتجات أنتجت أكثر بكثير مما يسمح به معيارها — زمن الدورة في Master خاطئ (أو عدد السليم مبالغ فيه). حتى يتم التصحيح، سرعتها محسوبة بحد أقصى 100%:",
+    sProduct: "المنتج", sMasterCyc: "دورة Master", sImplied: "الفعلي يعني", sUnits: "قطعة", sRatio: "اشتغل بنسبة",
+    aiTitle: "المراجعة الذكية", aiDaily: "تتجدد يوميًا",
+    aiUpdated: "آخر تحديث", aiRegen: "إعادة التوليد", aiRegenerating: "جارٍ التوليد…",
+    aiActions: "الخطوات التالية",
+    aiRules: "تحليل مدمج (لا يوجد مفتاح AI — أضف GEMINI_API_KEY أو ANTHROPIC_API_KEY لمراجعة مكتوبة بالذكاء الاصطناعي)",
+    aiUnavailable: "تعذّر تحميل المراجعة.",
   },
 };
 
@@ -149,6 +206,8 @@ export default function PerformancePage() {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [review, setReview] = useState<ReviewPayload | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,6 +224,24 @@ export default function PerformancePage() {
     }
   }, [period, thisMonth]);
   useEffect(() => { load(); }, [load]);
+
+  const loadReview = useCallback(async (refresh = false) => {
+    setReviewBusy(true);
+    try {
+      const params = new URLSearchParams();
+      if (period === "month") params.set("month", thisMonth);
+      if (refresh) params.set("refresh", "1");
+      const qs = params.toString();
+      const res = await fetch(`/api/ai-review${qs ? `?${qs}` : ""}`);
+      if (!res.ok) throw new Error("bad_status");
+      setReview(await res.json());
+    } catch {
+      setReview((r) => r ?? { review: null, provider: null, model: null, generatedAt: null, cached: false, llmConfigured: false, configured: false });
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [period, thisMonth]);
+  useEffect(() => { loadReview(); }, [loadReview]);
 
   const reasonLabel = (r: string) => localize(r, DOWNTIME_REASONS, p.runs.reasons);
   const pf0 = (x: number) => `${Math.round(x * 100)}%`;
@@ -280,6 +357,134 @@ export default function PerformancePage() {
           {o.performanceKnown && o.standardCoverage < 1 && (
             <p className="text-xs text-gray-400 mb-3">{t.coverage}: {pf(o.standardCoverage)}</p>
           )}
+
+          {/* How is this number calculated — full audit trail of the headline */}
+          {data.explain && (
+            <div className="mb-6 bg-white border border-gray-200 rounded-xl p-4">
+              <h2 className={`text-sm font-semibold text-gray-900 mb-1 ${isAr ? "text-right" : ""}`}>{t.explainTitle}</h2>
+              <p className={`text-xs text-gray-500 mb-3 ${isAr ? "text-right" : ""}`}>{t.explainIntro}</p>
+              <div className="space-y-2">
+                {([
+                  [t.exA, `${fmtNum(data.explain.runtimeMin, isAr)} ÷ ${fmtNum(data.explain.plannedMin, isAr)} ${t.minutes}`,
+                    pf(o.availability), data.explain.availabilityMeasured, true],
+                  [t.exP, `${fmtNum(data.explain.idealMin, isAr)} ÷ ${fmtNum(data.explain.stdRuntimeMin, isAr)} ${t.minutes}`,
+                    o.performanceKnown ? pf(o.performance) : "—", true, o.performanceKnown],
+                  [t.exQ, `${fmtNum(data.explain.goodUnits, isAr)} ÷ ${fmtNum(data.explain.goodUnits + data.explain.scrapUnits, isAr)} ${t.units}`,
+                    pf(o.quality), data.explain.qualityMeasured, true],
+                ] as const).map(([label, calc, result, measured, known], i) => (
+                  <div key={i} className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                    <span className="text-gray-600 flex-1 min-w-[220px]">{label}</span>
+                    <span className="text-gray-400 whitespace-nowrap" dir="ltr">{calc}</span>
+                    <span className={`font-semibold whitespace-nowrap ${known ? "text-gray-900" : "text-gray-300"}`} dir="ltr">= {result}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${
+                      measured ? "border-green-200 bg-green-50 text-green-700" : "border-amber-300 bg-amber-50 text-amber-700"
+                    }`}>{measured ? t.measured : t.assumedChip}</span>
+                  </div>
+                ))}
+                <div className={`pt-2 border-t border-gray-100 text-xs font-semibold text-gray-900 ${isAr ? "text-right" : ""}`}>
+                  <span dir="ltr">
+                    {t.oee} = {pf(o.availability)} × {o.performanceKnown ? pf(o.performance) : "—"} × {pf(o.quality)} ={" "}
+                    <span className={o.performanceKnown ? oeeText(o.oee) : "text-gray-300"}>{o.performanceKnown ? pf(o.oee) : "—"}</span>
+                  </span>
+                </div>
+              </div>
+              {data.explain.overspeedMin > 1 && (
+                <p className={`mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 ${isAr ? "text-right" : ""}`}>
+                  {t.overspeedNote(Math.round(data.explain.overspeedMin))}
+                </p>
+              )}
+              {data.suspects.length > 0 && (
+                <div className="mt-3">
+                  <h3 className={`text-xs font-semibold text-red-700 mb-1 ${isAr ? "text-right" : ""}`}>{t.suspectsTitle}</h3>
+                  <p className={`text-xs text-gray-500 mb-2 ${isAr ? "text-right" : ""}`}>{t.suspectsIntro}</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs" dir={isAr ? "rtl" : "ltr"}>
+                      <thead>
+                        <tr className="text-gray-400">
+                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sProduct}</th>
+                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sMasterCyc}</th>
+                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sImplied}</th>
+                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sRatio}</th>
+                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sUnits}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.suspects.map((s) => (
+                          <tr key={s.mold} className="border-t border-gray-100">
+                            <td className="py-1.5 font-medium text-gray-900">{s.mold}</td>
+                            <td className="py-1.5 text-gray-600" dir="ltr">{s.masterCycleSec}s × {s.cavities}</td>
+                            <td className="py-1.5 text-red-600 font-semibold" dir="ltr">≈{s.impliedCycleSec}s</td>
+                            <td className="py-1.5 text-gray-600" dir="ltr">{Math.round(s.ratio * 100)}%</td>
+                            <td className="py-1.5 text-gray-600">{fmtNum(s.units, isAr)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Review — daily narrative, grounded in the same dataset */}
+          <div className="mb-10 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+            <div className={`flex flex-wrap items-center gap-2 mb-2 ${isAr ? "flex-row-reverse" : ""}`}>
+              <h2 className="text-sm font-semibold text-indigo-900">{t.aiTitle}</h2>
+              <span className="text-xs text-indigo-400">· {t.aiDaily}</span>
+              {review?.generatedAt && (
+                <span className="text-xs text-gray-400">
+                  {t.aiUpdated}: {new Date(review.generatedAt).toLocaleString(isAr ? "ar-EG" : "en-US", { dateStyle: "medium", timeStyle: "short" })}
+                </span>
+              )}
+              <span className="flex-1" />
+              <button
+                onClick={() => loadReview(true)}
+                disabled={reviewBusy}
+                className="text-xs px-2.5 py-1 rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                {reviewBusy ? t.aiRegenerating : t.aiRegen}
+              </button>
+            </div>
+            {!review || (reviewBusy && !review.review) ? (
+              <p className={`text-xs text-gray-400 ${isAr ? "text-right" : ""}`}>…</p>
+            ) : !review.configured || !review.review ? (
+              <p className={`text-xs text-gray-500 ${isAr ? "text-right" : ""}`}>{t.aiUnavailable}</p>
+            ) : (
+              <>
+                <p className={`text-sm text-gray-800 mb-3 leading-relaxed ${isAr ? "text-right" : ""}`}>
+                  {isAr ? review.review.summary.ar || review.review.summary.en : review.review.summary.en || review.review.summary.ar}
+                </p>
+                {review.review.findings.length > 0 && (
+                  <ul className="space-y-1.5 mb-3">
+                    {review.review.findings.map((f, i) => (
+                      <li key={i} className={`flex items-start gap-2 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                        <span className={`mt-0.5 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${
+                          f.severity === "critical" ? "border-red-200 bg-red-100 text-red-700"
+                          : f.severity === "warn" ? "border-amber-200 bg-amber-100 text-amber-700"
+                          : f.severity === "good" ? "border-green-200 bg-green-100 text-green-700"
+                          : "border-gray-200 bg-gray-100 text-gray-600"
+                        }`}>●</span>
+                        <span className="text-gray-700">{isAr ? f.ar || f.en : f.en || f.ar}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {review.review.actions.length > 0 && (
+                  <div className={isAr ? "text-right" : ""}>
+                    <h3 className="text-xs font-semibold text-indigo-900 mb-1">{t.aiActions}</h3>
+                    <ol className={`space-y-1 ${isAr ? "pr-4" : "pl-4"} list-decimal text-xs text-gray-700`} dir={isAr ? "rtl" : "ltr"}>
+                      {review.review.actions.map((a, i) => (
+                        <li key={i}>{isAr ? a.ar || a.en : a.en || a.ar}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                <p className={`mt-3 text-[10px] text-gray-400 ${isAr ? "text-right" : ""}`}>
+                  {review.provider === "rules" ? t.aiRules : review.model ? `${review.provider} · ${review.model}` : ""}
+                </p>
+              </>
+            )}
+          </div>
 
           {/* Data readiness — the honesty panel */}
           {readinessItems.length > 0 && (

@@ -53,5 +53,7 @@ service cloud.firestore {
     match /molds/{doc}            { allow read, write: if true; }
     match /jobs/{doc}             { allow read, write: if true; }
     match /productionRuns/{doc}   { allow read, write: if true; }
+    // Daily AI-review cache (one doc per day per period) — written by /api/ai-review.
+    match /aiReviews/{doc}        { allow read, write: if true; }
   }
 }

@@ -1,45 +1,46 @@
 "use client";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { formatDate } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { Plus, Circle } from "lucide-react";
 
 /**
- * Machine fleet — read from the sheet's `machines` daily-plan tab.
- * One card per machine (latest status / shift length / product); the form
- * appends a new plan row to the sheet (date + status + shift length).
+ * Machine registry — read from the sheet's `machines` tab (one row per
+ * PHYSICAL machine; the PQPI code is the unique id since several tonnages
+ * exist twice). The form appends a new registry row.
  */
 
-type MachineAgg = {
+type MachineInfo = {
+  row: number;
+  code: string;
   name: string;
+  label: string;
+  product: string;
+  manufacturer: string;
   status: string;
   shiftLength: number;
-  lastDate: string;
-  lastProduct: string;
-  planRows: number;
 };
-type Data = { machines: MachineAgg[]; writable: boolean; configured: boolean };
+type Data = { machines: MachineInfo[]; writable: boolean; configured: boolean };
 
 const L = {
   en: {
-    subtitle: "From the machines tab — one plan row per machine per day",
-    addRow: "Add plan row", machine: "Machine", date: "Date",
-    status: "Status", statuses: ["Active", "Inactive"] as const,
+    subtitle: "From the machines tab — one row per physical machine, identified by its code",
+    addRow: "Add machine", code: "Machine code (e.g. PQPI 16)", machine: "Tonnage (e.g. 220)",
+    manufacturer: "Manufacturer", status: "Status", statuses: ["Active", "Inactive"] as const,
     statusLabel: { Active: "Active", Inactive: "Inactive" } as Record<string, string>,
-    shiftLength: "Shift length (min)", product: "Product (optional)",
-    lastPlan: "last plan", rows: "plan rows", min: "min",
+    shiftLength: "Shift length (min)", product: "Current product (optional)",
+    noCode: "no code — add one in the sheet", min: "min",
     empty: "No machines found in the sheet's machines tab yet.",
     unreachable: "Couldn't reach the data sheet. Check the connection and reload.",
     saveFailed: "Saving failed — check the Apps Script deployment.",
   },
   ar: {
-    subtitle: "من تبويب machines — صف خطة لكل ماكينة لكل يوم",
-    addRow: "إضافة صف خطة", machine: "الماكينة", date: "التاريخ",
-    status: "الحالة", statuses: ["Active", "Inactive"] as const,
+    subtitle: "من تبويب machines — صف لكل ماكينة فعلية، وهويتها هي الكود",
+    addRow: "إضافة ماكينة", code: "كود الماكينة (مثال PQPI 16)", machine: "الحمولة (مثال 220)",
+    manufacturer: "الشركة المصنعة", status: "الحالة", statuses: ["Active", "Inactive"] as const,
     statusLabel: { Active: "تعمل", Inactive: "متوقفة" } as Record<string, string>,
-    shiftLength: "طول الوردية (دقيقة)", product: "المنتج (اختياري)",
-    lastPlan: "آخر خطة", rows: "صفوف الخطة", min: "د",
+    shiftLength: "طول الوردية (دقيقة)", product: "المنتج الحالي (اختياري)",
+    noCode: "بدون كود — أضفه في الشيت", min: "د",
     empty: "لا توجد ماكينات في تبويب machines بعد.",
     unreachable: "تعذّر الوصول إلى جدول البيانات. تحقق من الاتصال وأعد التحميل.",
     saveFailed: "فشل الحفظ — تحقق من نشر Apps Script.",
@@ -56,14 +57,13 @@ export default function MachinesPage() {
   const tr = t[lang];
   const l = L[lang];
   const isAr = lang === "ar";
-  const today = new Date().toISOString().slice(0, 10);
 
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(false);
-  const [form, setForm] = useState({ name: "", date: today, status: "Active", shiftLength: "720", product: "" });
+  const [form, setForm] = useState({ code: "", name: "", manufacturer: "", status: "Active", shiftLength: "720", product: "" });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   async function load() {
@@ -88,7 +88,7 @@ export default function MachinesPage() {
     }).catch(() => null);
     setSaving(false);
     if (!res || !res.ok) { setSaveErr(true); return; }
-    setForm({ name: "", date: today, status: "Active", shiftLength: "720", product: "" });
+    setForm({ code: "", name: "", manufacturer: "", status: "Active", shiftLength: "720", product: "" });
     setShowForm(false);
     load();
   }
@@ -115,15 +115,16 @@ export default function MachinesPage() {
         <form onSubmit={handleAdd} className="bg-white border border-gray-200 rounded-xl p-6 mb-6 space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.machine}</label>
-              <input value={form.name} onChange={(e) => set("name", e.target.value)} required list="machine-names" className={inputCls} />
-              <datalist id="machine-names">
-                {data?.machines.map((m) => <option key={m.name} value={m.name} />)}
-              </datalist>
+              <label className="block text-sm text-gray-600 mb-1">{l.code}</label>
+              <input value={form.code} onChange={(e) => set("code", e.target.value)} className={inputCls} />
             </div>
             <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.date}</label>
-              <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} required className={inputCls} />
+              <label className="block text-sm text-gray-600 mb-1">{l.machine}</label>
+              <input value={form.name} onChange={(e) => set("name", e.target.value)} required className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">{l.manufacturer}</label>
+              <input value={form.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} className={inputCls} />
             </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">{l.status}</label>
@@ -135,7 +136,7 @@ export default function MachinesPage() {
               <label className="block text-sm text-gray-600 mb-1">{l.shiftLength}</label>
               <input type="number" min="0" step="30" value={form.shiftLength} onChange={(e) => set("shiftLength", e.target.value)} required className={inputCls} />
             </div>
-            <div className="sm:col-span-2">
+            <div>
               <label className="block text-sm text-gray-600 mb-1">{l.product}</label>
               <input value={form.product} onChange={(e) => set("product", e.target.value)} className={inputCls} />
             </div>
@@ -159,16 +160,15 @@ export default function MachinesPage() {
       ) : (
         <div className="space-y-3">
           {data.machines.map((m) => (
-            <div key={m.name} className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center justify-between">
+            <div key={m.row} className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center justify-between">
               <div className={`flex items-center gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
                 <Circle size={8} className={`fill-current ${statusColor(m.status)}`} />
                 <div dir={isAr ? "rtl" : "ltr"}>
-                  <p className="font-medium text-gray-900">{m.name}</p>
+                  <p className="font-medium text-gray-900">{m.label}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
+                    {m.manufacturer && <>{m.manufacturer} · </>}
                     {m.shiftLength > 0 && <>{m.shiftLength} {l.min} · </>}
-                    {m.lastDate && <>{l.lastPlan}: {formatDate(m.lastDate, lang)} · </>}
-                    {m.lastProduct && <>{m.lastProduct} · </>}
-                    {m.planRows} {l.rows}
+                    {m.product ? m.product : !m.code ? l.noCode : ""}
                   </p>
                 </div>
               </div>
