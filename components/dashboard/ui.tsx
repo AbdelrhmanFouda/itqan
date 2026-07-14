@@ -42,8 +42,10 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
+// text-base below sm keeps iOS Safari from auto-zooming into focused fields;
+// from sm up it is the same text-sm as before.
 export const inputCls =
-  "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400";
+  "w-full border border-gray-300 rounded-lg px-3 py-2 text-base sm:text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400";
 
 export function Btn({
   children,
@@ -93,7 +95,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-20 overflow-auto"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-3 pt-14 sm:p-4 sm:pt-20 overflow-auto"
       onClick={onClose}
     >
       <div

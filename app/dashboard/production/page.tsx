@@ -157,7 +157,41 @@ export default function ProductionPage() {
       ) : runs.length === 0 ? (
         <EmptyState text={p.runs.empty} />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <>
+        {/* Phone: stacked run cards */}
+        <div className="md:hidden space-y-2" dir={isAr ? "rtl" : "ltr"}>
+          {(runs ?? []).map((r) => (
+            <div key={r.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-gray-900 leading-snug">{moldLabel(r.mold)}</span>
+                <button
+                  onClick={() => handleDelete(r.id)}
+                  className="text-gray-300 hover:text-red-500 transition-colors shrink-0 p-1 -m-1"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                {r.date}{r.shift ? ` · ${shiftLabel(r.shift)}` : ""} · {r.machineCode || r.machine || "—"}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
+                <span className="text-green-600 font-medium">{fmt(r.goodUnits)} ✓</span>
+                {r.scrapUnits ? <span className="text-red-500">{fmt(r.scrapUnits)} ✗</span> : null}
+                {r.downtimeMin ? (
+                  <span className="text-gray-500">
+                    {fmt(r.downtimeMin)} {p.overview.minutes}
+                    {r.downtimeReason && r.downtimeReason !== "None"
+                      ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+              {r.operator ? <div className="text-xs text-gray-400 mt-1">{r.operator}</div> : null}
+            </div>
+          ))}
+        </div>
+        {/* Desktop: the table, unchanged */}
+        <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
             <thead>
               <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
@@ -198,6 +232,7 @@ export default function ProductionPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Log production modal */}

@@ -136,7 +136,29 @@ export default function SheetSection({
       {filtered.length === 0 ? (
         <EmptyState text={m.empty} />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <>
+        {/* Phone: stacked cards (tap a card to open details) */}
+        <div className="sm:hidden space-y-2" dir={isAr ? "rtl" : "ltr"}>
+          {filtered.map((rec) => (
+            <button
+              key={rec.row}
+              onClick={() => openEdit(rec)}
+              className="w-full text-start bg-white border border-gray-200 rounded-xl px-4 py-3 active:bg-gray-50 transition-colors"
+            >
+              <div className="font-medium text-gray-900 leading-snug">{rec[cols[0]] || "—"}</div>
+              {cols.slice(1).map((f) =>
+                rec[f] ? (
+                  <div key={f} className="flex items-baseline justify-between gap-3 text-xs mt-1">
+                    <span className="text-gray-400 shrink-0">{label(f)}</span>
+                    <span className="text-gray-600 truncate">{rec[f]}</span>
+                  </div>
+                ) : null
+              )}
+            </button>
+          ))}
+        </div>
+        {/* Tablet/desktop: the table, unchanged */}
+        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
             <thead>
               <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
@@ -160,6 +182,7 @@ export default function SheetSection({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <Modal

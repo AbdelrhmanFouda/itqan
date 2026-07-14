@@ -580,7 +580,7 @@ export default function PerformancePage() {
                     {m.performanceKnown ? pf(m.oee) : t.noStd}
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
                   {([
                     ["availability", m.availability, true],
                     ["performance", m.performance, m.performanceKnown],

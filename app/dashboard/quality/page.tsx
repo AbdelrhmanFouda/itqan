@@ -132,7 +132,42 @@ export default function QualityPage() {
       {dayRuns.length === 0 ? (
         <EmptyState text={a.quality.noEntries} />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <>
+        {/* Phone: stacked entry cards */}
+        <div className="md:hidden space-y-2" dir={isAr ? "rtl" : "ltr"}>
+          {dayRuns.map((r) => {
+            const tot = (r.goodUnits || 0) + (r.scrapUnits || 0);
+            const rate = tot ? ((r.scrapUnits / tot) * 100).toFixed(1) : "0.0";
+            return (
+              <div key={r.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-gray-900 leading-snug">{r.machineCode || r.machine || "—"}</span>
+                  <span className={`text-xs font-medium shrink-0 ${Number(rate) > 3 ? "text-amber-600" : "text-gray-400"}`}>
+                    {rate}%
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {moldLabel(r.mold)}{r.shift ? ` · ${shiftLabel(r.shift)}` : ""}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
+                  <span className="text-green-600 font-medium">{fmt(r.goodUnits)} ✓</span>
+                  {r.scrapUnits ? <span className="text-red-500">{fmt(r.scrapUnits)} ✗</span> : null}
+                  {r.downtimeMin ? (
+                    <span className="text-gray-500">
+                      {fmt(r.downtimeMin)} {a.quality.min}
+                      {r.downtimeReason && r.downtimeReason !== "None"
+                        ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                        : ""}
+                    </span>
+                  ) : null}
+                </div>
+                {r.operator ? <div className="text-xs text-gray-400 mt-1">{r.operator}</div> : null}
+              </div>
+            );
+          })}
+        </div>
+        {/* Desktop: the table, unchanged */}
+        <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
             <thead>
               <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
@@ -171,6 +206,7 @@ export default function QualityPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <Modal open={open} title={a.quality.add} onClose={() => setOpen(false)} isAr={isAr}>
