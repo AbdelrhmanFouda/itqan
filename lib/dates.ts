@@ -38,8 +38,13 @@ export function normalizeDate(raw: string | number | undefined | null): string {
   if (raw === undefined || raw === null) return "";
   let s = latinDigits(String(raw).trim());
   if (!s) return "";
+  // Invisible bidi marks (LRM/RLM/ALM) sneak into cells on RTL sheets.
+  s = s.replace(/[‎‏؜]/g, "");
   // Strip a trailing time part ("6/30/2026 14:00" / ISO "T…").
   s = s.replace(/[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?Z?$/, "").trim();
+  // Sheets date formats sometimes render stray spaces around separators
+  // ("14/07 /2026" was observed live) — collapse them so the patterns match.
+  s = s.replace(/\s*([/.\-])\s*/g, "$1");
 
   // ISO-ish: 2026-06-30 / 2026/6/30
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
