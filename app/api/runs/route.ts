@@ -22,6 +22,7 @@ function shape(r: SheetRecord) {
     plannedMin: num(r.plannedMin),
     goodUnits: num(r.goodUnits),
     scrapUnits: num(r.scrapUnits),
+    openCavities: num(r.openCavities),
     downtimeMin: num(r.downtimeMin),
     downtimeReason: r.downtimeReason || "None",
     operator: r.operator ?? "",
@@ -58,6 +59,8 @@ export async function POST(req: NextRequest) {
       plannedMin: String(num(b.plannedMin) || 720),
       goodUnits: String(num(b.goodUnits)),
       scrapUnits: String(num(b.scrapUnits)),
+      // Optional — left blank (not 0) when the crew doesn't record it.
+      openCavities: num(b.openCavities) > 0 ? String(num(b.openCavities)) : "",
       downtimeMin: String(num(b.downtimeMin)),
       downtimeReason: b.downtimeReason || "None",
       operator: b.operator ?? "",

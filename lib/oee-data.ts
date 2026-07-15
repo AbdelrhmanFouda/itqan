@@ -117,6 +117,7 @@ export async function buildOEEData(month: string | null) {
       mold: moldKey,
       moldLabel,
       date,
+      openCavities: num(r.openCavities),
       shift: r.shift || "",
       plannedMin,
       goodUnits: num(r.goodUnits),

@@ -33,7 +33,7 @@ export default function QualityPage() {
   const blank = useCallback(
     () => ({
       date, shift: SHIFTS[0], machine: "", mold: "", product: "", plannedMin: "720",
-      goodUnits: "", scrapUnits: "", downtimeMin: "", downtimeReason: "None",
+      goodUnits: "", scrapUnits: "", openCavities: "", downtimeMin: "", downtimeReason: "None",
       operator: "", note: "",
     }),
     [date]
@@ -245,6 +245,9 @@ export default function QualityPage() {
             </Field>
             <Field label={a.quality.scrap}>
               <input className={inputCls} type="number" min="0" value={form.scrapUnits} onChange={(e) => set("scrapUnits", e.target.value)} />
+            </Field>
+            <Field label={p.runs.openCav}>
+              <input className={inputCls} type="number" min="1" value={form.openCavities} onChange={(e) => set("openCavities", e.target.value)} />
             </Field>
             <Field label={a.quality.downtime}>
               <input className={inputCls} type="number" min="0" value={form.downtimeMin} onChange={(e) => set("downtimeMin", e.target.value)} />

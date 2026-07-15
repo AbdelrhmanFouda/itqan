@@ -98,6 +98,10 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "plannedMin", keywords: ["planned", "الزمن المخطط", "المخطط"] },
       { key: "goodUnits", keywords: ["good", "سليم"] },
       { key: "scrapUnits", keywords: ["scrap", "هالك"] },
+      // Cavities actually OPEN during this run (damaged ones get blocked, so the
+      // count varies per run). Lets scrap be derived from the hourly board's
+      // shot counts: scrap = shots × open − good.
+      { key: "openCavities", keywords: ["التجاويف", "open cav"] },
       { key: "downtimeReason", keywords: ["downtime reason", "سبب التوقف", "reason", "سبب"] },
       { key: "downtimeMin", keywords: ["downtime", "زمن التوقف", "توقف"] },
       { key: "operator", keywords: ["operator", "worker", "العامل", "المشغل"] },

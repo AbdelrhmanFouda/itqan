@@ -35,7 +35,7 @@ export default function ProductionPage() {
   const blank = useCallback(
     () => ({
       date: today, shift: SHIFTS[0], machine: "", mold: "", product: "", plannedMin: "720",
-      goodUnits: "", scrapUnits: "", downtimeMin: "", downtimeReason: "None",
+      goodUnits: "", scrapUnits: "", openCavities: "", downtimeMin: "", downtimeReason: "None",
       operator: "", note: "",
     }),
     [today]
@@ -276,6 +276,9 @@ export default function ProductionPage() {
             </Field>
             <Field label={p.runs.scrap}>
               <input className={inputCls} type="number" min="0" value={form.scrapUnits} onChange={(e) => set("scrapUnits", e.target.value)} />
+            </Field>
+            <Field label={p.runs.openCav}>
+              <input className={inputCls} type="number" min="1" value={form.openCavities} onChange={(e) => set("openCavities", e.target.value)} />
             </Field>
             <Field label={p.runs.downtime}>
               <input className={inputCls} type="number" min="0" value={form.downtimeMin} onChange={(e) => set("downtimeMin", e.target.value)} />

@@ -34,6 +34,9 @@ export type RunInput = {
   scrapUnits: number | string;
   downtimeMin: number | string;
   downtimeReason?: string;
+  /** Cavities actually OPEN this run (damaged ones get blocked; varies per run).
+   *  When set, the ideal rate uses it instead of the mold's design cavities. */
+  openCavities?: number | string;
 };
 
 export type MoldStandard = { cycleSec: number; cavities: number };
@@ -90,7 +93,9 @@ export function computeOEE(runs: RunInput[], standards: Map<string, MoldStandard
 
     const std = standards.get(r.mold);
     if (std && std.cycleSec > 0 && std.cavities > 0) {
-      const perUnit = (std.cycleSec / std.cavities) / 60; // ideal minutes per part
+      // Blocked-cavity runs: the ideal rate must use the cavities actually open.
+      const cav = Math.max(0, n(r.openCavities)) || std.cavities;
+      const perUnit = (std.cycleSec / cav) / 60; // ideal minutes per part
       const ideal = total * perUnit;
       // Cap this run's ideal time at its actual runtime: a run can't be more
       // than 100% efficient. Uncapped, a wrong (too-slow) Master cycle lets one
@@ -155,9 +160,10 @@ export function suspectStandards(
     const total = Math.max(0, n(r.goodUnits)) + Math.max(0, n(r.scrapUnits));
     if (total <= 0) continue;
     const cur = agg.get(r.mold) ?? { units: 0, runtime: 0, ideal: 0, std };
+    const cav = Math.max(0, n(r.openCavities)) || std.cavities;
     cur.units += total;
     cur.runtime += runtime;
-    cur.ideal += total * ((std.cycleSec / std.cavities) / 60);
+    cur.ideal += total * ((std.cycleSec / cav) / 60);
     agg.set(r.mold, cur);
   }
   const out: SuspectStandard[] = [];
