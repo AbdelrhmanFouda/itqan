@@ -149,6 +149,37 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "notes", keywords: ["ملاحظ", "note"], long: true },
     ],
   },
+  // «تسجيل الإنتاج» — the hourly log that REPLACED the old block-based board
+  // (2026-07-19 workbook). LONG format: one row per machine per day. Header row 4:
+  // date | shift | machine label | product | 24 hour columns (08:00→07:00) |
+  // الأجمالي سستم (=SUM of hours) | الأجمالي الفعلي (manually counted) |
+  // المتوقع (from الرئيسي cycle+cavities) | الكفاءة %. Hours are PIECES.
+  // scrap ≈ سستم − فعلي when both are present.
+  hourly: {
+    tab: "تسجيل الإنتاج", titleEn: "Hourly Log", titleAr: "تسجيل الإنتاج",
+    fields: [
+      { key: "date", keywords: ["التاريخ", "date"] },
+      { key: "shift", keywords: ["الوردية", "shift"] },
+      { key: "machine", keywords: ["الماكينة", "machine"] },
+      { key: "product", keywords: ["المنتج", "product"] },
+      { key: "h08", keywords: ["08:00"] }, { key: "h09", keywords: ["09:00"] },
+      { key: "h10", keywords: ["10:00"] }, { key: "h11", keywords: ["11:00"] },
+      { key: "h12", keywords: ["12:00"] }, { key: "h13", keywords: ["13:00"] },
+      { key: "h14", keywords: ["14:00"] }, { key: "h15", keywords: ["15:00"] },
+      { key: "h16", keywords: ["16:00"] }, { key: "h17", keywords: ["17:00"] },
+      { key: "h18", keywords: ["18:00"] }, { key: "h19", keywords: ["19:00"] },
+      { key: "h20", keywords: ["20:00"] }, { key: "h21", keywords: ["21:00"] },
+      { key: "h22", keywords: ["22:00"] }, { key: "h23", keywords: ["23:00"] },
+      { key: "h00", keywords: ["00:00"] }, { key: "h01", keywords: ["01:00"] },
+      { key: "h02", keywords: ["02:00"] }, { key: "h03", keywords: ["03:00"] },
+      { key: "h04", keywords: ["04:00"] }, { key: "h05", keywords: ["05:00"] },
+      { key: "h06", keywords: ["06:00"] }, { key: "h07", keywords: ["07:00"] },
+      { key: "systemTotal", keywords: ["سستم", "system"] },
+      { key: "actualTotal", keywords: ["الفعلي", "actual"] },
+      { key: "expected", keywords: ["المتوقع", "expected"] },
+      { key: "efficiency", keywords: ["الكفاءة", "efficiency"] },
+    ],
+  },
   // Manual faults/issues log — one row per reported problem on the floor.
   // The AI agent's log_issue tool appends here. Headers are unknown/loosely
   // structured on the live sheet, so keywords are deliberately broad; appendRecord

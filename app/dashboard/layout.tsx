@@ -11,7 +11,7 @@ import { navFor, canAccess, landingFor, type NavKey } from "@/lib/roles";
 import { Spinner } from "@/components/dashboard/ui";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
-  BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle,
+  BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Clock,
 } from "lucide-react";
 
 const ICON: Record<NavKey, React.ElementType> = {
@@ -24,6 +24,7 @@ const ICON: Record<NavKey, React.ElementType> = {
   products: Layers,
   jobs: FileText,
   production: Layers,
+  hourly: Clock,
   issues: AlertTriangle,
   performance: Gauge,
   assistant: Sparkles,
@@ -69,6 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "products": return isAr ? "المنتجات" : "Products";
       case "jobs": return p.nav.jobs;
       case "production": return p.nav.production;
+      case "hourly": return isAr ? "الإنتاج بالساعة" : "Hourly";
       case "issues": return isAr ? "الأعطال" : "Issues";
       case "performance": return isAr ? "الأداء" : "Performance";
       case "assistant": return isAr ? "المساعد الذكي" : "Assistant";

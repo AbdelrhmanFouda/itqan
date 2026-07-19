@@ -40,13 +40,15 @@ const TOOLS = [
   {
     name: "read_records",
     description:
-      "Read rows from a sheet tab. entity ∈ production|master|machines|molds|products|clients|jobs|issues. " +
+      "Read rows from a sheet tab. entity ∈ production|master|machines|molds|products|clients|jobs|issues|hourly. " +
+      "hourly = «تسجيل الإنتاج»: one row per machine per day, hour columns are PIECES; " +
+      "systemTotal−actualTotal ≈ scrap when the crew filled the hand-counted الفعلي. " +
       "Optional case/space-insensitive `search` filters rows; `limit` (default 30, max 60). " +
       "Each record includes its sheet `row` number (needed for propose_cell_update).",
     input_schema: {
       type: "object",
       properties: {
-        entity: { type: "string", enum: ["production", "master", "machines", "molds", "products", "clients", "jobs", "issues"] },
+        entity: { type: "string", enum: ["production", "master", "machines", "molds", "products", "clients", "jobs", "issues", "hourly"] },
         search: { type: "string" },
         limit: { type: "number" },
       },

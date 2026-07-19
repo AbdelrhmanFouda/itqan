@@ -43,7 +43,7 @@ const normKey = (s: string | undefined) =>
 
 /* --------------------------------- READ ----------------------------------- */
 
-const READABLE = new Set(["production", "master", "machines", "molds", "products", "clients", "jobs", "issues"]);
+const READABLE = new Set(["production", "master", "machines", "molds", "products", "clients", "jobs", "issues", "hourly"]);
 
 /** read_records — sliced + de-noised view of any tab the agent may inspect. */
 export async function readRecords(

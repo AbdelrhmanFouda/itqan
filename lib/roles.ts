@@ -44,7 +44,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
-  | "issues" | "assistant" | "reports" | "clients" | "approvals";
+  | "hourly" | "issues" | "assistant" | "reports" | "clients" | "approvals";
 
 // Production and Quality see EXACTLY the same things — keep them in one shared
 // group so the two can never drift apart.
@@ -62,6 +62,7 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/products", key: "products", roles: [...OPS, "sales"] },
   { href: "/dashboard/jobs", key: "jobs", roles: [...OPS, "sales"] },
   { href: "/dashboard/production", key: "production", roles: [...OPS] },
+  { href: "/dashboard/hourly", key: "hourly", roles: [...OPS] },
   { href: "/dashboard/issues", key: "issues", roles: [...OPS, "maintenance"] },
   { href: "/dashboard/performance", key: "performance", roles: [...OPS] },
   { href: "/dashboard/assistant", key: "assistant", roles: [...OPS] },
