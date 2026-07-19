@@ -8,7 +8,9 @@ type HourlyRow = {
   row: number; date: string; shift: string; machine: string; product: string;
   hours: (number | null)[]; hoursLogged: number;
   systemTotal: number | null; actualTotal: number | null;
-  expected: number | null; efficiency: number | null; scrap: number | null;
+  expected: number | null; scrap: number | null;
+  /** counter÷expected, actual÷expected, and the preferred one (actual first). */
+  effSystem: number | null; effActual: number | null; efficiency: number | null;
 };
 type Payload = {
   date: string; dates: string[]; hourLabels: string[]; rows: HourlyRow[];
@@ -49,6 +51,10 @@ export default function HourlyPage() {
 
   const fmt = (n: number | null) => (n === null ? "—" : n.toLocaleString(isAr ? "ar-EG" : "en-US"));
   const pct = (e: number | null) => (e === null ? "—" : `${Math.round(e * 100)}%`);
+  // The definitive efficiency is الفعلي ÷ المتوقع (owner's rule). Until الفعلي is
+  // counted, the counter-based number is shown as an approximation (≈).
+  const effText = (r: HourlyRow) =>
+    r.effActual !== null ? pct(r.effActual) : r.effSystem !== null ? `≈${pct(r.effSystem)}` : "—";
 
   return (
     <div className="max-w-6xl" dir={isAr ? "rtl" : "ltr"}>
@@ -97,8 +103,11 @@ export default function HourlyPage() {
                 <div key={r.row} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-gray-900 leading-snug">{r.machine}</span>
-                    <span className={`shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap ${effCls(r.efficiency)}`}>
-                      {pct(r.efficiency)}
+                    <span
+                      title={r.effActual !== null ? `${t.actual} ÷ ${t.expected}` : `${t.system} ÷ ${t.expected}`}
+                      className={`shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap ${effCls(r.efficiency)}`}
+                    >
+                      {effText(r)}
                     </span>
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
@@ -173,7 +182,12 @@ export default function HourlyPage() {
                       <td className="px-3 py-2 text-green-700">{fmt(r.actualTotal)}</td>
                       <td className="px-3 py-2 text-red-500">{r.scrap !== null && r.scrap > 0 ? fmt(r.scrap) : "—"}</td>
                       <td className="px-3 py-2">
-                        <span className={`inline-block text-xs px-2 py-0.5 rounded-full border ${effCls(r.efficiency)}`}>{pct(r.efficiency)}</span>
+                        <span
+                          title={r.effActual !== null ? `${t.actual} ÷ ${t.expected}` : `${t.system} ÷ ${t.expected}`}
+                          className={`inline-block text-xs px-2 py-0.5 rounded-full border ${effCls(r.efficiency)}`}
+                        >
+                          {effText(r)}
+                        </span>
                       </td>
                     </tr>
                   );

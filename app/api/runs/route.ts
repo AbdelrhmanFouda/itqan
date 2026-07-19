@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, type SheetRecord } from "@/lib/sheets";
 import { normalizeDate } from "@/lib/dates";
+import { loadHourlyRows, deriveScrap } from "@/lib/hourly";
 
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
 // data model). Each run is one row; the sheet row number is its id.
@@ -34,8 +35,18 @@ export async function GET(req: NextRequest) {
   try {
     const machine = req.nextUrl.searchParams.get("machine");
     const mold = req.nextUrl.searchParams.get("mold");
-    const { records } = await getRecords("production");
-    let runs = records.map(shape);
+    const [{ records }, hourly] = await Promise.all([
+      getRecords("production"),
+      loadHourlyRows().catch(() => []),
+    ]);
+    let runs = records.map(shape).map((r) => ({ ...r, scrapSource: r.scrapUnits > 0 ? "logged" : "none" }));
+    // Fill unlogged scrap from «تسجيل الإنتاج»: scrap = سستم − الفعلي per
+    // machine/day, split across that day's runs in proportion to good units.
+    const derived = deriveScrap(
+      runs.map((r) => ({ date: r.date, machine: r.machineCode || r.machine, goodUnits: r.goodUnits, scrapUnits: r.scrapUnits })),
+      hourly,
+    );
+    runs = runs.map((r, i) => (derived[i] > 0 ? { ...r, scrapUnits: derived[i], scrapSource: "hourly" } : r));
     if (machine) runs = runs.filter((r) => r.machine === machine);
     if (mold) runs = runs.filter((r) => r.mold === mold);
     runs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : Number(b.id) - Number(a.id)));

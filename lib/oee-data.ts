@@ -4,6 +4,7 @@ import {
   type RunInput, type MoldStandard,
 } from "@/lib/oee";
 import { normalizeDate, latinDigits } from "@/lib/dates";
+import { loadHourlyRows, deriveScrap, type HourlyRow } from "@/lib/hourly";
 
 /**
  * The OEE dataset — one function, one truth. Reads the sheet's Production tab,
@@ -35,10 +36,11 @@ const normKey = (s: string | undefined) =>
 export type OEEData = Awaited<ReturnType<typeof buildOEEData>>;
 
 export async function buildOEEData(month: string | null) {
-  const [prod, master, machinesTab] = await Promise.all([
+  const [prod, master, machinesTab, hourlyRows] = await Promise.all([
     getRecords("production"),
     getRecords("master"),
     getRecords("machines"),
+    loadHourlyRows().catch(() => [] as HourlyRow[]),
   ]);
 
   // Per-mold standards from Master, keyed by normalized code AND name.
@@ -126,6 +128,25 @@ export async function buildOEEData(month: string | null) {
       downtimeReason: r.downtimeReason || "None",
     });
   }
+
+  // Scrap from «تسجيل الإنتاج» (سستم − الفعلي per machine/day) fills runs whose
+  // scrap was never logged — Quality is MEASURED wherever the crew counted الفعلي.
+  const derivedScrap = deriveScrap(
+    runs.map((r) => ({
+      date: r.date || "",
+      machine: r.machine,
+      goodUnits: num(r.goodUnits),
+      scrapUnits: num(r.scrapUnits),
+    })),
+    hourlyRows,
+  );
+  let scrapFromHourly = 0;
+  runs = runs.map((r, i) => {
+    if (derivedScrap[i] <= 0) return r;
+    scrapFromHourly++;
+    return { ...r, scrapUnits: derivedScrap[i] };
+  });
+  withScrap += scrapFromHourly;
 
   // Months present in the data (for the period toggle) — from ALL runs, unfiltered.
   const months = Array.from(new Set(runs.map((r) => (r.date || "").slice(0, 7)).filter(Boolean)))
@@ -229,6 +250,7 @@ export async function buildOEEData(month: string | null) {
     stubs,
     withMold,
     withScrap,
+    scrapFromHourly, // runs whose scrap came from «تسجيل الإنتاج» (سستم − الفعلي)
     withDowntime,
     plannedSource,
     machinesTabFound,
