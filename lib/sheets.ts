@@ -31,7 +31,7 @@ export type EntityConfig = { tab: string; titleEn: string; titleAr: string; fiel
 
 export const ENTITIES: Record<string, EntityConfig> = {
   molds: {
-    tab: "Molds", titleEn: "Molds Register", titleAr: "حصر الاسطمبات",
+    tab: "الاسطمبات", titleEn: "Molds Register", titleAr: "حصر الاسطمبات",
     fields: [
       { key: "code", keywords: ["mold code", "code", "كود"] },
       { key: "name", keywords: ["product / mold", "product", "mold name", "name", "المنتج", "اسم الاسطمبة"] },
@@ -45,7 +45,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
     ],
   },
   products: {
-    tab: "Products", titleEn: "Products", titleAr: "المنتجات",
+    tab: "المنتجات", titleEn: "Products", titleAr: "المنتجات",
     fields: [
       { key: "name", keywords: ["product", "المنتج"] },
       { key: "client", keywords: ["client", "العميل"] },
@@ -60,7 +60,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
     ],
   },
   clients: {
-    tab: "Clients", titleEn: "Clients", titleAr: "العملاء",
+    tab: "العملاء", titleEn: "Clients", titleAr: "العملاء",
     fields: [
       { key: "name", keywords: ["client", "العميل"] },
       { key: "products", keywords: ["products", "عدد المنتجات"] },
@@ -79,7 +79,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
   // Field order matters for append alignment: downtimeReason is declared before
   // downtimeMin and carries a distinctive keyword so the two never collide.
   production: {
-    tab: "Production", titleEn: "Production Runs", titleAr: "تشغيلات الإنتاج",
+    tab: "الإنتاج", titleEn: "Production Runs", titleAr: "تشغيلات الإنتاج",
     fields: [
       { key: "date", keywords: ["date", "التاريخ"] },
       { key: "shift", keywords: ["shift", "الوردية"] },
@@ -116,7 +116,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
   // `active` deliberately omits the bare "active" keyword so the trailing
   // "Active on" column stays unclaimed.
   machines: {
-    tab: "machines", titleEn: "Machines", titleAr: "الماكينات",
+    tab: "الماكينات", titleEn: "Machines", titleAr: "الماكينات",
     fields: [
       { key: "code", keywords: ["كود الماكينة", "machine code"] },
       { key: "name", keywords: ["الماكينة", "machine"] },
@@ -129,7 +129,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
   // Client work orders. One row per job; progress is COMPUTED from production
   // rows matched by product name + start date (no run⇄job foreign keys).
   jobs: {
-    tab: "jobs", titleEn: "Jobs", titleAr: "أوامر العمل",
+    tab: "أوامر العمل", titleEn: "Jobs", titleAr: "أوامر العمل",
     fields: [
       // moldCode BEFORE code: "كود" alone would otherwise claim the mold-code
       // column during appends.
@@ -149,10 +149,27 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "notes", keywords: ["ملاحظ", "note"], long: true },
     ],
   },
+  // Manual faults/issues log — one row per reported problem on the floor.
+  // The AI agent's log_issue tool appends here. Headers are unknown/loosely
+  // structured on the live sheet, so keywords are deliberately broad; appendRecord
+  // maps each real header to the first matching field and leaves the rest blank.
+  issues: {
+    tab: "الأعطال", titleEn: "Issues Log", titleAr: "سجل الأعطال",
+    fields: [
+      { key: "date", keywords: ["date", "التاريخ", "التاريح"] },
+      { key: "machine", keywords: ["machine", "الماكينة", "الماكينه"] },
+      { key: "product", keywords: ["المنتج", "product"] },
+      { key: "category", keywords: ["category", "type", "النوع", "التصنيف", "الفئة", "فئة"] },
+      { key: "description", keywords: ["description", "الوصف", "البيان", "المشكلة", "العطل", "وصف"], long: true },
+      { key: "action", keywords: ["action", "الإجراء", "الاجراء", "المعالجة", "الحل", "إجراء"], long: true },
+      { key: "status", keywords: ["status", "الحالة", "الحاله"] },
+      { key: "note", keywords: ["note", "ملاحظ"], long: true },
+    ],
+  },
   // The single source of truth. Read directly when we need the per-mold standards
   // (cycle time + cavities) that OEE's Performance factor depends on.
   master: {
-    tab: "Master", titleEn: "Master", titleAr: "الرئيسي",
+    tab: "الرئيسي", titleEn: "Master", titleAr: "الرئيسي",
     fields: [
       { key: "id", keywords: ["id", "الرقم", "رقم"] },
       { key: "name", keywords: ["product / mold", "المنتج / الاسطمبة", "product", "mold name", "المنتج"] },
@@ -191,14 +208,29 @@ async function resolveTabTitle(want: string): Promise<string> {
   }
 }
 
+// Tabs were renamed to Arabic (2026-07-15). The OLD English names stay as
+// fallbacks so the site keeps working whether the sheet-side rename has run
+// or not (and survives a rollback). Keyed by the CURRENT (Arabic) tab name.
+const TAB_ALIASES: Record<string, string[]> = {
+  "الرئيسي": ["Master"],
+  "الاسطمبات": ["Molds"],
+  "المنتجات": ["Products"],
+  "العملاء": ["Clients"],
+  "الإنتاج": ["Production", "production"],
+  "الماكينات": ["machines", "Machines"],
+  "أوامر العمل": ["jobs", "Jobs"],
+  "لوحة البيانات": ["Dashboard"],
+};
+
 async function fetchSheet(tab: string): Promise<{ title: string; values: string[][] }> {
   // Preferred: Apps Script (works on a private sheet, no API key).
   // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
-  // have drifted between "Production"/"production" etc., so retry casings.
+  // have drifted between "Production"/"production" etc., so retry casings and
+  // the pre-rename English aliases.
   if (SCRIPT_URL && SCRIPT_SECRET) {
     const lower = tab.toLowerCase();
     const cap = lower.charAt(0).toUpperCase() + lower.slice(1);
-    const candidates = Array.from(new Set([tab, lower, cap, tab.toUpperCase()]));
+    const candidates = Array.from(new Set([tab, ...(TAB_ALIASES[tab] ?? []), lower, cap, tab.toUpperCase()]));
     for (const name of candidates) {
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
@@ -342,7 +374,7 @@ export type UpdateResult = { ok: boolean; reason?: string };
 
 type Cell = { row: number; col: number; value: string };
 
-const MASTER_TAB = "Master";
+const MASTER_TAB = "الرئيسي"; // resolved through TAB_ALIASES → falls back to "Master"
 const MASTER_VIEWS = new Set(["molds", "products"]); // entities mirrored from Master
 const ID_KEYWORDS = ["id", "الرقم", "رقم", "no."]; // the key column in Master + its views
 
@@ -463,6 +495,14 @@ export async function appendRecord(entity: string, values: Record<string, string
     return f ? (values[f.key] ?? "") : "";
   });
   return postAction({ tab: title, append: row });
+}
+
+// Ask the bridge to create a tab (with a header row) if it doesn't exist yet.
+// Requires the createTab action in apps-script.gs (deploy a New version to enable);
+// on an older deployment this returns no_tab and callers fall back gracefully.
+export async function ensureTab(tab: string, headers: string[]): Promise<UpdateResult> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  return postAction({ createTab: tab, headers });
 }
 
 export async function deleteRecord(entity: string, row: number): Promise<UpdateResult> {

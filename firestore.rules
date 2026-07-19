@@ -55,5 +55,17 @@ service cloud.firestore {
     match /productionRuns/{doc}   { allow read, write: if true; }
     // Daily AI-review cache (one doc per day per period) — written by /api/ai-review.
     match /aiReviews/{doc}        { allow read, write: if true; }
+
+    // Per-user AI-assistant daily message counter (usage/{uid} = {date, count}).
+    // A user may READ their own counter (to see remaining messages). Writes come
+    // from /api/agent, which verifies the caller's Firebase ID token itself (no
+    // Admin SDK — org policy blocks service-account keys), so the server can only
+    // reach Firestore through the unauthenticated client SDK and needs write open
+    // here. Abusing it only inflates the abuser's OWN limit, so the risk is low;
+    // owner/manager are unlimited regardless. Harden once /api runs on the Admin SDK.
+    match /usage/{uid} {
+      allow read:  if isSignedIn() && request.auth.uid == uid;
+      allow write: if true;
+    }
   }
 }
