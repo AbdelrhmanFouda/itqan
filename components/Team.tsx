@@ -20,7 +20,7 @@ export default function Team() {
   if (!tr.team.members.length) return null;
 
   return (
-    <section id="team" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-950 relative overflow-hidden">
+    <section id="team" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6">
@@ -34,7 +34,7 @@ export default function Team() {
           <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
             {isAr ? "مهندسونا" : "Our Engineers"}
           </p>
-          <h2 className="text-4xl font-bold text-white mb-4">{tr.team.title}</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.team.title}</h2>
           <p className="text-gray-500">{tr.team.subtitle}</p>
         </motion.div>
 

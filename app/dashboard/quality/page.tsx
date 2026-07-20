@@ -111,7 +111,7 @@ export default function QualityPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className={`flex items-center justify-between mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
         <h1 className="text-2xl font-bold text-gray-900">{a.quality.title}</h1>
         <Btn onClick={openLog}><Plus size={15} /> {a.quality.add}</Btn>
       </div>

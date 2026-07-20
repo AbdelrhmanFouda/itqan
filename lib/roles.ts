@@ -7,14 +7,14 @@
 // (mirror this value in firestore.rules).
 export const OWNER_EMAIL = "abdelrhman.2003.16@gmail.com";
 
-export type Role = "owner" | "manager" | "production" | "quality" | "sales" | "finance" | "maintenance";
+export type Role = "owner" | "manager" | "production" | "quality" | "sales" | "finance" | "maintenance" | "storage";
 export type UserStatus = "pending" | "approved" | "rejected";
 
 // Roles a new user can request (owner is the bootstrap account, never requestable).
 // Order matters: the FIRST entry is the default when approving a request that has
 // no stated role — keep a low-privilege role first and "manager" last so a stray
 // approval never hands out full access by accident.
-export const REQUESTABLE_ROLES: Role[] = ["production", "quality", "sales", "finance", "maintenance", "manager"];
+export const REQUESTABLE_ROLES: Role[] = ["production", "quality", "sales", "finance", "maintenance", "storage", "manager"];
 export const ALL_ROLES: Role[] = ["owner", ...REQUESTABLE_ROLES];
 
 // Roles that can see and do everything: the owner plus any manager.
@@ -33,6 +33,7 @@ export function landingFor(role: Role): string {
     case "finance": return "/dashboard/finance";
     case "sales": return "/dashboard/sales";
     case "maintenance": return "/dashboard/machines";
+    case "storage": return "/dashboard/storage";
     case "quality":
     case "production":
     case "manager":
@@ -44,7 +45,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
-  | "hourly" | "issues" | "assistant" | "reports" | "clients" | "approvals";
+  | "hourly" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
 
 // Production and Quality see EXACTLY the same things — keep them in one shared
 // group so the two can never drift apart.
@@ -63,6 +64,9 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/jobs", key: "jobs", roles: [...OPS, "sales"] },
   { href: "/dashboard/production", key: "production", roles: [...OPS] },
   { href: "/dashboard/hourly", key: "hourly", roles: [...OPS] },
+  // Storage keeper edits; production/quality see the stock levels (read-only —
+  // write actions are additionally gated by role in the page + API).
+  { href: "/dashboard/storage", key: "storage", roles: [...OPS, "storage"] },
   { href: "/dashboard/issues", key: "issues", roles: [...OPS, "maintenance"] },
   { href: "/dashboard/performance", key: "performance", roles: [...OPS] },
   { href: "/dashboard/assistant", key: "assistant", roles: [...OPS] },

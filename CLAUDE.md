@@ -81,6 +81,23 @@ Domain semantics (owner-confirmed 2026-07-14):
 - ⚠️ **Editing apps-script.gs is NOT live until Deploy → Manage deployments → New version.**
   Editor "Run" works without redeploy; the web app serves the last deployed snapshot.
 
+## Storage module (المخزن — SEPARATE spreadsheet)
+
+- The storage sheet «مخزن اتقان» (`1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw`) is NOT the
+  DB sheet. Its bound script is `../storage-setup.gs` (repo-adjacent, itqan root): builds the
+  whole sheet (form + إيداع/سحب logs + الرصيد الحالي) AND serves its own web bridge
+  (`doGet` = balance/logs/lists in one call; `doPost` = save/update/delete/refresh, reusing
+  the sheet form's validate_/compute_/nextNumber_/available_ so website saves behave exactly
+  like sheet saves — incl. the insufficient-balance block on withdrawals). Same redeploy
+  gotcha as apps-script.gs.
+- Env: `STORAGE_APPS_SCRIPT_URL` + `STORAGE_APPS_SCRIPT_SECRET` (= `WEB_TOKEN` in the .gs).
+- Website: `lib/storage.ts` → `/api/storage` (GET open; POST verifies the Firebase ID token
+  via `lib/agent-auth.ts` and requires role storage/owner/manager) → `/dashboard/storage`.
+- Roles: `storage` («أمين المخزن») edits; production/quality see the balance read-only
+  (NAV grants the page, `canWrite` in the page + the API gate writes).
+- Conventions: خامة = kg only; منتج = pieces (kg×1000 ÷ piece-grams conversion); blank
+  client/loc stored as «غير متاح / N/A» (the site's `clean()` blanks it for display).
+
 ## Conventions
 
 - i18n: `lib/i18n*.ts` — `en` and `ar` objects MUST keep the same shape. UI strings never

@@ -19,7 +19,7 @@ export default function Services() {
   const isAr = lang === "ar";
 
   return (
-    <section id="services" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-950 relative overflow-hidden">
+    <section id="services" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
       {/* Subtle divider glow */}
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
 
@@ -34,7 +34,7 @@ export default function Services() {
           <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
             {isAr ? "ما نقدمه" : "What We Do"}
           </p>
-          <h2 className="text-4xl font-bold text-white mb-4">{tr.services.title}</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.services.title}</h2>
           <p className="text-gray-500 max-w-xl mx-auto">{tr.services.subtitle}</p>
         </motion.div>
 

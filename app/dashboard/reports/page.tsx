@@ -63,7 +63,7 @@ export default function ReportsPage() {
 
   return (
     <div className="max-w-3xl">
-      <div className={`flex items-center justify-between mb-8 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-8 ${isAr ? "flex-row-reverse" : ""}`}>
         <h1 className="text-2xl font-bold text-gray-900">{tr.dashboard.reports}</h1>
         <button
           onClick={() => setShowForm(!showForm)}

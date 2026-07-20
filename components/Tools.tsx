@@ -21,7 +21,7 @@ export default function Tools() {
   if (!tr.tools.categories.length) return null;
 
   return (
-    <section id="tools" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-950 relative overflow-hidden">
+    <section id="tools" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
 
       {/* Background glow */}
@@ -40,7 +40,7 @@ export default function Tools() {
           <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
             {isAr ? "أصولنا" : "Our Assets"}
           </p>
-          <h2 className="text-4xl font-bold text-white mb-4">{tr.tools.title}</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.tools.title}</h2>
           <p className="text-gray-500">{tr.tools.subtitle}</p>
         </motion.div>
 

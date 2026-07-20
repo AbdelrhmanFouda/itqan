@@ -173,7 +173,7 @@ export default function JobDetailPage() {
 
       {/* Work order — أمر الشغل (matches the paper form; Master fills the standards) */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4 mb-6">
-        <div className={`flex items-center justify-between mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
           <h2 className="font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
           <button
             onClick={() => window.print()}

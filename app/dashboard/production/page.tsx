@@ -123,7 +123,7 @@ export default function ProductionPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className={`flex items-center justify-between mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
         <h1 className="text-2xl font-bold text-gray-900">{p.runs.title}</h1>
         <Btn onClick={() => { setForm(blank()); setSaveError(null); setOpen(true); }}><Plus size={15} /> {p.runs.add}</Btn>
       </div>

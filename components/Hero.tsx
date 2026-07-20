@@ -39,7 +39,7 @@ export default function Hero() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-32 w-full relative z-10">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
+        <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
           {/* Text */}
           <div className={isAr ? "text-right" : ""}>
             <motion.div

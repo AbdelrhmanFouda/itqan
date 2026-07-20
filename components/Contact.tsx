@@ -28,7 +28,7 @@ export default function Contact() {
   }
 
   return (
-    <section id="contact" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-900 relative overflow-hidden">
+    <section id="contact" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-900 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
       {/* Glow */}
       <div className="absolute inset-0 pointer-events-none">
@@ -46,7 +46,7 @@ export default function Contact() {
           <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
             {isAr ? "ابدأ المشروع" : "Start a Project"}
           </p>
-          <h2 className="text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
           <p className="text-gray-500">{tr.contact.subtitle}</p>
         </motion.div>
 

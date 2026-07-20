@@ -115,7 +115,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      <div className={`flex items-center justify-between mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
         <h2 className="font-semibold text-gray-900">Notes</h2>
         <button
           onClick={() => setShowForm(!showForm)}

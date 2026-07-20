@@ -97,7 +97,7 @@ export default function MachinesPage() {
 
   return (
     <div className="max-w-3xl">
-      <div className={`flex items-center justify-between mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
         <h1 className="text-2xl font-bold text-gray-900">{tr.dashboard.machines}</h1>
         {data?.writable && (
           <button

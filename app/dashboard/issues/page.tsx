@@ -126,7 +126,7 @@ export default function IssuesPage() {
 
   return (
     <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
-      <div className={`flex items-center justify-between gap-3 mb-1`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1`}>
         <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
         <Btn onClick={() => { setForm(blank()); setSaveError(null); setOpen(true); }}>
           <Plus size={15} /> {t.add}

@@ -11,12 +11,12 @@ export default function About() {
   const isAr = lang === "ar";
 
   return (
-    <section id="about" dir={isAr ? "rtl" : "ltr"} className="py-28 bg-gray-900 relative overflow-hidden">
+    <section id="about" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-900 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
       <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
+        <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
           {/* CNC Machine Visual */}
           <motion.div
             initial="hidden"
@@ -127,7 +127,7 @@ export default function About() {
             <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
               {isAr ? "من نحن" : "About Us"}
             </p>
-            <h2 className="text-4xl font-bold text-white mb-6">{tr.about.title}</h2>
+            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-6">{tr.about.title}</h2>
             <p className="text-gray-400 leading-relaxed text-lg">{tr.about.body}</p>
           </motion.div>
         </div>
