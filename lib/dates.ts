@@ -108,6 +108,29 @@ export function monthOf(iso: string): string {
   return iso ? iso.slice(0, 7) : "";
 }
 
+/* --------------------------- the factory's day ---------------------------- */
+
+/** Cairo is UTC+2 year-round (Egypt dropped DST again in 2015 → reinstated 2023;
+ *  the workbook's own timestamps are UTC+2, so we match it rather than the host). */
+const CAIRO_OFFSET_MIN = 120;
+/** The floor's day starts at 08:00 — «تسجيل الإنتاج» runs its 24 hour columns
+ *  08:00 → 07:00 on ONE dated row, so 02:00 belongs to the PREVIOUS date. */
+export const FACTORY_DAY_START_HOUR = 8;
+
+/**
+ * The production date a moment belongs to, as the floor counts it: Cairo time
+ * shifted back by the 08:00 start, formatted "YYYY-MM-DD".
+ *
+ * A stoppage logged at 02:00 on 8 Aug is part of the shift that began 08:00 on
+ * 7 Aug, so it must join to the 7 Aug production rows — using the calendar date
+ * would file it against a day the crew never worked.
+ */
+export function factoryDay(at: Date | number = Date.now()): string {
+  const ms = typeof at === "number" ? at : at.getTime();
+  const shifted = ms + CAIRO_OFFSET_MIN * 60000 - FACTORY_DAY_START_HOUR * 3600000;
+  return new Date(shifted).toISOString().slice(0, 10);
+}
+
 /** Display an ISO date in the reader's locale (falls back to the raw string). */
 export function formatDate(iso: string, lang: "ar" | "en"): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);

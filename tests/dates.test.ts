@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDate, monthOf, latinDigits } from "../lib/dates.ts";
+import { normalizeDate, monthOf, latinDigits, factoryDay } from "../lib/dates.ts";
 
 test("unambiguous day-first: first part exceeds 12", () => {
   assert.equal(normalizeDate("13/07/2026"), "2026-07-13");
@@ -67,6 +67,21 @@ test("unreadable values yield empty string, never a wrong date", () => {
   for (const v of ["", "   ", "غير متاح / N/A", "-", "hello", "13/13/2026", "0/5/2026", null, undefined]) {
     assert.equal(normalizeDate(v as string), "");
   }
+});
+
+test("factoryDay follows the 08:00 shift start, not the calendar", () => {
+  // Cairo = UTC+2, so 06:00Z is 08:00 Cairo — the first moment of 7 August.
+  const iso = (s: string) => Date.parse(s);
+  assert.equal(factoryDay(iso("2026-08-07T06:00:00Z")), "2026-08-07"); // 08:00 Cairo
+  assert.equal(factoryDay(iso("2026-08-07T12:00:00Z")), "2026-08-07"); // 14:00 Cairo
+  assert.equal(factoryDay(iso("2026-08-07T21:59:00Z")), "2026-08-07"); // 23:59 Cairo
+  // 02:00 Cairo on the 8th is still the shift that STARTED 08:00 on the 7th.
+  assert.equal(factoryDay(iso("2026-08-08T00:00:00Z")), "2026-08-07"); // 02:00 Cairo
+  assert.equal(factoryDay(iso("2026-08-08T04:59:00Z")), "2026-08-07"); // 06:59 Cairo
+  // 08:00 Cairo on the 8th rolls over.
+  assert.equal(factoryDay(iso("2026-08-08T06:00:00Z")), "2026-08-08");
+  // Just before the roll-over, still the 7th.
+  assert.equal(factoryDay(iso("2026-08-08T05:59:00Z")), "2026-08-07");
 });
 
 test("monthOf groups August correctly", () => {

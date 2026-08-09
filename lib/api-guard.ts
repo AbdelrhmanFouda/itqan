@@ -15,25 +15,31 @@
  * Owner + manager always pass. Pages attach the token via lib/authed-fetch.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { verifyIdToken, roleFor } from "@/lib/agent-auth";
+import { verifyIdToken, roleFor, type VerifiedUser } from "@/lib/agent-auth";
 import { hasFullAccess, type Role } from "@/lib/roles";
 
-export type Guard = { role: Role } | { deny: NextResponse };
+// `user` carries the VERIFIED identity from the ID token — added so a route can
+// record who did something (downtimeEvents.createdBy) without trusting a name
+// posted in the body. Existing callers read only `g.role` and are unaffected.
+export type Guard = { role: Role; user: VerifiedUser } | { deny: NextResponse };
 
 export async function requireRole(req: NextRequest, allowed?: Role[]): Promise<Guard> {
   const h = req.headers.get("authorization") || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : "";
   let role: Role | null = null;
+  let user: VerifiedUser | null = null;
   try {
-    role = await roleFor(await verifyIdToken(token)); // null unless approved
+    user = await verifyIdToken(token);
+    role = await roleFor(user); // null unless approved
   } catch {
     role = null;
+    user = null;
   }
-  if (!role) {
+  if (!role || !user) {
     return { deny: NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 }) };
   }
   if (allowed && !allowed.includes(role) && !hasFullAccess(role)) {
     return { deny: NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 }) };
   }
-  return { role };
+  return { role, user };
 }

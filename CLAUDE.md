@@ -5,8 +5,20 @@
 Next.js 16 (App Router) + Tailwind v4 + Framer Motion. Public marketing site plus a
 role-gated `/dashboard` for an Egyptian plastic-injection factory. **The database is a
 Google Sheet** (the crew edits it; the site reads/writes through an Apps Script bridge).
-Firebase is used ONLY for auth/roles and small caches (users, usage, aiReviews) — not for
-production data. Everything is bilingual AR/EN with RTL support.
+Firebase holds auth/roles, small caches (users, usage, aiReviews) — and, as of phase 2,
+**one collection of genuine factory data: `downtimeEvents`.** Everything is bilingual
+AR/EN with RTL support.
+
+> **That `downtimeEvents` exception is deliberate — do not "fix" it.** The old rule here
+> read "Firebase is auth and roles only, not factory data", and everywhere else it still
+> holds. Downtime is the exception because the owner ruled that the workbook must not gain
+> tabs, columns, formulas or validation, and that `apps-script.gs` must not be edited or
+> redeployed. «الإنتاج»!J «زمن التوقف» and !K «سبب التوقف» are two of the six columns that
+> have never been filled once in 417 rows, so there was no existing place in the sheet to
+> write downtime and no permission to make one. Firestore was the only remaining store.
+> A CSV export (`/api/downtime/export`) ships with it precisely so this is reversible: if
+> the owner later wants downtime in the workbook, he exports and pastes it himself.
+> See "Downtime capture" below.
 
 > Business context, live data state, open items and the sheet's history live in
 > **`../ITQAN-CONTEXT.md`**. Read that for *what is true right now*; read this file for
@@ -74,6 +86,29 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   pieces via the piece weight, and sums production for progress.
 - Auth: Firebase (email/Google) → role request → owner approves at `/dashboard/approvals`.
   Roles/nav in `lib/roles.ts`; owner email hardcoded there and in `firestore.rules`.
+- **Downtime capture (phase 2)** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
+  + `lib/downtime-data.ts` (Firestore fetch), the same split as `oee.ts`/`oee-data.ts`.
+  `/dashboard/downtime` is a phone-first Arabic page: pick machine → pick reason → start →
+  stop, **four taps, no typing**. That constraint is evidence-driven — the six sheet columns
+  that need typing are empty across 417 rows, while the tapped hourly log has 20 unbroken
+  days. `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
+  including the reads, because the rows carry `createdBy`.
+  - The server stamps `startedAt` and computes minutes from the STORED start on stop, so a
+    phone with a wrong clock cannot invent downtime that would flow into Availability.
+  - `date` is the **factory day** (`factoryDay()` in `lib/dates.ts`, 08:00→07:00), not the
+    calendar day — a 02:00 stoppage belongs to the shift that began the previous morning,
+    matching how «تسجيل الإنتاج» dates its rows.
+  - One open event per machine; a double-tapped start returns the running event instead of
+    opening a duplicate that would double-count.
+  - `distributeDowntime()` spreads a day+machine total across that day's runs in proportion
+    to each run's remaining headroom. It must not land on one run: `computeOEE()` clamps a
+    run's downtime to its planned minutes, so a whole day dumped on one 720-min run would
+    be silently truncated. Anything that genuinely does not fit is returned as
+    `readiness.downtimeUnallocatedMin` rather than dropped.
+  - This is what finally makes **Availability real** — it was a flat 100% before, because
+    every run's `downtimeMin` was 0. `explain.availabilityMeasured` is no longer permanently
+    false, and `explain.availabilitySource` says whether the number came from the capture,
+    the sheet column, or both.
 
 ## The sheet model — read this before touching data code
 
@@ -85,6 +120,7 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
 | `الإنتاج` (production) | One row per machine/day: A date, B shift, C machine LABEL, D mold, E product (must match Master name EXACTLY — joins are by name), H good, I scrap, J downtime, K reason |
 | `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4; 24 hour columns 08:00→07:00 holding PIECES; AB سستم (=SUM), AC فعلي (hand count), AE متوقع, الكفاءة %, AF الهالك, AG حالة السجل, AH hidden scrap denominator |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
+| *(no tab)* `downtimeEvents` | **Firestore, not the sheet.** Phase-2 downtime capture — see the exception note at the top. Joins to «الإنتاج» on `date` + the «الماكينات»!J machine label |
 | `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name. **K (status) and L (priority) are validated ARABIC lists** — K is exactly `لم يبدأ · جاري التشغيل · متوقف · مكتمل`. The app keeps English tokens internally and maps at the boundary via `jobStatusToSheet`/`FromSheet` in `lib/prod-meta.ts`. `Quoted`/`Delivered` have no Arabic counterpart, so they are no longer written — adding them is a sheet change the owner must approve |
 | `الأعطال` | Issues log (date, machine, **product**, category, description, action, status, notes). Dropdowns from machines!J / Master!C — layout applied by `setupIssuesTab()` in apps-script.gs (re-run to repair) |
 | `العملاء` (Clients), `لوحة البيانات` (Dashboard) | Manual contacts / counters |
@@ -191,6 +227,15 @@ Domain semantics:
 
 ## Gotchas
 
+- ⚠️ **`firestore.rules` is NOT deployed by pushing to git.** Vercel deploys the app;
+  Firebase rules are deployed separately (`firebase deploy --only firestore:rules`, or
+  pasted in the Firebase console). Every collection needs a `match` block — there is no
+  catch-all — and API routes reach Firestore through the **unauthenticated** client SDK,
+  so a missing block denies the SERVER too, not just browsers. Verified the hard way on
+  2026-08-09: `downtimeEvents` writes returned `PERMISSION_DENIED` until the rule shipped.
+  Symptom to recognise: downtime capture appears to work, the page shows no error, and
+  Availability quietly stays at 100% — because `loadDowntimeTotals()` catches the failure
+  and degrades to the pre-phase-2 state on purpose.
 - Vercel build runs the typecheck — a bad type fails the deploy.
 - Turbopack can serve a stale compile error after export refactors — request the route URL
   to force recompile; corrupted `.next` → delete `.next` + `tsconfig.tsbuildinfo`.

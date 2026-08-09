@@ -45,7 +45,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
-  | "hourly" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
+  | "hourly" | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
 
 // Production and Quality see EXACTLY the same things — keep them in one shared
 // group so the two can never drift apart.
@@ -64,6 +64,9 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/jobs", key: "jobs", roles: [...OPS, "sales"] },
   { href: "/dashboard/production", key: "production", roles: [...OPS] },
   { href: "/dashboard/hourly", key: "hourly", roles: [...OPS] },
+  // Downtime capture is a shop-floor surface — same audience as the faults log,
+  // which is its closest analogue (machine-centric, logged at the machine).
+  { href: "/dashboard/downtime", key: "downtime", roles: [...OPS, "maintenance"] },
   // Storage keeper edits; production/quality see the stock levels (read-only —
   // write actions are additionally gated by role in the page + API).
   { href: "/dashboard/storage", key: "storage", roles: [...OPS, "storage"] },

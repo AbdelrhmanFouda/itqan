@@ -278,6 +278,7 @@ const PCOL = {
   molds: "molds",
   jobs: "jobs",
   runs: "productionRuns",
+  downtime: "downtimeEvents",
 } as const;
 
 /* ------------------------------- Molds ------------------------------ */
@@ -481,6 +482,103 @@ export async function addRun(input: Omit<Run, "id" | "createdAt">) {
 
 export async function deleteRun(id: string) {
   await deleteDoc(doc(db, PCOL.runs, id));
+  return { ok: true };
+}
+
+/* -------------------------- Downtime events ------------------------- */
+
+/**
+ * PHASE 2 — downtime capture. This is FACTORY data in Firestore, which the rest
+ * of the system deliberately keeps in the Google Sheet. It lives here because
+ * the owner ruled the sheet must not gain tabs, columns, formulas or validation,
+ * and the bridge must not be redeployed — so there is nowhere in the workbook to
+ * put it. See repo CLAUDE.md ("the one exception").
+ *
+ * `machine` is the «الماكينات»!J label ("PQ 7 — 100"), the same string the
+ * production and hourly tabs use, because that is the only unique machine id —
+ * PQ 5 and PQ 7 are both 100 t, so tonnage alone would merge two machines.
+ *
+ * `date` is the FACTORY day (factoryDay(), 08:00→07:00), not the calendar day,
+ * so a 02:00 stoppage joins to the shift that started the previous morning —
+ * matching how «تسجيل الإنتاج» dates its rows.
+ *
+ * An OPEN event (operator tapped start, not yet stop) has `endedAt: null` and
+ * `minutes: 0`; stopping sets both. Storing the start server-side rather than
+ * holding it in the phone means a closed browser, a dead battery or a stop from
+ * a different device cannot lose the event.
+ */
+export type DowntimeEvent = {
+  id: string;
+  date: string;        // YYYY-MM-DD, factory day (08:00→07:00)
+  machine: string;     // «الماكينات»!J label, e.g. "PQ 7 — 100"
+  reason: string;      // one of DOWNTIME_REASONS (Arabic, see lib/prod-meta.ts)
+  minutes: number;     // 0 while running; set on stop
+  startedAt: number;   // epoch ms
+  endedAt: number | null; // epoch ms, null while running
+  createdBy: string;   // verified caller's email (or uid when no email claim)
+  createdAt?: number;
+};
+type DowntimeDoc = Omit<DowntimeEvent, "id">;
+
+function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
+  return {
+    id,
+    date: d.date ?? "",
+    machine: d.machine ?? "",
+    reason: d.reason ?? "",
+    minutes: d.minutes ?? 0,
+    startedAt: d.startedAt ?? 0,
+    endedAt: d.endedAt ?? null,
+    createdBy: d.createdBy ?? "",
+    createdAt: d.createdAt,
+  };
+}
+
+export async function getDowntimeEvents(): Promise<DowntimeEvent[]> {
+  const snap = await getDocs(collection(db, PCOL.downtime));
+  return rows<DowntimeDoc>(snap)
+    .map((r) => shapeDowntime(r.id, r))
+    .sort((a, b) =>
+      a.date < b.date ? 1 : a.date > b.date ? -1 : (b.startedAt ?? 0) - (a.startedAt ?? 0)
+    );
+}
+
+/** The still-running events (endedAt === null) — what the phone shows as "stop". */
+export async function getOpenDowntimeEvents(): Promise<DowntimeEvent[]> {
+  const snap = await getDocs(
+    query(collection(db, PCOL.downtime), where("endedAt", "==", null))
+  );
+  return rows<DowntimeDoc>(snap)
+    .map((r) => shapeDowntime(r.id, r))
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+}
+
+export async function addDowntimeEvent(input: Omit<DowntimeEvent, "id" | "createdAt">) {
+  const ref = await addDoc(collection(db, PCOL.downtime), {
+    ...input,
+    createdAt: Date.now(),
+  });
+  return { id: ref.id, ...input };
+}
+
+/**
+ * Close an open event. Minutes are computed from the STORED start, never from a
+ * duration the client sends, so a wrong phone clock cannot invent downtime.
+ * Already-stopped events are left untouched (a double-tapped stop is a no-op).
+ */
+export async function stopDowntimeEvent(id: string, endedAt = Date.now()) {
+  const ref = doc(db, PCOL.downtime, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false as const, reason: "not_found" };
+  const d = snap.data() as DowntimeDoc;
+  if (d.endedAt != null) return { ok: true as const, minutes: d.minutes ?? 0, already: true };
+  const minutes = Math.max(0, Math.round((endedAt - (d.startedAt ?? endedAt)) / 60000));
+  await updateDoc(ref, { endedAt, minutes });
+  return { ok: true as const, minutes, already: false };
+}
+
+export async function deleteDowntimeEvent(id: string) {
+  await deleteDoc(doc(db, PCOL.downtime, id));
   return { ok: true };
 }
 

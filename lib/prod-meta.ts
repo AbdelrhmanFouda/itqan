@@ -55,6 +55,29 @@ export const jobPriorityFromSheet = (v: string): string => JOB_PRIORITY_EN[v.tri
 export const jobStatusToSheet = (v: string): string => JOB_STATUS_AR[v] ?? v;
 export const jobPriorityToSheet = (v: string): string => JOB_PRIORITY_AR[v] ?? v;
 export const DOWNTIME_REASONS = ["None", "Mold change", "Breakdown", "Material", "No order", "Quality hold", "Other"];
+
+/**
+ * The five buttons on the phone capture page (/dashboard/downtime).
+ *
+ * The stored `reason` is the canonical ENGLISH key so downtime captured on the
+ * phone lands in the SAME Pareto bucket as downtime typed into the sheet's
+ * «سبب التوقف» column — four of these five already exist in DOWNTIME_REASONS
+ * above; only "Maintenance" is new. The operator only ever sees `ar`.
+ *
+ * Order is deliberate: the two most frequent stoppages first, «أخرى» last, so
+ * the common case is the nearest tap.
+ */
+export const DOWNTIME_CAPTURE_REASONS: { key: string; ar: string; en: string }[] = [
+  { key: "Breakdown", ar: "مش شغالة", en: "Not running" },
+  { key: "Mold change", ar: "تغيير اسطمبة", en: "Mold change" },
+  { key: "Maintenance", ar: "صيانة", en: "Maintenance" },
+  { key: "Material", ar: "خامة خلصت", en: "Out of material" },
+  { key: "Other", ar: "أخرى", en: "Other" },
+];
+
+/** Canonical downtime key → the crew's Arabic wording (falls back to the key). */
+export const downtimeReasonAr = (key: string): string =>
+  DOWNTIME_CAPTURE_REASONS.find((r) => r.key === key)?.ar ?? key;
 // Shift definitions. Canonical English value stored in the sheet; UI label is
 // localised via lib/i18n.prod.ts `runs.shifts` (index-aligned with this array).
 export const SHIFTS = ["Day", "Night"];
