@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appendRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
+import { jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 
 // Jobs live in the sheet's `jobs` tab (they used to be in Firestore).
 // GET returns jobs with auto-computed production progress.
@@ -33,8 +34,9 @@ export async function POST(req: NextRequest) {
       qty: s("qtyOrdered") || s("qty"),
       startDate: s("startDate") || new Date().toISOString().slice(0, 10),
       dueDate: s("dueDate"),
-      status: s("status") || "In Production",
-      priority: s("priority") || "Normal",
+      // «أوامر العمل»!K and !L are validated Arabic lists — translate on the way in.
+      status: jobStatusToSheet(s("status") || "Not Started"),
+      priority: jobPriorityToSheet(s("priority") || "Normal"),
       machine: s("machine"),
       materialIssued: s("materialIssued"),
       masterbatch: s("masterbatch"),

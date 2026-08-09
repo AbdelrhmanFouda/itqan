@@ -3,6 +3,7 @@ import { getRecords, updateRecord, deleteRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { latinDigits } from "@/lib/dates";
 import { requireRole } from "@/lib/api-guard";
+import { jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
@@ -63,7 +64,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const changes: Record<string, string> = {};
     for (const [k, v] of Object.entries(body)) {
       const key = k === "qtyOrdered" ? "qty" : k;
-      if (EDITABLE.has(key)) changes[key] = String(v ?? "");
+      if (!EDITABLE.has(key)) continue;
+      const val = String(v ?? "");
+      // «أوامر العمل»!K and !L are validated Arabic lists — translate on the way in.
+      changes[key] =
+        key === "status" ? jobStatusToSheet(val) : key === "priority" ? jobPriorityToSheet(val) : val;
     }
     const res = await updateRecord("jobs", Number(id), changes);
     return NextResponse.json(res, { status: res.ok ? 200 : 400 });

@@ -296,9 +296,24 @@ function clean(v: string | undefined): string {
   return NA.has(s.toLowerCase()) ? "" : s;
 }
 
+/**
+ * Lowercase a header for keyword matching, zero-padding a bare hour label.
+ *
+ * «تسجيل الإنتاج» labels its 24 hour columns 8:00, 9:00, 10:00 … 07:00 — only
+ * the first two lack the leading zero (00:00–07:00 ARE padded). ENTITIES.hourly
+ * matches the literal "08:00"/"09:00", so exactly those two columns were dropped
+ * and the hourly viewer showed 22 of 24 hours. Padding here fixes both.
+ *
+ * The lookahead-free form only rewrites a single digit that has no digit before
+ * it, so "11:00" and "21:00" are left alone.
+ */
+function normHeader(h: string | undefined): string {
+  return (h || "").toLowerCase().replace(/(^|[^\d])(\d):(\d{2})/g, "$10$2:$3");
+}
+
 function colIndex(headers: string[], keywords: string[]): number {
   for (let i = 0; i < headers.length; i++) {
-    const h = (headers[i] || "").toLowerCase();
+    const h = normHeader(headers[i]);
     if (keywords.some((k) => h.includes(k))) return i;
   }
   return -1;
@@ -308,7 +323,7 @@ function findHeaderRow(values: string[][], fields: FieldDef[]): number {
   let best = values.length > 1 ? 1 : 0;
   let bestScore = -1;
   for (let i = 0; i < Math.min(values.length, 8); i++) {
-    const row = values[i].map((c) => (c || "").toLowerCase());
+    const row = values[i].map(normHeader);
     let score = 0;
     for (const f of fields) if (row.some((h) => f.keywords.some((k) => h.includes(k)))) score++;
     if (score > bestScore) { bestScore = score; best = i; }
@@ -451,6 +466,42 @@ async function mapToMaster(
   }
   if (masterRow < 0) return { reason: "id_not_in_master" };
 
+  // ── Identity check: the ID alone is NOT trustworthy ──────────────────────
+  // «الاسطمبات» and «المنتجات» compute their ID as ROW()-2 of the VIEW's own
+  // row, so each #REF! break shifts every row beneath it and the ID silently
+  // stops agreeing with Master. Verified live 2026-08-09: both views break at
+  // rows 435, 459, 473, 478 and 488, and 45 products carry an ID that belongs
+  // to a DIFFERENT Master row (view row 440 shows «الجردل» with id 438, which is
+  // «قاعدة» in Master). Writing by that ID edits the wrong product.
+  //
+  // The product NAME is the real identity — it is what every operational tab
+  // joins on. So: verify the name; if it disagrees, re-resolve by name; and if
+  // the name is missing or matches more than one Master row, refuse the write
+  // rather than corrupt a row. Both sides are normalized the SAME way, because
+  // some names carry a trailing tab («زراير») or space («قاعدة ») from the
+  // dropdown and one-sided trimming would break an otherwise good match.
+  const nameField = cfg.fields.find((f) => f.key === "name");
+  if (nameField) {
+    const vNameCol = colIndex(viewHeaders, nameField.keywords);
+    const mNameCol = colIndex(mHeaders, nameField.keywords);
+    if (vNameCol >= 0 && mNameCol >= 0) {
+      const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const viewName = norm(viewRow[vNameCol]);
+      if (!viewName) return { reason: "no_name_to_verify" };
+
+      if (norm(master.values[masterRow - 1]?.[mNameCol]) !== viewName) {
+        const hits: number[] = [];
+        for (let i = mh + 1; i < master.values.length; i++) {
+          if (norm(master.values[i][mNameCol]) === viewName) hits.push(i + 1);
+        }
+        // Exactly one Master row owns this name → that is the row to edit.
+        // Zero or several → we cannot know which product the user meant.
+        if (hits.length !== 1) return { reason: "identity_mismatch" };
+        masterRow = hits[0];
+      }
+    }
+  }
+
   const updates: Cell[] = [];
   for (const [field, value] of Object.entries(changes)) {
     const f = cfg.fields.find((x) => x.key === field);
@@ -521,7 +572,7 @@ export async function appendRecord(entity: string, values: Record<string, string
   // For each real column, find the first field whose keywords match that header
   // and drop in its value; unknown columns are left blank.
   const row = headers.map((hd) => {
-    const h = (hd || "").toLowerCase();
+    const h = normHeader(hd);
     const f = cfg.fields.find((x) => x.keywords.some((k) => h.includes(k)));
     return f ? (values[f.key] ?? "") : "";
   });

@@ -87,7 +87,7 @@ export const pd = {
       status: "Status",
       priority: "Priority",
       notes: "Notes",
-      statuses: ["Quoted", "In Production", "Completed", "Delivered", "On Hold"],
+      statuses: ["Not Started", "In Production", "On Hold", "Completed"],
       priorities: ["Low", "Normal", "High"],
       empty: "No jobs yet.",
       overdue: "Overdue",
@@ -250,7 +250,9 @@ export const pd = {
       status: "الحالة",
       priority: "الأولوية",
       notes: "ملاحظات",
-      statuses: ["عرض سعر", "قيد الإنتاج", "مكتمل", "تم التسليم", "معلّق"],
+      // Deliberately the sheet's own four words, so the crew reads the same
+      // vocabulary on the site as in «أوامر العمل»!K.
+      statuses: ["لم يبدأ", "جاري التشغيل", "متوقف", "مكتمل"],
       priorities: ["منخفضة", "عادية", "عالية"],
       empty: "لا توجد أوامر بعد.",
       overdue: "متأخر",

@@ -33,7 +33,7 @@ type MachineAgg = { name: string };
 
 const empty = {
   code: "", client: "", product: "", moldCode: "", qtyOrdered: "", startDate: "",
-  dueDate: "", status: "In Production", priority: "Normal", machine: "",
+  dueDate: "", status: "Not Started", priority: "Normal", machine: "",
   materialIssued: "", masterbatch: "", instructions: "", notes: "",
 };
 

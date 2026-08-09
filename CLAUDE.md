@@ -18,23 +18,22 @@ production data. Everything is bilingual AR/EN with RTL support.
 npm run dev          # localhost:3000 (Turbopack)
 npm run build        # production build — ALSO the type gate; Vercel runs this on push
 npx tsc --noEmit     # quick typecheck
+npm test             # Node's own runner, zero deps. `tests/` is excluded from
+                     # tsconfig on purpose — it needs the .ts import extension
 npm run seed         # (legacy Firestore seed — rarely needed now)
 ```
 
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
-## ⚠️ Uncommitted work in the tree (as of 2026-08-09)
+## Recently landed (2026-08-09)
 
-`HEAD == origin/main == b42c388`, but **36 files are modified/new and not pushed**:
+The API auth hardening (`lib/api-guard.ts`, `lib/authed-fetch.ts`, `app/robots.ts`) and the
+jobs kg→pieces fix were pushed in `545b10c` — they had been sitting uncommitted, so the
+live site was accepting unauthenticated writes until then. `/robots.txt` is live.
 
-- the **API auth hardening** (`lib/api-guard.ts`, `lib/authed-fetch.ts`, `app/robots.ts`
-  and ~31 route/page files) — so the LIVE site still accepts unauthenticated writes;
-- the **jobs kg→pieces fix** (`lib/jobs.ts`, both jobs pages, `lib/i18n.prod.ts`) — so the
-  live jobs page compares pieces produced against kilograms ordered.
-
-Before starting new work, check `git status`. Pushing this is the highest-value action
-available. The owner runs git himself in PowerShell.
+Then `f4d59ca` fixed four data-correctness bugs; each is described in place below.
+All were verified against the live workbook through the bridge, not inferred.
 
 ## Architecture (data flow)
 
@@ -56,7 +55,15 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   `TAB_ALIASES` maps the Arabic tab names to their old English names as fallbacks — keep
   that map when adding an entity.
 - Molds/Products tabs are **formula views of Master** — never write to them; writes route
-  to the Master row by ID (`MASTER_VIEWS` logic). Clients is a manual tab (write in place).
+  to the Master row (`MASTER_VIEWS` logic). Clients is a manual tab (write in place).
+  ⚠️ **The view's ID column cannot be trusted.** It is `ROW()-2` of the view's OWN row, and
+  both views carry `#REF!` at rows 435, 459, 473, 478, 488; each break shifts everything
+  below it, so **45 products show an ID belonging to a different Master row** (view row 440
+  is «الجردل» with id 438, which is «قاعدة» in Master). `mapToMaster()` therefore verifies
+  the PRODUCT NAME after locating by ID, re-resolves by name on disagreement, and returns
+  `identity_mismatch` rather than writing when the name is missing or duplicated (one
+  product, «سماعة اريون», is genuinely duplicated in Master at rows 289 and 453).
+  Clearing the `#REF!` rows is still the owner's job in the sheet.
 - `lib/oee.ts` (pure) + `lib/oee-data.ts` (fetch+shape, shared by `/api/oee` and
   `/api/ai-review`) — OEE = Availability × Performance × Quality with per-run capping.
 - `lib/hourly.ts` — `loadHourlyRows()` parses «تسجيل الإنتاج»; `deriveScrap()` computes
@@ -78,7 +85,7 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
 | `الإنتاج` (production) | One row per machine/day: A date, B shift, C machine LABEL, D mold, E product (must match Master name EXACTLY — joins are by name), H good, I scrap, J downtime, K reason |
 | `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4; 24 hour columns 08:00→07:00 holding PIECES; AB سستم (=SUM), AC فعلي (hand count), AE متوقع, الكفاءة %, AF الهالك, AG حالة السجل, AH hidden scrap denominator |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
-| `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name |
+| `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name. **K (status) and L (priority) are validated ARABIC lists** — K is exactly `لم يبدأ · جاري التشغيل · متوقف · مكتمل`. The app keeps English tokens internally and maps at the boundary via `jobStatusToSheet`/`FromSheet` in `lib/prod-meta.ts`. `Quoted`/`Delivered` have no Arabic counterpart, so they are no longer written — adding them is a sheet change the owner must approve |
 | `الأعطال` | Issues log (date, machine, **product**, category, description, action, status, notes). Dropdowns from machines!J / Master!C — layout applied by `setupIssuesTab()` in apps-script.gs (re-run to repair) |
 | `العملاء` (Clients), `لوحة البيانات` (Dashboard) | Manual contacts / counters |
 
@@ -97,13 +104,20 @@ Domain semantics:
 - **«غير متاح / N/A»** is the deliberate filler for unknown cells — never "clean" it;
   all parsing treats it as blank.
 - **Dates** arrive in any shape ("14/07 /2026", Arabic digits, serials) — always go through
-  `normalizeDate()` in `lib/dates.ts`; never parse dates ad hoc. Known suspicion: ambiguous
-  `d/m` vs `m/d` ties resolve month-first, which can flip days 1–12 into the wrong month —
-  `/api/runs` reports a latest date of 2026-12-07 with no December data. Worth verifying.
-- **Known bug, not yet fixed:** «تسجيل الإنتاج» labels its first two hour columns `8:00` and
-  `9:00` without a leading zero; `ENTITIES.hourly` matches the literal `08:00`/`09:00`, so
-  both columns are dropped. Fix = zero-pad bare `H:MM` headers before matching in
-  `lib/sheets.ts`. Totals are unaffected (read from the sheet's own column).
+  `normalizeDate()` in `lib/dates.ts`; never parse dates ad hoc. **The workbook holds TWO
+  conventions in the same column** (verified 2026-08-09): hand-typed text is zero-padded
+  day-first (`01/08 /2026` = 1 Aug), while cells Sheets parsed as real dates render unpadded
+  month-first (`8/5/2026` = 5 Aug). `normalizeDate()` uses whichever part exceeds 12 first,
+  then falls back to that padding tell. Before the fix, ambiguous ties were forced
+  month-first: 11 of 35 production dates and 7 of 20 hourly dates were wrong, all of August
+  disappeared, August scrap computed as zero and **Quality read a fake 100%**. Covered by
+  `tests/dates.test.ts` (`npm test`) using real sheet values. If a third format ever appears,
+  add it there first.
+- **Fixed:** «تسجيل الإنتاج» labels its first two hour columns `8:00`/`9:00` without a
+  leading zero (`00:00`–`07:00` ARE padded), so matching the literal `08:00`/`09:00` dropped
+  exactly those two columns — 22 of 24 hours displayed. `normHeader()` in `lib/sheets.ts`
+  now zero-pads a bare `H:MM` before keyword matching. Totals were always unaffected (they
+  come from the sheet's own AB column).
 - Reports from the floor identify machines unreliably by code — resolve by PRODUCT NAME
   through the registry when validating.
 

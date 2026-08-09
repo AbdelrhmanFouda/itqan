@@ -1,5 +1,6 @@
 import { getRecords } from "@/lib/sheets";
 import { normalizeDate, latinDigits } from "@/lib/dates";
+import { jobStatusFromSheet, jobPriorityFromSheet } from "@/lib/prod-meta";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
@@ -161,8 +162,9 @@ export async function loadJobs(): Promise<{
       remaining: 0,
       startDate: normalizeDate(r.startDate),
       dueDate: normalizeDate(r.dueDate),
-      status: r.status || "In Production",
-      priority: r.priority || "Normal",
+      // The sheet stores these in Arabic; the app speaks English internally.
+      status: r.status ? jobStatusFromSheet(r.status) : "Not Started",
+      priority: r.priority ? jobPriorityFromSheet(r.priority) : "Normal",
       machine: latinDigits((r.machine || "").trim()),
       materialIssued: r.materialIssued || "",
       masterbatch: r.masterbatch || "",

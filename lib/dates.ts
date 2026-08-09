@@ -30,9 +30,30 @@ function ymd(y: number, m: number, d: number): string {
 /**
  * Normalize a sheet cell to ISO "YYYY-MM-DD", or "" when it can't be read.
  *
- * Accepted: ISO (y-m-d, y/m/d), slash/dot/dash dates (m/d/y or d/m/y —
- * disambiguated by whichever part exceeds 12; ties assume MONTH-FIRST, the
- * observed Sheets locale), and Excel/Sheets serial numbers.
+ * Accepted: ISO (y-m-d, y/m/d), slash/dot/dash dates (m/d/y or d/m/y), and
+ * Excel/Sheets serial numbers.
+ *
+ * ── Disambiguating d/m from m/d ──────────────────────────────────────────
+ * Whichever part exceeds 12 settles it. When BOTH are ≤ 12 the workbook holds
+ * two genuinely different conventions in the same column, and zero-padding is
+ * what tells them apart. Verified against «الإنتاج» and «تسجيل الإنتاج» on
+ * 2026-08-09:
+ *
+ *   "01/08 /2026" … "04/08 /2026"   hand-typed TEXT, zero-padded  → DAY-first
+ *   "8/5/2026" … "8/8/2026"         real dates RENDERED by Sheets → MONTH-first
+ *
+ * Those two groups are consecutive days (1–4 Aug, then 5–8 Aug), so the reading
+ * is not a guess: the padded group continues into 30/06, 13/07, 19/07 … where
+ * the first part exceeds 12, and the unpadded group continues the calendar from
+ * where the padded one stops. The crew types dd/mm and Sheets renders m/d/yyyy
+ * unpadded in this spreadsheet's locale — a cell Sheets could not parse (note
+ * the stray space) stays as the typist's day-first text.
+ *
+ * So: a zero-padded leading part means the crew typed it → day-first. An
+ * unpadded ambiguous pair came from Sheets' own renderer → month-first.
+ *
+ * Reading the underlying serial instead would remove the guesswork entirely,
+ * but the bridge returns displayValues only and redeploying it is out of scope.
  */
 export function normalizeDate(raw: string | number | undefined | null): string {
   if (raw === undefined || raw === null) return "";
@@ -56,7 +77,8 @@ export function normalizeDate(raw: string | number | undefined | null): string {
     const a = +m[1], b = +m[2], y = +m[3];
     if (a > 12 && b <= 12) return ymd(y, b, a); // day-first
     if (b > 12 && a <= 12) return ymd(y, a, b); // month-first
-    return ymd(y, a, b); // ambiguous → month-first (matches the sheet's US locale)
+    // Ambiguous — fall back to the padding tell documented above.
+    return m[1].length === 2 ? ymd(y, b, a) : ymd(y, a, b);
   }
 
   // a/b/yy → 20yy
@@ -64,7 +86,8 @@ export function normalizeDate(raw: string | number | undefined | null): string {
   if (m) {
     const a = +m[1], b = +m[2], y = 2000 + +m[3];
     if (a > 12 && b <= 12) return ymd(y, b, a);
-    return ymd(y, a, b);
+    if (b > 12 && a <= 12) return ymd(y, a, b);
+    return m[1].length === 2 ? ymd(y, b, a) : ymd(y, a, b);
   }
 
   // Excel/Sheets serial (days since 1899-12-30). 30000≈1982, 60000≈2064.

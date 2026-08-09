@@ -30,5 +30,8 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // `tests/` is excluded on purpose: it runs on Node's own test runner, which
+  // needs the explicit ".ts" import extension that this tsconfig rejects. The
+  // Vercel build typechecks the app, not the tests — run them with `npm test`.
+  "exclude": ["node_modules", "tests"]
 }
