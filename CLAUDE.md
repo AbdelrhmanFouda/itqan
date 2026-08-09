@@ -86,6 +86,43 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   pieces via the piece weight, and sums production for progress.
 - Auth: Firebase (email/Google) → role request → owner approves at `/dashboard/approvals`.
   Roles/nav in `lib/roles.ts`; owner email hardcoded there and in `firestore.rules`.
+
+### Roles and what each one sees
+
+`owner` + `manager` have full access to everything and are not listed. Everyone else
+sees exactly this — the `NAV` table in `lib/roles.ts` is the single source for both the
+sidebar and `canAccess()`.
+
+| Role | Pages |
+|---|---|
+| `worker` (عامل) | hourly, downtime, issues, assistant |
+| `production` | overview, production, jobs, hourly, downtime, performance, assistant, issues |
+| `quality` | overview, quality, hourly, issues, performance, assistant |
+| `maintenance` | machines, downtime, issues |
+| `sales` | sales, products, jobs, clients |
+| `finance` | finance, reports |
+| `storage` | storage |
+
+- **`production` and `quality` are no longer the same.** They used to share one `OPS`
+  constant with a comment saying they must never drift apart; that coupling was
+  deliberately removed, every entry now lists its roles explicitly, and there is no shared
+  alias left. Production lost quality/machines/molds/products/storage/reports; quality lost
+  those plus jobs/production/downtime. Both keep overview.
+- `worker` is the least-privileged role and is therefore **first** in `REQUESTABLE_ROLES`,
+  which is the default applied when a request is approved without a stated role.
+- ⚠ **`landingFor(role)` must always return a page that role can access**, or the user
+  signs in and is bounced straight back out. `tests/roles.test.ts` asserts
+  `canAccess(role, landingFor(role))` for every role in `ALL_ROLES` — change `NAV` and
+  `landingFor` together. `worker` lands on `/dashboard/downtime` (it has no overview).
+- ⚠ **This table is UX gating, not a security boundary.** Operational read APIs (molds,
+  products, machines, runs, oee, hourly, issues) are deliberately open — removing a page
+  from a role hides it, it does not classify the data. Mutating routes are guarded by
+  `requireRole`, but with no allow-list, so **any approved role** may call them; only
+  `/api/inquiries` and `sheet/clients` restrict further (`["sales"]`, both PII reads).
+- `canAccess()` matches by longest PREFIX, and the overview entry's href is `/dashboard`,
+  which prefixes every `/dashboard/*` path. So a role holding overview inherits any route
+  with no NAV entry of its own. Every real page has one today, but **a new page added
+  without a NAV entry is reachable by production and quality**, not owner/manager only.
 - **Downtime capture (phase 2)** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
   + `lib/downtime-data.ts` (Firestore fetch), the same split as `oee.ts`/`oee-data.ts`.
   `/dashboard/downtime` is a phone-first Arabic page: pick machine → pick reason → start →
@@ -229,7 +266,14 @@ Domain semantics:
   `rulesReview()` fallback when no key is set.
 - `/api/agent` + `lib/agent-tools.ts` + `/dashboard/assistant` — chat assistant that reads the
   sheet and **proposes** writes. Non-negotiable rule: **confirm-before-write.** The agent
-  returns a preview; only an explicit user confirmation triggers the write. Per-user daily
+  returns a preview; only an explicit user confirmation triggers the write.
+  `ALLOWED` includes `worker`, so a shop-floor account can drive it, writes included.
+  Because of that, a confirmed write is **attributed**: `handleConfirm` stamps
+  `[المساعد · <email>]` into the row's «ملاحظات» note for production rows and issues,
+  taking the actor from the VERIFIED token — never from the request body. A single-cell
+  `update` has nowhere in the sheet to carry provenance (writing it into a neighbouring
+  cell would corrupt data nobody asked to change), so it is attributed in the server log
+  and the response instead. Per-user daily
   message limits are counted in Firestore `usage/{uid}`; the Firebase ID token is verified
   server-side without firebase-admin (Google securetoken certs, `aud`/`iss` = itqan-5f802),
   because org policy blocks service-account keys.

@@ -31,8 +31,10 @@ const MODEL = process.env.AI_AGENT_MODEL?.trim() || "claude-haiku-4-5";
 const MAX_ITERS = 8; // tool-loop cap — cost guardrail
 const API_KEY = process.env.ANTHROPIC_API_KEY?.trim();
 
-// Roles allowed to use the assistant (OPS + full access, per the milestone spec).
-const ALLOWED: Role[] = ["owner", "manager", "production", "quality"];
+// Roles allowed to use the assistant. Workers get the full assistant, writes
+// included — the owner's call. Because a shop-floor account can now trigger a
+// sheet write, every confirmed write records who asked for it (see WRITE_ACTOR).
+const ALLOWED: Role[] = ["owner", "manager", "worker", "production", "quality"];
 
 /* --------------------------------- tools ---------------------------------- */
 
@@ -206,7 +208,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
     // --- confirm branch: execute a previously-previewed write ---
-    if (body.confirm) return handleConfirm(body.confirm);
+    // The actor comes from the VERIFIED token, never from the body.
+    if (body.confirm) return handleConfirm(body.confirm, user.email || user.uid);
 
     // --- chat branch ---
     if (!API_KEY) return NextResponse.json({ error: "no_api_key" }, { status: 503 });
@@ -322,20 +325,49 @@ async function runTool(
 
 /* ------------------------------- confirm ---------------------------------- */
 
-async function handleConfirm(confirm: { kind?: string; rows?: unknown; issue?: unknown; update?: unknown }) {
+/**
+ * Provenance for assistant-initiated sheet writes.
+ *
+ * The assistant is now open to `worker`, so a shop-floor account can trigger a
+ * write to the shared workbook after confirming a preview. Those rows must say
+ * who asked for them. `actor` is ALWAYS the identity from the verified ID token
+ * — never a name posted in the body, which the caller controls.
+ *
+ * It goes in the row's own «ملاحظات» note field (appended, so a real note the
+ * user wrote is preserved). That column is one of the six «الإنتاج» columns that
+ * has never been filled, so nothing is being displaced.
+ */
+const stampNote = (note: string | undefined, actor: string) => {
+  const mark = `[المساعد · ${actor}]`;
+  const base = (note ?? "").trim();
+  return base ? `${base} ${mark}` : mark;
+};
+
+async function handleConfirm(
+  confirm: { kind?: string; rows?: unknown; issue?: unknown; update?: unknown },
+  actor: string,
+) {
   if (confirm.kind === "production") {
     const rows = (Array.isArray(confirm.rows) ? confirm.rows : []) as ValidatedRow["values"][];
     if (rows.length === 0) return NextResponse.json({ error: "no_rows" }, { status: 400 });
-    const r = await appendProductionRows(rows);
-    return NextResponse.json({ ok: r.ok, written: r.results.filter((x) => x.ok).length, results: r.results });
+    const stamped = rows.map((v) => ({ ...v, note: stampNote(v.note, actor) }));
+    const r = await appendProductionRows(stamped);
+    return NextResponse.json({ ok: r.ok, written: r.results.filter((x) => x.ok).length, results: r.results, by: actor });
   }
   if (confirm.kind === "issue") {
-    const r = await logIssue((confirm.issue || {}) as Record<string, string>);
-    return NextResponse.json({ ok: r.ok, reason: r.reason });
+    const issue = { ...((confirm.issue || {}) as Record<string, string>) };
+    issue.note = stampNote(issue.note, actor);
+    const r = await logIssue(issue);
+    return NextResponse.json({ ok: r.ok, reason: r.reason, by: actor });
   }
   if (confirm.kind === "update") {
-    const r = await updateCell(confirm.update as ProposedUpdate);
-    return NextResponse.json({ ok: r.ok, reason: r.reason });
+    const u = confirm.update as ProposedUpdate;
+    // A single-cell edit has nowhere in the sheet to carry provenance — writing
+    // it into a neighbouring cell would corrupt data the user did not ask to
+    // change. So it is attributed in the server log and the response instead.
+    console.info(`[agent] cell update by ${actor}: ${u?.entity} row ${u?.row} field ${u?.field}`);
+    const r = await updateCell(u);
+    return NextResponse.json({ ok: r.ok, reason: r.reason, by: actor });
   }
   return NextResponse.json({ error: "bad_confirm" }, { status: 400 });
 }

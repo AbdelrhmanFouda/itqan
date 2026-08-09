@@ -39,6 +39,7 @@ export const ad = {
     roles: {
       owner: "Owner",
       manager: "Manager",
+      worker: "Worker",
       production: "Production",
       quality: "Quality",
       sales: "Sales",
@@ -158,6 +159,7 @@ export const ad = {
     roles: {
       owner: "المالك",
       manager: "مدير",
+      worker: "عامل",
       production: "الإنتاج",
       quality: "الجودة",
       sales: "المبيعات",

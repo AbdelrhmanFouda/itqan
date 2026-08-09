@@ -7,14 +7,20 @@
 // (mirror this value in firestore.rules).
 export const OWNER_EMAIL = "abdelrhman.2003.16@gmail.com";
 
-export type Role = "owner" | "manager" | "production" | "quality" | "sales" | "finance" | "maintenance" | "storage";
+export type Role =
+  | "owner" | "manager" | "worker" | "production" | "quality"
+  | "sales" | "finance" | "maintenance" | "storage";
 export type UserStatus = "pending" | "approved" | "rejected";
 
 // Roles a new user can request (owner is the bootstrap account, never requestable).
 // Order matters: the FIRST entry is the default when approving a request that has
 // no stated role — keep a low-privilege role first and "manager" last so a stray
-// approval never hands out full access by accident.
-export const REQUESTABLE_ROLES: Role[] = ["production", "quality", "sales", "finance", "maintenance", "storage", "manager"];
+// approval never hands out full access by accident. "worker" is now the least
+// privileged, so it takes that first slot (it used to be "production", which can
+// see far more).
+export const REQUESTABLE_ROLES: Role[] = [
+  "worker", "production", "quality", "sales", "finance", "maintenance", "storage", "manager",
+];
 export const ALL_ROLES: Role[] = ["owner", ...REQUESTABLE_ROLES];
 
 // Roles that can see and do everything: the owner plus any manager.
@@ -27,13 +33,24 @@ export function isOwnerEmail(email: string | null | undefined): boolean {
   return (email ?? "").trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
 }
 
-// Where each role lands after signing in.
+/**
+ * Where each role lands after signing in.
+ *
+ * ⚠ Every branch here MUST be a page that role can actually reach, or the user
+ * signs in straight into a screen the layout bounces them off. That invariant —
+ * `canAccess(role, landingFor(role))` for every role in ALL_ROLES — is asserted
+ * in tests/roles.test.ts. Change NAV and this function together.
+ *
+ * A worker has no overview, so "/dashboard" would be a forbidden landing for
+ * them; downtime is their whole job, so that is where they start.
+ */
 export function landingFor(role: Role): string {
   switch (role) {
     case "finance": return "/dashboard/finance";
     case "sales": return "/dashboard/sales";
     case "maintenance": return "/dashboard/machines";
     case "storage": return "/dashboard/storage";
+    case "worker": return "/dashboard/downtime";
     case "quality":
     case "production":
     case "manager":
@@ -47,33 +64,39 @@ export type NavKey =
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
   | "hourly" | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
 
-// Production and Quality see EXACTLY the same things — keep them in one shared
-// group so the two can never drift apart.
-const OPS: Role[] = ["production", "quality"];
-
-// Sidebar entries with the (non-full-access) roles allowed to see/visit them.
-// owner + manager are handled by hasFullAccess() and always see every item.
+/**
+ * Sidebar entries with the (non-full-access) roles allowed to see/visit them.
+ * owner + manager are handled by hasFullAccess() and always see every item.
+ *
+ * Production and Quality used to share one `OPS` constant, on the rule that they
+ * must see exactly the same things. That is deliberately over — they now differ,
+ * so every entry lists its roles explicitly and there is no shared alias to
+ * reintroduce the coupling by accident.
+ *
+ * ⚠ This table is UX gating: it decides what a role SEES and can navigate to.
+ * It is not a security boundary. The operational read APIs (molds, products,
+ * machines, runs, oee, hourly, issues) stay deliberately open — see CLAUDE.md.
+ * Removing a page from a role hides it; it does not classify the data.
+ */
 export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
-  { href: "/dashboard", key: "overview", roles: [...OPS] },
+  { href: "/dashboard", key: "overview", roles: ["production", "quality"] },
   { href: "/dashboard/finance", key: "finance", roles: ["finance"] },
-  { href: "/dashboard/quality", key: "quality", roles: [...OPS] },
+  { href: "/dashboard/quality", key: "quality", roles: ["quality"] },
   { href: "/dashboard/sales", key: "sales", roles: ["sales"] },
-  { href: "/dashboard/machines", key: "machines", roles: [...OPS, "maintenance"] },
-  { href: "/dashboard/molds", key: "molds", roles: [...OPS] },
-  { href: "/dashboard/products", key: "products", roles: [...OPS, "sales"] },
-  { href: "/dashboard/jobs", key: "jobs", roles: [...OPS, "sales"] },
-  { href: "/dashboard/production", key: "production", roles: [...OPS] },
-  { href: "/dashboard/hourly", key: "hourly", roles: [...OPS] },
-  // Downtime capture is a shop-floor surface — same audience as the faults log,
-  // which is its closest analogue (machine-centric, logged at the machine).
-  { href: "/dashboard/downtime", key: "downtime", roles: [...OPS, "maintenance"] },
-  // Storage keeper edits; production/quality see the stock levels (read-only —
-  // write actions are additionally gated by role in the page + API).
-  { href: "/dashboard/storage", key: "storage", roles: [...OPS, "storage"] },
-  { href: "/dashboard/issues", key: "issues", roles: [...OPS, "maintenance"] },
-  { href: "/dashboard/performance", key: "performance", roles: [...OPS] },
-  { href: "/dashboard/assistant", key: "assistant", roles: [...OPS] },
-  { href: "/dashboard/reports", key: "reports", roles: [...OPS, "finance"] },
+  { href: "/dashboard/machines", key: "machines", roles: ["maintenance"] },
+  { href: "/dashboard/molds", key: "molds", roles: [] }, // owner + manager only
+  { href: "/dashboard/products", key: "products", roles: ["sales"] },
+  { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
+  { href: "/dashboard/production", key: "production", roles: ["production"] },
+  { href: "/dashboard/hourly", key: "hourly", roles: ["production", "quality", "worker"] },
+  // Downtime capture is the shop floor's own surface: the worker who stops the
+  // machine, the supervisor who runs it, and maintenance who fix it.
+  { href: "/dashboard/downtime", key: "downtime", roles: ["production", "worker", "maintenance"] },
+  { href: "/dashboard/storage", key: "storage", roles: ["storage"] },
+  { href: "/dashboard/issues", key: "issues", roles: ["production", "quality", "worker", "maintenance"] },
+  { href: "/dashboard/performance", key: "performance", roles: ["production", "quality"] },
+  { href: "/dashboard/assistant", key: "assistant", roles: ["production", "quality", "worker"] },
+  { href: "/dashboard/reports", key: "reports", roles: ["finance"] },
   { href: "/dashboard/clients", key: "clients", roles: ["sales"] },
   { href: "/dashboard/approvals", key: "approvals", roles: [] }, // owner + manager only
 ];
