@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-    const role = await roleFor(user);
+    const role = await roleFor(user, token);
     if (!role || !ALLOWED.includes(role))
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -353,7 +353,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const role = await roleFor(user);
+  const role = await roleFor(user, token);
   const allowed = !!role && ALLOWED.includes(role);
   if (!allowed) return NextResponse.json({ allowed: false, role });
   const usage: UsageState = await peekUsage(user.uid, role);

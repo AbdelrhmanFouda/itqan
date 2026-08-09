@@ -30,7 +30,9 @@ export async function requireRole(req: NextRequest, allowed?: Role[]): Promise<G
   let user: VerifiedUser | null = null;
   try {
     user = await verifyIdToken(token);
-    role = await roleFor(user); // null unless approved
+    // The token MUST be passed on: the role lookup reads the caller's own
+    // profile as the caller. Without it every non-owner resolves to null.
+    role = await roleFor(user, token); // null unless approved
   } catch {
     role = null;
     user = null;

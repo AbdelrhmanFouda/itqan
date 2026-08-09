@@ -71,9 +71,44 @@ export async function verifyIdToken(token: string): Promise<VerifiedUser> {
 
 /* ------------------------------ role lookup ------------------------------- */
 
-/** The granted role for a verified user (owner email always wins). Best-effort. */
-export async function roleFor(user: VerifiedUser): Promise<Role | null> {
+/**
+ * The granted role for a verified user (owner email always wins).
+ *
+ * ⚠ PASS `idToken`. Without it this returns null for EVERY NON-OWNER.
+ *
+ * Why: `users/{uid}` is genuinely protected — `allow read: if isSignedIn() &&
+ * (request.auth.uid == uid || isAdmin())`. But API routes reach Firestore
+ * through the UNAUTHENTICATED client SDK, so `request.auth` is null there and
+ * the read is denied. The owner never noticed because `isOwnerEmail()`
+ * short-circuits above, before any Firestore access. Every other account fell
+ * to the catch below and came back null → 401 on every guarded route.
+ * Verified 2026-08-09: anonymous read → 403, read-as-user → 200.
+ *
+ * The fix is to read the caller's OWN profile AS THE CALLER, over the Firestore
+ * REST API with the ID token we just verified. That satisfies
+ * `request.auth.uid == uid` with no rules change and no new privileges — a user
+ * may already read their own profile, and only an admin can write the role.
+ */
+export async function roleFor(user: VerifiedUser, idToken?: string): Promise<Role | null> {
   if (isOwnerEmail(user.email)) return "owner";
+
+  if (idToken) {
+    try {
+      const res = await fetch(
+        `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${user.uid}`,
+        { headers: { Authorization: `Bearer ${idToken}` }, cache: "no-store" },
+      );
+      if (res.status === 404) return null; // signed in but no profile yet
+      if (res.ok) {
+        const f = ((await res.json()) as { fields?: Record<string, { stringValue?: string }> }).fields ?? {};
+        return f.status?.stringValue === "approved" ? ((f.role?.stringValue as Role) ?? null) : null;
+      }
+    } catch {
+      /* fall through to the SDK path below */
+    }
+  }
+
+  // Legacy path — works only where the SDK is authenticated (i.e. the browser).
   try {
     const snap = await getDoc(doc(db, "users", user.uid));
     if (!snap.exists()) return null;

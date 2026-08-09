@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     let role: Role | null = null;
     try {
-      role = await roleFor(await verifyIdToken(token));
+      role = await roleFor(await verifyIdToken(token), token);
     } catch {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
