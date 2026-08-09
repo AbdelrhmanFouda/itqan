@@ -197,6 +197,10 @@ export const pd = {
       staleEstimated: "estimated",
       staleSince: "started",
       estimatedNote: "Estimated — nobody tapped stop; capped at the end of that shift.",
+      errAuth: "Your session expired. Sign out and sign in again.",
+      errRole: "Your account does not have access to downtime. Ask the owner to grant it.",
+      errNet: "Could not load the list — check the connection.",
+      retry: "Try again",
     },
   },
   ar: {
@@ -389,6 +393,10 @@ export const pd = {
       staleEstimated: "تقديري",
       staleSince: "بدأت",
       estimatedNote: "تقديري — محدش ضغط «رجعت تشتغل»، والوقت محسوب لحد نهاية الوردية.",
+      errAuth: "الجلسة انتهت. اعمل تسجيل خروج ودخول تاني.",
+      errRole: "الحساب ده مالوش صلاحية على التوقفات. كلّم صاحب المصنع يفتحها لك.",
+      errNet: "مقدرناش نحمّل القائمة — اتأكد من النت.",
+      retry: "جرّب تاني",
     },
   },
 } satisfies Record<Lang, unknown>;

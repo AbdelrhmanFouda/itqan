@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
+import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
@@ -41,6 +42,7 @@ function elapsed(from: number, now: number): string {
 
 export default function DowntimePage() {
   const { lang } = useLang();
+  const { user, loading: authLoading } = useAuth();
   const p = pd[lang];
   const t = p.downtime;
   const isAr = lang === "ar";
@@ -50,12 +52,31 @@ export default function DowntimePage() {
   const [machine, setMachine] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [loadErr, setLoadErr] = useState<"auth" | "role" | "net" | null>(null);
   // Ticks once a minute so a running stoppage counts up on its own.
   const [now, setNow] = useState(() => Date.now());
 
+  /**
+   * Load the open/stale/today lists.
+   *
+   * This route is GUARDED (the rows carry createdBy), so unlike the other
+   * dashboard reads it needs a token. Everything here exists because the first
+   * version just did `if (res.ok) setData(...)`: any failure left `data` null,
+   * the page returned a Spinner forever, and the operator got a screen that
+   * never loaded and never said why. A guarded fetch on a phone fails for
+   * ordinary reasons — the token is not restored yet, the session expired, the
+   * signal dropped in the workshop — so it must fail LOUDLY and be retryable,
+   * and it must never block the start flow, which needs no token to render.
+   */
   const load = useCallback(async () => {
-    const res = await authedFetch("/api/downtime");
-    if (res.ok) setData(await res.json());
+    setLoadErr(null);
+    try {
+      const res = await authedFetch("/api/downtime");
+      if (res.ok) { setData(await res.json()); return; }
+      setLoadErr(res.status === 401 ? "auth" : res.status === 403 ? "role" : "net");
+    } catch {
+      setLoadErr("net");
+    }
   }, []);
 
   useEffect(() => {
@@ -63,8 +84,15 @@ export default function DowntimePage() {
       .then((r) => r.json())
       .then((d) => setMachines(d.machines ?? []))
       .catch(() => setMachines([]));
+  }, []);
+
+  // Wait for Firebase to restore the session before the authenticated call.
+  // authedFetch reads auth.currentUser, which is null for the first moments
+  // after a page load — calling too early is an automatic 401.
+  useEffect(() => {
+    if (authLoading || !user) return;
     load();
-  }, [load]);
+  }, [authLoading, user, load]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -121,12 +149,21 @@ export default function DowntimePage() {
     await load();
   }
 
-  if (machines === null || data === null) return <Spinner text={p.common.loading} />;
+  // Only the MACHINE LIST gates the page. If the guarded read failed we still
+  // render, say why, and let the operator start a stoppage — the action that
+  // matters must not be held hostage by a list that failed to load.
+  if (machines === null || (data === null && loadErr === null)) {
+    return <Spinner text={p.common.loading} />;
+  }
+
+  const openList = data?.open ?? [];
+  const staleList = data?.stale ?? [];
+  const todayList = data?.today ?? [];
 
   // A machine with an unclosed stoppage — running OR stale — must not be
   // startable again; that would open a second event and double-count it.
-  const openByMachine = new Set([...data.open, ...data.stale].map((e) => e.machine));
-  const lostToday = data.today.reduce((s, e) => s + e.minutes, 0);
+  const openByMachine = new Set([...openList, ...staleList].map((e) => e.machine));
+  const lostToday = todayList.reduce((s, e) => s + e.minutes, 0);
   const reasonLabel = (key: string) => {
     const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === key);
     return r ? (isAr ? r.ar : r.en) : key;
@@ -147,7 +184,7 @@ export default function DowntimePage() {
 
       <div className="grid grid-cols-2 gap-4 mb-6 max-w-sm">
         <Stat label={t.todayMinutes} value={lostToday} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
-        <Stat label={t.todayEvents} value={data.today.length} />
+        <Stat label={t.todayEvents} value={todayList.length} />
       </div>
 
       {failed && (
@@ -156,16 +193,35 @@ export default function DowntimePage() {
         </div>
       )}
 
+      {/* The guarded list failed. Say which failure it was — "sign in again" and
+          "no signal" need different actions from the operator — and offer a
+          retry. The start buttons below still work. */}
+      {loadErr && (
+        <div className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="font-semibold text-amber-900">
+            {loadErr === "auth" ? t.errAuth : loadErr === "role" ? t.errRole : t.errNet}
+          </p>
+          {loadErr !== "role" && (
+            <button
+              onClick={load}
+              className="mt-2 rounded-lg border-2 border-amber-600 px-4 py-2 font-semibold text-amber-900"
+            >
+              {t.retry}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ---- Never stopped. Above everything: these carry no minutes at all, so
            they are missing from Availability until somebody closes them. ---- */}
-      {data.stale.length > 0 && (
+      {staleList.length > 0 && (
         <section className="mb-8">
           <h2 className="text-sm font-semibold text-amber-700 mb-2">
-            {t.staleTitle} ({data.stale.length})
+            {t.staleTitle} ({staleList.length})
           </h2>
           <p className="text-sm text-gray-600 mb-3">{t.staleBody}</p>
           <div className="space-y-3">
-            {data.stale.map((e) => (
+            {staleList.map((e) => (
               <div
                 key={e.id}
                 className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3"
@@ -194,11 +250,11 @@ export default function DowntimePage() {
            down is the most urgent thing on the page. ---- */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-gray-500 mb-2">{t.running}</h2>
-        {data.open.length === 0 ? (
+        {openList.length === 0 ? (
           <EmptyState text={t.noneRunning} />
         ) : (
           <div className="space-y-3">
-            {data.open.map((e) => (
+            {openList.map((e) => (
               <div
                 key={e.id}
                 className="flex items-center gap-3 rounded-2xl border-2 border-red-200 bg-red-50 px-4 py-3"
@@ -280,11 +336,11 @@ export default function DowntimePage() {
       {/* ---- Today's finished stoppages ---- */}
       <section className="mt-8">
         <h2 className="text-sm font-semibold text-gray-500 mb-2">{t.today}</h2>
-        {data.today.length === 0 ? (
+        {todayList.length === 0 ? (
           <EmptyState text={t.empty} />
         ) : (
           <div className="space-y-2">
-            {data.today.map((e) => (
+            {todayList.map((e) => (
               <div
                 key={e.id}
                 className="flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl px-4 py-3"
