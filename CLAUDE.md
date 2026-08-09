@@ -32,7 +32,7 @@ The API auth hardening (`lib/api-guard.ts`, `lib/authed-fetch.ts`, `app/robots.t
 jobs kg→pieces fix were pushed in `545b10c` — they had been sitting uncommitted, so the
 live site was accepting unauthenticated writes until then. `/robots.txt` is live.
 
-Then `f4d59ca` fixed four data-correctness bugs; each is described in place below.
+Then `d3d124e` fixed four data-correctness bugs; each is described in place below.
 All were verified against the live workbook through the bridge, not inferred.
 
 ## Architecture (data flow)
