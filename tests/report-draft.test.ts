@@ -48,6 +48,18 @@ test("draft is Arabic and carries the month, the numbers and the AI summary", ()
   assert.ok(d.notes.includes("أغسطس كان مستقر."), "AI summary reused, in Arabic");
 });
 
+test("AI prose is labelled and always follows the computed numbers", () => {
+  // Live, Gemini restated OEE as 54.7% while the digest said 52.7%. The computed
+  // lines are authoritative, so the model's text must be attributable.
+  const d = buildReportDraft("2026-08", base(), review, reasonAr);
+  assert.ok(d.notes.includes("ملخص المساعد الذكي"), "summary is labelled");
+  assert.ok(
+    d.notes.indexOf("52.7%") < d.notes.indexOf("أغسطس كان مستقر."),
+    "computed numbers come before the prose",
+  );
+  assert.ok(d.issues.includes("ملاحظات المساعد الذكي"), "findings are labelled too");
+});
+
 test("jobs_completed is left EMPTY — the sheet cannot tell us", () => {
   assert.equal(buildReportDraft("2026-08", base(), review, reasonAr).jobs_completed, "");
 });

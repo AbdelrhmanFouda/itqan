@@ -113,7 +113,11 @@ export function buildReportDraft(
     }
   }
 
-  if (review?.summary.ar) notes.push("", review.summary.ar);
+  // The AI paragraph is labelled, and always comes AFTER the computed numbers.
+  // Observed live: the model restated OEE as 54.7% while the digest said 52.7%.
+  // The lines above are computed from the sheet and are the authoritative ones;
+  // marking the prose makes a disagreement attributable instead of confusing.
+  if (review?.summary.ar) notes.push("", `— ملخص المساعد الذكي (راجعه):`, review.summary.ar);
 
   /* ------------------------------- issues ------------------------------- */
   const issues: string[] = [];
@@ -157,7 +161,7 @@ export function buildReportDraft(
     (f) => f.severity === "critical" || f.severity === "warn",
   );
   if (notable.length > 0) {
-    issues.push("ملاحظات:");
+    issues.push("— ملاحظات المساعد الذكي (راجعها):");
     for (const f of notable) issues.push(`• ${f.ar}`);
   }
 
