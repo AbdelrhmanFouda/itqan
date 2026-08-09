@@ -9,11 +9,36 @@ import { normalizeDate, latinDigits } from "@/lib/dates";
  * product, dated on/after the job's start date, count toward the ordered
  * quantity. No run⇄job foreign keys — the product name IS the link, same as
  * the OEE engine.
+ *
+ * UNITS. The sheet records «الكمية المطلوبة (كجم)» in KILOGRAMS, but the crew
+ * logs «إنتاج سليم» in PIECES. Comparing them directly is meaningless (it read
+ * "11,150 / 30"), so we convert kg → pieces here using the piece weight from
+ * «الرئيسي»:  pieces = kg × 1000 ÷ piece weight (g).
+ * `qtyOrdered` is therefore ALWAYS pieces; `qtyOrderedKg` keeps the original.
+ * This mirrors the «المطلوب بالقطعة» column added to the jobs tab on
+ * 2026-07-27, so the sheet and the site always agree.
  */
 
 const num = (v: unknown) => {
   const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : 0;
+};
+
+/**
+ * Master's numeric columns are free text: weight reads «15جم», cavities read
+ * «4+4» or «2 وش&2 كفر», cycle sometimes reads «تحتسب ورديات». These two
+ * helpers match the parsing the sheet formulas do, character for character.
+ */
+const firstNum = (v: unknown) => {
+  const m = String(v ?? "").match(/[0-9]+(?:\.[0-9]+)?/);
+  return m ? Number(m[0]) : 0;
+};
+// «4+4» → 8, «2 جراب&2 حزام» → 4, «1 طقم» → 1, «8» → 8
+const sumCavities = (v: unknown) => {
+  const s = String(v ?? "");
+  const a = s.match(/^[^0-9]*([0-9]+(?:\.[0-9]+)?)/);
+  const b = s.match(/[+&]\s*([0-9]+(?:\.[0-9]+)?)/);
+  return (a ? Number(a[1]) : 0) + (b ? Number(b[1]) : 0);
 };
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -36,7 +61,8 @@ export type JobShaped = {
   client: string;
   product: string;
   moldCode: string;
-  qtyOrdered: number;
+  qtyOrdered: number;    // PIECES — converted from kg via Master's piece weight
+  qtyOrderedKg: number;  // as typed by the planner in the sheet
   startDate: string;  // ISO or ""
   dueDate: string;    // ISO or ""
   status: string;
@@ -48,6 +74,14 @@ export type JobShaped = {
   notes: string;
   produced: number;
   scrapped: number;
+  remaining: number;
+  // --- pulled from «الرئيسي» by product name; 0 when the product isn't there
+  linked: boolean;       // false ⇒ product not registered in Master yet
+  pieceWeightG: number;
+  cavities: number;
+  cycleSec: number;
+  material: string;
+  estHours: number;      // pieces × cycle ÷ (3600 × cavities)
 };
 
 const DONE = new Set(["Completed", "Delivered"]);
@@ -58,10 +92,25 @@ export async function loadJobs(): Promise<{
   writable: boolean;
   configured: boolean;
 }> {
-  const [jobsTab, prodTab] = await Promise.all([
+  const [jobsTab, prodTab, masterTab] = await Promise.all([
     getRecords("jobs"),
     getRecords("production"),
+    getRecords("master"),
   ]);
+
+  // Product → standards, first row wins (same as the sheet's VLOOKUP).
+  const std = new Map<string, { w: number; cav: number; cyc: number; mat: string }>();
+  for (const m of masterTab.records) {
+    // NOTE: the master entity calls the product column `name`, not `product`.
+    const key = normKey(m.name);
+    if (!key || std.has(key)) continue;
+    std.set(key, {
+      w: firstNum(m.weight),
+      cav: sumCavities(m.cavities),
+      cyc: firstNum(m.cycle),
+      mat: m.material || "",
+    });
+  }
 
   // Shape production rows once, keyed by normalized product/mold.
   const runs = prodTab.records
@@ -86,13 +135,30 @@ export async function loadJobs(): Promise<{
   };
 
   const jobs: JobShaped[] = jobsTab.records.map((r) => {
+    const kg = num(r.qty);
+    const s = std.get(normKey(r.product));
+    // No piece weight in Master ⇒ we cannot state a piece count. Report 0 and
+    // let the UI fall back to showing the kilograms, rather than inventing one.
+    const pieces = s && s.w > 0 ? Math.round((kg * 1000) / s.w) : 0;
+
     const job: JobShaped = {
       id: String(r.row),
       code: r.code || "",
       client: r.client || "",
       product: r.product || "",
       moldCode: latinDigits((r.moldCode || "").trim()),
-      qtyOrdered: num(r.qty),
+      qtyOrdered: pieces,
+      qtyOrderedKg: kg,
+      linked: !!s,
+      pieceWeightG: s?.w ?? 0,
+      cavities: s?.cav ?? 0,
+      cycleSec: s?.cyc ?? 0,
+      material: s?.mat ?? "",
+      estHours:
+        pieces > 0 && s && s.cyc > 0 && s.cav > 0
+          ? Math.round((pieces * s.cyc * 10) / (3600 * s.cav)) / 10
+          : 0,
+      remaining: 0,
       startDate: normalizeDate(r.startDate),
       dueDate: normalizeDate(r.dueDate),
       status: r.status || "In Production",
@@ -106,8 +172,9 @@ export async function loadJobs(): Promise<{
       scrapped: 0,
     };
     const rs = matches(job);
-    job.produced = rs.reduce((s, x) => s + x.goodUnits, 0);
-    job.scrapped = rs.reduce((s, x) => s + x.scrapUnits, 0);
+    job.produced = rs.reduce((a, x) => a + x.goodUnits, 0);
+    job.scrapped = rs.reduce((a, x) => a + x.scrapUnits, 0);
+    job.remaining = job.qtyOrdered > 0 ? Math.max(0, job.qtyOrdered - job.produced) : 0;
     return job;
   });
 

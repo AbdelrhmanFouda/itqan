@@ -8,6 +8,7 @@ import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/compon
 import {
   JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options,
 } from "@/lib/prod-meta";
+import { authedFetch } from "@/lib/authed-fetch";
 
 /**
  * Jobs — client work orders, stored in the sheet's `jobs` tab.
@@ -17,10 +18,14 @@ import {
 
 type Job = {
   id: string; code: string; client: string; product: string; moldCode: string;
-  qtyOrdered: number; startDate: string; dueDate: string;
+  // qtyOrdered is PIECES (converted from kg via Master's piece weight, in
+  // lib/jobs.ts). 0 means Master has no weight for this product.
+  qtyOrdered: number; qtyOrderedKg: number; startDate: string; dueDate: string;
   status: string; priority: string; machine: string;
   materialIssued: string; masterbatch: string; instructions: string; notes: string;
-  produced: number; scrapped: number;
+  produced: number; scrapped: number; remaining: number;
+  linked: boolean; pieceWeightG: number; cavities: number; cycleSec: number;
+  material: string; estHours: number;
 };
 type Data = { jobs: Job[]; writable: boolean; configured: boolean };
 type Mold = { row: number; code?: string; name?: string };
@@ -71,7 +76,7 @@ export default function JobsPage() {
     e.preventDefault();
     setSaving(true);
     setSaveErr(false);
-    const res = await fetch("/api/jobs", {
+    const res = await authedFetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
@@ -140,6 +145,14 @@ export default function JobsPage() {
                     <p className="text-xs text-gray-500 mt-1 truncate">
                       {[j.client, j.product, j.machine].filter(Boolean).join(" · ") || "—"}
                     </p>
+                    {/* Shows the kg→pieces working, so the number is never a black box. */}
+                    <p className="text-[11px] text-gray-400 mt-0.5 truncate" dir={isAr ? "rtl" : "ltr"}>
+                      {!j.linked
+                        ? p.jobs.notInMaster
+                        : j.qtyOrdered > 0
+                          ? `${fmt(j.qtyOrderedKg)} ${p.jobs.kg} × ${j.pieceWeightG} ${p.jobs.gPerPc} = ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
+                          : p.jobs.noWeight}
+                    </p>
                   </div>
                   <div className={`text-xs shrink-0 ${isAr ? "text-left" : "text-right"}`}>
                     {j.dueDate && (
@@ -153,8 +166,10 @@ export default function JobsPage() {
                   <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden" dir="ltr">
                     <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-xs text-gray-500 whitespace-nowrap">
-                    {fmt(j.produced)} / {fmt(j.qtyOrdered)}
+                  <span className="text-xs text-gray-500 whitespace-nowrap" dir="ltr">
+                    {j.qtyOrdered > 0
+                      ? `${fmt(j.produced)} / ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
+                      : `${fmt(j.produced)} ${p.jobs.pcs}`}
                   </span>
                 </div>
               </Link>
@@ -184,8 +199,10 @@ export default function JobsPage() {
                 {molds.map((m) => (m.code ? <option key={`c${m.row}`} value={m.code} /> : null))}
               </datalist>
             </Field>
-            <Field label={p.jobs.qtyOrdered}>
-              <input className={inputCls} type="number" min="0" required value={form.qtyOrdered} onChange={(e) => set("qtyOrdered", e.target.value)} />
+            {/* The sheet column is «الكمية المطلوبة (كجم)» — label the unit so
+                nobody types a piece count into a kilogram field. */}
+            <Field label={p.jobs.qtyOrderedKg}>
+              <input className={inputCls} type="number" min="0" step="any" required value={form.qtyOrdered} onChange={(e) => set("qtyOrdered", e.target.value)} />
             </Field>
             <Field label={isAr ? "الخامة المصروفة (كجم)" : "Material issued (kg)"}>
               <input className={inputCls} value={form.materialIssued} onChange={(e) => set("materialIssued", e.target.value)} />

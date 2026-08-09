@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMolds, addMold } from "@/lib/db";
+import { requireRole } from "@/lib/api-guard";
 
 export async function GET() {
   try {
@@ -11,6 +12,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const b = await req.json();
     const mold = await addMold({

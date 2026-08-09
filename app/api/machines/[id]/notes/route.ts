@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMachineNotes, addMachineNote } from "@/lib/db";
+import { requireRole } from "@/lib/api-guard";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -8,6 +9,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   const { note, note_date } = await req.json();
   const result = await addMachineNote(id, note, note_date);

@@ -5,6 +5,7 @@ import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
 import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { Pill, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Inquiry = {
   id: string; name: string; company: string; phone: string;
@@ -29,7 +30,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/inquiries").then((r) => r.json()),
+      authedFetch("/api/inquiries").then((r) => r.json()),
       fetch("/api/jobs").then((r) => r.json()),
     ])
       .then(([i, j]) => {

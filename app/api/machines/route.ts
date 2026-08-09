@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, sheetsWritable } from "@/lib/sheets";
 import { latinDigits } from "@/lib/dates";
+import { requireRole } from "@/lib/api-guard";
 
 /**
  * Machine REGISTRY, read from the sheet's `machines` tab — one row per
@@ -63,6 +64,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const b = (await req.json()) as Record<string, unknown>;
     const name = String(b.name ?? "").trim();

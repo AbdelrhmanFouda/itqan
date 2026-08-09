@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appendRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
+import { requireRole } from "@/lib/api-guard";
 
 // Jobs live in the sheet's `jobs` tab (they used to be in Firestore).
 // GET returns jobs with auto-computed production progress.
@@ -16,6 +17,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const b = (await req.json()) as Record<string, unknown>;
     const s = (k: string) => String(b[k] ?? "").trim();

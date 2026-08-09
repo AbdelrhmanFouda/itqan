@@ -5,6 +5,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Report = {
   id: string;
@@ -43,7 +44,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
 
   async function handleDelete() {
     if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
-    await fetch(`/api/reports/${id}`, { method: "DELETE" });
+    await authedFetch(`/api/reports/${id}`, { method: "DELETE" });
     router.push("/dashboard/reports");
   }
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Rec = { row: number } & Record<string, string>;
 type Payload = {
@@ -39,7 +40,8 @@ export default function SheetSection({
 
   async function load(initial = false) {
     try {
-      const res = await fetch(`/api/sheet/${entity}`);
+      // authed: the clients tab (contact/payment data) is signed-in-only server-side
+      const res = await authedFetch(`/api/sheet/${entity}`);
       const json = await res.json();
       setData((prev) =>
         !initial && prev && prev.records.length > 0 && (json?.records?.length ?? 0) === 0 ? prev : json
@@ -83,7 +85,7 @@ export default function SheetSection({
       if (next !== String(editing[key] ?? "")) changes[key] = next;
     }
     if (Object.keys(changes).length === 0) { setSaving(false); setEditing(null); return; }
-    const res = await fetch(`/api/sheet/${entity}`, {
+    const res = await authedFetch(`/api/sheet/${entity}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row: editing.row, changes }),

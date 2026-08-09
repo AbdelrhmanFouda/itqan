@@ -6,6 +6,7 @@ import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } from "@/components/dashboard/charts";
 import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type OEE = {
   availability: number; performance: number; quality: number; oee: number;
@@ -232,7 +233,7 @@ export default function PerformancePage() {
       if (period === "month") params.set("month", thisMonth);
       if (refresh) params.set("refresh", "1");
       const qs = params.toString();
-      const res = await fetch(`/api/ai-review${qs ? `?${qs}` : ""}`);
+      const res = await authedFetch(`/api/ai-review${qs ? `?${qs}` : ""}`);
       if (!res.ok) throw new Error("bad_status");
       setReview(await res.json());
     } catch {

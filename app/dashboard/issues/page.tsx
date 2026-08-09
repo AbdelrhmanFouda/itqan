@@ -4,6 +4,7 @@ import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { Plus } from "lucide-react";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Issue = {
   row: number; date: string; machine: string; product: string; category: string;
@@ -73,7 +74,7 @@ export default function IssuesPage() {
     if (!form.description.trim()) { setSaveError(t.descRequired); return; }
     setSaving(true); setSaveError(null);
     try {
-      const res = await fetch("/api/issues", {
+      const res = await authedFetch("/api/issues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -90,7 +91,7 @@ export default function IssuesPage() {
     const next = NEXT_STATUS[issue.status] || "مفتوح";
     setIssues((list) => (list ?? []).map((i) => (i.row === issue.row ? { ...i, status: next } : i)));
     try {
-      const res = await fetch("/api/sheet/issues", {
+      const res = await authedFetch("/api/sheet/issues", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ row: issue.row, changes: { status: next } }),

@@ -10,6 +10,7 @@ import {
   JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
   priorityTone, localize, options,
 } from "@/lib/prod-meta";
+import { authedFetch } from "@/lib/authed-fetch";
 
 /**
  * One job (sheet row in the `jobs` tab) + the production runs credited to it
@@ -19,7 +20,9 @@ import {
 
 type Job = {
   id: string; code: string; client: string; product: string; moldCode: string;
-  qtyOrdered: number; startDate: string; dueDate: string;
+  // qtyOrdered is PIECES (kg × 1000 ÷ Master piece weight, see lib/jobs.ts);
+  // qtyOrderedKg is what the planner actually typed in the sheet.
+  qtyOrdered: number; qtyOrderedKg: number; startDate: string; dueDate: string;
   status: string; priority: string; machine: string;
   materialIssued: string; masterbatch: string; instructions: string; notes: string;
   produced: number; scrapped: number;
@@ -88,7 +91,7 @@ export default function JobDetailPage() {
     e.preventDefault();
     if (!job) return;
     setSaving(true);
-    await fetch("/api/runs", {
+    await authedFetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...form, product: job.product }),
@@ -101,7 +104,7 @@ export default function JobDetailPage() {
   async function handleStatus(status: string) {
     if (!job) return;
     setJob({ ...job, status });
-    await fetch(`/api/jobs/${id}`, {
+    await authedFetch(`/api/jobs/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
@@ -110,13 +113,13 @@ export default function JobDetailPage() {
 
   async function handleDeleteRun(runId: string) {
     if (!confirm(p.common.confirmDelete)) return;
-    await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+    await authedFetch(`/api/runs/${runId}`, { method: "DELETE" });
     load();
   }
 
   async function handleDeleteJob() {
     if (!confirm(p.common.confirmDelete)) return;
-    await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+    await authedFetch(`/api/jobs/${id}`, { method: "DELETE" });
     router.push("/dashboard/jobs");
   }
 
@@ -192,10 +195,12 @@ export default function JobDetailPage() {
             value={job.dueDate ? `${job.dueDate}${overdue ? ` · ${p.jobs.overdue}` : ""}` : "—"}
             danger={!!overdue}
           />
-          <Detail label={p.jobs.qtyOrdered} value={fmt(qty)} />
+          {/* Ordered is recorded in kg; pieces are derived from Master's piece weight. */}
+          <Detail label={p.jobs.qtyOrderedKg} value={`${fmt(Number(job.qtyOrderedKg) || 0)} ${p.jobs.kg}`} />
+          <Detail label={p.jobs.qtyOrderedPcs} value={qty > 0 ? `${fmt(qty)} ${p.jobs.pcs}` : "—"} />
           <Detail label={isAr ? "الخامة المصروفة (كجم)" : "Material issued (kg)"} value={job.materialIssued || "—"} />
           <Detail label={isAr ? "الماستر باتش" : "Masterbatch"} value={job.masterbatch || "—"} />
-          <Detail label={p.jobs.unitsRemaining} value={fmt(remaining)} />
+          <Detail label={p.jobs.unitsRemaining} value={qty > 0 ? `${fmt(remaining)} ${p.jobs.pcs}` : "—"} />
           {standard ? (
             <>
               <Detail label={isAr ? "وزن القطعة (جم)" : "Part weight (g)"} value={standard.weight || "—"} />
@@ -241,7 +246,11 @@ export default function JobDetailPage() {
         <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden" dir="ltr">
           <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
         </div>
-        <span className="text-xs text-gray-500 whitespace-nowrap">{fmt(good)} / {fmt(qty)} ({pct.toFixed(0)}%)</span>
+        <span className="text-xs text-gray-500 whitespace-nowrap" dir="ltr">
+          {qty > 0
+            ? `${fmt(good)} / ${fmt(qty)} ${p.jobs.pcs} (${pct.toFixed(0)}%)`
+            : `${fmt(good)} ${p.jobs.pcs}`}
+        </span>
       </div>
 
       {/* Stats */}

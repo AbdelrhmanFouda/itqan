@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords } from "@/lib/sheets";
 import { validateIssue, logIssue, newToolCtx, type ProposedIssue } from "@/lib/agent-tools";
+import { requireRole } from "@/lib/api-guard";
 
 // «الأعطال» faults log — list + create. Uses the SAME validation the AI agent
 // uses (machine label vs registry, product vs Master), and logIssue's
@@ -35,6 +36,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const b = (await req.json()) as ProposedIssue;
     const v = await validateIssue(b, newToolCtx());

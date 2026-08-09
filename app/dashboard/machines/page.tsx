@@ -3,6 +3,7 @@ import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { Plus, Circle } from "lucide-react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 /**
  * Machine registry — read from the sheet's `machines` tab (one row per
@@ -81,7 +82,7 @@ export default function MachinesPage() {
     e.preventDefault();
     setSaving(true);
     setSaveErr(false);
-    const res = await fetch("/api/machines", {
+    const res = await authedFetch("/api/machines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),

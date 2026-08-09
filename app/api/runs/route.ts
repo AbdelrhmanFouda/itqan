@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, type SheetRecord } from "@/lib/sheets";
+import { requireRole } from "@/lib/api-guard";
 import { normalizeDate } from "@/lib/dates";
 import { loadHourlyRows, deriveScrap } from "@/lib/hourly";
 
@@ -58,6 +59,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const b = await req.json();
     const values: Record<string, string> = {

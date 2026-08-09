@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMold, updateMold, deleteMold } from "@/lib/db";
+import { requireRole } from "@/lib/api-guard";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -9,13 +10,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   const patch = await req.json();
   await updateMold(id, patch);
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   await deleteMold(id);
   return NextResponse.json({ ok: true });

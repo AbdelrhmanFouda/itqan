@@ -3,6 +3,7 @@ import { buildOEEData } from "@/lib/oee-data";
 import {
   cairoDay, generateReview, pickProvider, readCachedReview, writeCachedReview,
 } from "@/lib/ai-review";
+import { requireRole } from "@/lib/api-guard";
 
 /**
  * Daily AI review of the production data.
@@ -15,6 +16,10 @@ import {
  * (lib/oee-data.ts), so the narrative can never disagree with the charts.
  */
 export async function GET(req: NextRequest) {
+  // Signed-in only: every uncached call here costs an LLM generation, so an
+  // open endpoint would let anyone burn the API quota (e.g. by varying ?month).
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const month = req.nextUrl.searchParams.get("month");
     const refresh = req.nextUrl.searchParams.get("refresh") === "1";

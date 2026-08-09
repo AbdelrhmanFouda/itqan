@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRecords, updateRecord, deleteRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { latinDigits } from "@/lib/dates";
+import { requireRole } from "@/lib/api-guard";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
@@ -54,6 +55,8 @@ const EDITABLE = new Set([
 ]);
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   try {
     const body = (await req.json()) as Record<string, unknown>;
@@ -70,7 +73,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   try {
     const res = await deleteRecord("jobs", Number(id));

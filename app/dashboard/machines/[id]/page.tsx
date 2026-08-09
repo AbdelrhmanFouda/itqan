@@ -5,6 +5,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Machine = { id: string; name: string; type: string; status: string };
 type Note = { id: string; note: string; note_date: string };
@@ -45,7 +46,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
   async function handleAddNote(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await fetch(`/api/machines/${id}/notes`, {
+    await authedFetch(`/api/machines/${id}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note: noteText, note_date: noteDate }),
@@ -58,7 +59,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
 
   async function handleStatusChange(s: string) {
     setNewStatus(s);
-    await fetch(`/api/machines/${id}`, {
+    await authedFetch(`/api/machines/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: s }),
@@ -68,7 +69,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
 
   async function handleDelete() {
     if (!confirm(isAr ? "حذف هذه الماكينة وكل ملاحظاتها؟" : "Delete this machine and all its notes?")) return;
-    await fetch(`/api/machines/${id}`, { method: "DELETE" });
+    await authedFetch(`/api/machines/${id}`, { method: "DELETE" });
     router.push("/dashboard/machines");
   }
 

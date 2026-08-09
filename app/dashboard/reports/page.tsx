@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, FileText, Trash2 } from "lucide-react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
 
@@ -43,7 +44,7 @@ export default function ReportsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await fetch("/api/reports", {
+    await authedFetch("/api/reports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
@@ -55,7 +56,7 @@ export default function ReportsPage() {
 
   async function handleDelete(rid: string) {
     if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
-    await fetch(`/api/reports/${rid}`, { method: "DELETE" });
+    await authedFetch(`/api/reports/${rid}`, { method: "DELETE" });
     load();
   }
 

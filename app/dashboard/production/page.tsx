@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -87,7 +88,7 @@ export default function ProductionPage() {
       // ("PQPI 4 — 220") — the machine's identity everywhere (board included).
       const mac = machines.find((m) => m.label === form.machine);
       const payload = { ...form, machine: mac ? mac.label : form.machine, machineCode: mac ? mac.label : "" };
-      const res = await fetch("/api/runs", {
+      const res = await authedFetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -106,7 +107,7 @@ export default function ProductionPage() {
 
   async function handleDelete(id: string) {
     if (!confirm(p.common.confirmDelete)) return;
-    await fetch(`/api/runs/${id}`, { method: "DELETE" });
+    await authedFetch(`/api/runs/${id}`, { method: "DELETE" });
     load();
   }
 

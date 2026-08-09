@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getReports, addReport } from "@/lib/db";
+import { requireRole } from "@/lib/api-guard";
 
 export async function GET() {
   try {
@@ -12,6 +13,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const { month, year, jobs_completed, notes, issues, recommendations } = await req.json();
     const report = await addReport(

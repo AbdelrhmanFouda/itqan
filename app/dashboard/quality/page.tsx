@@ -6,6 +6,7 @@ import { pd } from "@/lib/i18n.prod";
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { Plus } from "lucide-react";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -80,7 +81,7 @@ export default function QualityPage() {
       // machine column = registry label (the machine's identity everywhere)
       const mac = machines.find((m) => m.label === form.machine);
       const payload = { ...form, machine: mac ? mac.label : form.machine, machineCode: mac ? mac.label : "" };
-      const res = await fetch("/api/runs", {
+      const res = await authedFetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
