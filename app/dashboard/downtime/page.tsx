@@ -25,8 +25,9 @@ type MachineInfo = { label: string; code: string; name: string; status: string }
 type Event = {
   id: string; date: string; machine: string; reason: string;
   minutes: number; startedAt: number; endedAt: number | null; createdBy: string;
+  estimated?: boolean;
 };
-type Data = { open: Event[]; today: Event[]; todayDate: string };
+type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string };
 
 /** Big enough to hit with a work glove on. */
 const TAP =
@@ -102,13 +103,18 @@ export default function DowntimePage() {
     URL.revokeObjectURL(url);
   }
 
-  async function stop(id: string) {
+  /**
+   * `estimate` closes a stoppage nobody stopped. It is always a deliberate tap
+   * by a person — nothing here closes anything on a timer — and the row is
+   * flagged `estimated` for good, capped server-side at the end of its shift.
+   */
+  async function stop(id: string, estimate = false) {
     if (busy) return;
     setBusy(true); setFailed(false);
     const res = await authedFetch("/api/downtime", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify(estimate ? { id, estimate: true } : { id }),
     }).catch(() => null);
     setBusy(false);
     if (!res || !res.ok) { setFailed(true); return; }
@@ -117,7 +123,9 @@ export default function DowntimePage() {
 
   if (machines === null || data === null) return <Spinner text={p.common.loading} />;
 
-  const openByMachine = new Set(data.open.map((e) => e.machine));
+  // A machine with an unclosed stoppage — running OR stale — must not be
+  // startable again; that would open a second event and double-count it.
+  const openByMachine = new Set([...data.open, ...data.stale].map((e) => e.machine));
   const lostToday = data.today.reduce((s, e) => s + e.minutes, 0);
   const reasonLabel = (key: string) => {
     const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === key);
@@ -146,6 +154,40 @@ export default function DowntimePage() {
         <div className="mb-4 rounded-xl border-2 border-red-200 bg-red-50 px-4 py-3 text-red-700">
           {t.failed}
         </div>
+      )}
+
+      {/* ---- Never stopped. Above everything: these carry no minutes at all, so
+           they are missing from Availability until somebody closes them. ---- */}
+      {data.stale.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-amber-700 mb-2">
+            {t.staleTitle} ({data.stale.length})
+          </h2>
+          <p className="text-sm text-gray-600 mb-3">{t.staleBody}</p>
+          <div className="space-y-3">
+            {data.stale.map((e) => (
+              <div
+                key={e.id}
+                className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-lg font-bold text-gray-900 truncate">{e.machine}</div>
+                  <div className="text-sm text-amber-800">
+                    {reasonLabel(e.reason)} · {t.staleSince} {e.date}
+                  </div>
+                </div>
+                <button
+                  onClick={() => stop(e.id, true)}
+                  disabled={busy}
+                  className={`${TAP} border-amber-600 bg-amber-600 text-white px-5 shrink-0`}
+                >
+                  {t.staleClose}
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-gray-500">{t.estimatedNote}</p>
+        </section>
       )}
 
       {/* ---- Running stoppages: the STOP half. Always first — a machine that is
@@ -249,7 +291,15 @@ export default function DowntimePage() {
               >
                 <div className="min-w-0">
                   <div className="font-semibold text-gray-900 truncate">{e.machine}</div>
-                  <div className="text-sm text-gray-500">{reasonLabel(e.reason)}</div>
+                  <div className="text-sm text-gray-500">
+                    {reasonLabel(e.reason)}
+                    {/* An estimate must never read as a measurement. */}
+                    {e.estimated && (
+                      <span className="ms-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                        {t.staleEstimated}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="text-lg font-bold text-gray-900 shrink-0">
                   {e.minutes} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>

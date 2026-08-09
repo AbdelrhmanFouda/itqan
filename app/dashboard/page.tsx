@@ -3,8 +3,9 @@ import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, BarChart3 } from "lucide-react";
+import { Plus, BarChart3, AlertTriangle } from "lucide-react";
 import { Stat, EmptyState } from "@/components/dashboard/ui";
+import { authedFetch } from "@/lib/authed-fetch";
 
 type Machine = { name: string; status: string };
 type Job = { id: string; code: string; status: string; dueDate: string };
@@ -20,6 +21,8 @@ type Run = {
   downtimeMin: number;
 };
 
+type StaleEvent = { id: string; date: string; machine: string; reason: string; startedAt: number };
+
 const OPERATIONAL = ["Operational", "تعمل", "Active"];
 const DONE = ["Completed", "Delivered"];
 
@@ -31,11 +34,20 @@ export default function DashboardPage() {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  // Stoppages started on the floor and never stopped. They carry no minutes, so
+  // they are absent from Availability — the owner has to see that here, not
+  // only on the entry page the floor uses.
+  const [stale, setStale] = useState<StaleEvent[]>([]);
 
   useEffect(() => {
     fetch("/api/machines").then((r) => r.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
     fetch("/api/jobs").then((r) => r.json()).then((j) => setJobs(j.jobs ?? [])).catch(() => {});
     fetch("/api/runs").then((r) => r.json()).then((r) => setRuns(Array.isArray(r) ? r : [])).catch(() => {});
+    // Guarded route (the rows carry createdBy), so this one is authenticated.
+    authedFetch("/api/downtime")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setStale(d?.stale ?? []))
+      .catch(() => {});
   }, []);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -71,6 +83,39 @@ export default function DashboardPage() {
     <div className="max-w-5xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-1">{p.overview.title}</h1>
       <p className="text-sm text-gray-500 mb-8">{p.overview.subtitle}</p>
+
+      {/* Unclosed stoppages. Deliberately ABOVE the stats: every number below
+          assumes downtime is fully logged, and this is the case where it is not. */}
+      {stale.length > 0 && (
+        <div
+          className="mb-8 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3"
+          dir={isAr ? "rtl" : "ltr"}
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-semibold text-amber-900">
+                {p.downtime.staleTitle} ({fmt(stale.length)})
+              </p>
+              <p className="text-sm text-amber-800 mt-0.5">{p.downtime.staleBody}</p>
+              <ul className="mt-2 space-y-0.5 text-sm text-amber-900">
+                {stale.slice(0, 4).map((e) => (
+                  <li key={e.id}>
+                    <span className="font-medium">{e.machine}</span> · {e.date}
+                  </li>
+                ))}
+                {stale.length > 4 && <li>…</li>}
+              </ul>
+              <Link
+                href="/dashboard/downtime"
+                className="inline-block mt-2 text-sm font-medium text-amber-900 underline"
+              >
+                {p.downtime.staleReview}
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         <Stat

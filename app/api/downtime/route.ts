@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getDowntimeEvents,
+  getDowntimeEventsBetween,
   getOpenDowntimeEvents,
   addDowntimeEvent,
   stopDowntimeEvent,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
-import { factoryDay } from "@/lib/dates";
+import { factoryDay, factoryDayEnd } from "@/lib/dates";
+import { isStaleOpen } from "@/lib/downtime";
 import { DOWNTIME_CAPTURE_REASONS } from "@/lib/prod-meta";
 
 /**
@@ -31,19 +32,23 @@ const REASON_KEYS = new Set(DOWNTIME_CAPTURE_REASONS.map((r) => r.key));
 export async function GET(req: NextRequest) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
+  const today = factoryDay();
   try {
-    const all = await getDowntimeEvents();
-    const open = all.filter((e) => e.endedAt == null);
-    const today = factoryDay();
+    // Bounded: today's rows for the day list, plus the (tiny) open-event query.
+    // Never the whole collection — see getDowntimeEventsBetween.
+    const [todayRows, open] = await Promise.all([
+      getDowntimeEventsBetween(today, today),
+      getOpenDowntimeEvents(),
+    ]);
     return NextResponse.json({
-      open,
-      today: all.filter((e) => e.date === today && e.endedAt != null),
-      recent: all.slice(0, 100),
+      open: open.filter((e) => !isStaleOpen(e, today)),   // running now, this shift
+      stale: open.filter((e) => isStaleOpen(e, today)),   // never stopped, day is over
+      today: todayRows.filter((e) => e.endedAt != null),
       todayDate: today,
     });
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ open: [], today: [], recent: [], todayDate: factoryDay() });
+    return NextResponse.json({ open: [], stale: [], today: [], todayDate: today });
   }
 }
 
@@ -73,6 +78,8 @@ export async function POST(req: NextRequest) {
       startedAt: Date.now(),
       endedAt: null,
       createdBy: g.user.email || g.user.uid,
+      estimated: false, // a tapped stop measures; only a later review estimates
+      closedBy: "",
     });
     return NextResponse.json({ ok: true, event, already: false });
   } catch (err) {
@@ -88,6 +95,26 @@ export async function PATCH(req: NextRequest) {
     const b = (await req.json()) as Record<string, unknown>;
     const id = String(b.id ?? "").trim();
     if (!id) return NextResponse.json({ ok: false, reason: "no_id" }, { status: 400 });
+
+    // Closing a stoppage nobody stopped. This is a REVIEW action — a person is
+    // looking at it and deciding — so the minutes may inform Availability, but
+    // the row is flagged `estimated` for good and capped at the end of its own
+    // factory day. Nothing in the system closes these on its own.
+    if (b.estimate === true) {
+      const ev = (await getOpenDowntimeEvents()).find((e) => e.id === id);
+      if (!ev) return NextResponse.json({ ok: false, reason: "not_open" }, { status: 404 });
+      const endedAt = factoryDayEnd(ev.date);
+      if (!endedAt || endedAt <= ev.startedAt) {
+        return NextResponse.json({ ok: false, reason: "bad_day" }, { status: 400 });
+      }
+      const res = await stopDowntimeEvent(id, {
+        endedAt,
+        estimated: true,
+        closedBy: g.user.email || g.user.uid,
+      });
+      return NextResponse.json({ ...res, estimated: true }, { status: res.ok ? 200 : 404 });
+    }
+
     const res = await stopDowntimeEvent(id);
     return NextResponse.json(res, { status: res.ok ? 200 : 404 });
   } catch (err) {

@@ -109,6 +109,33 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
     every run's `downtimeMin` was 0. `explain.availabilityMeasured` is no longer permanently
     false, and `explain.availabilitySource` says whether the number came from the capture,
     the sheet column, or both.
+  - **Unclosed stoppages are the expected failure mode**, not an edge case: the likeliest
+    real behaviour is an operator ending a shift without tapping stop. Such an event has no
+    duration, so it is excluded from Availability — which under-counts downtime while every
+    number still looks healthy. `isStaleOpen()` flags any event still open after its factory
+    day ended, and they are surfaced where the OWNER sees them (dashboard home banner,
+    `readiness.staleOpen`, and the monthly report), not only on the floor's entry page.
+    **Nothing auto-closes.** A person reviews each one and closes it, which caps the minutes
+    at the end of that factory day and marks the row `estimated: true` + `closedBy`, so a
+    reconstructed number can never be mistaken for a measured one. `explain`/the report
+    disclose the estimated total separately.
+  - Queries are **date-bounded** (`getDowntimeEventsBetween`) because OEE recomputes on every
+    request; only the CSV export reads the whole collection. Both bounds are a range on the
+    same field, so no composite index is needed — the rule `lib/db.ts` is built around.
+- **Monthly report draft (phase 3)** — `/dashboard/reports` was a blank manual form, which is
+  why it was empty. `GET /api/reports/draft?month=YYYY-MM` (guarded) composes an ARABIC draft
+  from `buildOEEData(month)` + the **existing** `generateReview()` in `lib/ai-review.ts`,
+  sharing the same `(cairoDay, month)` cache document as the Performance page — so a month
+  already reviewed today costs no extra LLM call, and the two surfaces can never disagree.
+  **There is no second AI path and no second prompt**; that review is already bilingual, so
+  the Arabic is its `.ar` half, and the deterministic `rulesReview()` fallback is Arabic too,
+  so the draft works with no API key (better with `GEMINI_API_KEY`).
+  `lib/report-draft.ts` is pure/import-free and unit-tested. It **never invents**:
+  `jobs_completed` stays blank because «أوامر العمل» has no completion date, and an
+  unmeasured Availability/Quality, estimated minutes, unallocated minutes and unclosed
+  stoppages are all stated in the text the owner reads.
+  The draft **is never auto-saved** — it fills the form's state, and the owner edits and
+  presses save, which goes through the unchanged `POST /api/reports`.
 
 ## The sheet model — read this before touching data code
 

@@ -188,6 +188,15 @@ export const pd = {
       failed: "Could not save — try again.",
       export: "Export CSV",
       machinesFailed: "Could not load the machine list.",
+      // Stoppages started and never stopped — see lib/downtime.ts isStaleOpen().
+      staleTitle: "Stoppages that were never stopped",
+      staleBody:
+        "These are NOT counted in Availability, so downtime is under-reported until each one is closed.",
+      staleReview: "Review them",
+      staleClose: "Close at end of shift",
+      staleEstimated: "estimated",
+      staleSince: "started",
+      estimatedNote: "Estimated — nobody tapped stop; capped at the end of that shift.",
     },
   },
   ar: {
@@ -372,6 +381,14 @@ export const pd = {
       failed: "مقدرناش نسجل — جرّب تاني.",
       export: "تنزيل CSV",
       machinesFailed: "مقدرناش نحمّل قائمة الماكينات.",
+      staleTitle: "توقفات مااتقفلتش",
+      staleBody:
+        "دي مش محسوبة في الجاهزية، يعني وقت التوقف أقل من الحقيقة لحد ما تتقفل.",
+      staleReview: "راجعها",
+      staleClose: "اقفلها بنهاية الوردية",
+      staleEstimated: "تقديري",
+      staleSince: "بدأت",
+      estimatedNote: "تقديري — محدش ضغط «رجعت تشتغل»، والوقت محسوب لحد نهاية الوردية.",
     },
   },
 } satisfies Record<Lang, unknown>;

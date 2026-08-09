@@ -43,10 +43,11 @@ export async function buildOEEData(month: string | null) {
     getRecords("master"),
     getRecords("machines"),
     loadHourlyRows().catch(() => [] as HourlyRow[]),
-    // Firestore downtime (PHASE 2). Best-effort like the hourly load: if
-    // Firestore is unreachable the OEE picture degrades to the pre-phase-2
+    // Firestore downtime (PHASE 2), bounded to the period being computed so
+    // this never scans the whole collection. Best-effort like the hourly load:
+    // if Firestore is unreachable the OEE picture degrades to the pre-phase-2
     // "downtime not measured" state rather than failing the whole page.
-    loadDowntimeTotals().catch(() => EMPTY_DOWNTIME),
+    loadDowntimeTotals(month).catch(() => EMPTY_DOWNTIME),
   ]);
 
   // Per-mold standards from Master, keyed by normalized code AND name.
@@ -310,6 +311,17 @@ export async function buildOEEData(month: string | null) {
     downtimeFromCapture,
     downtimeEventsInPeriod: capturedInPeriod.length,
     downtimeUnallocatedMin: spread.unallocatedMin,
+    // Minutes that are a reviewed ESTIMATE rather than a tapped stop.
+    downtimeEstimatedMin: captured.estimatedMin,
+    downtimeEstimatedCount: captured.estimatedCount,
+    /**
+     * Stoppages still running after their factory day ended. These carry NO
+     * minutes, so they are missing from Availability entirely — the number below
+     * is how much of the downtime picture is knowingly absent.
+     */
+    staleOpen: captured.staleOpen.map((e) => ({
+      id: e.id, date: e.date, machine: e.machine, reason: e.reason, startedAt: e.startedAt,
+    })),
     plannedSource,
     machinesTabFound,
     defaultShiftMin: DEFAULT_SHIFT_MIN,

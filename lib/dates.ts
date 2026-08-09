@@ -131,6 +131,22 @@ export function factoryDay(at: Date | number = Date.now()): string {
   return new Date(shifted).toISOString().slice(0, 10);
 }
 
+/**
+ * The instant a factory day ends — 08:00 Cairo the following morning, as epoch ms.
+ *
+ * Used to bound an ESTIMATED stop time: an operator who walked off without
+ * tapping stop cannot have been down past the end of that day's shift, so a
+ * reconstructed stoppage is capped here rather than running on forever.
+ * Returns 0 for an unparseable date so callers can reject it.
+ */
+export function factoryDayEnd(isoDate: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) return 0;
+  const startOfDayUtc = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  // back out of the factoryDay() shift, then add one whole day
+  return startOfDayUtc - CAIRO_OFFSET_MIN * 60000 + FACTORY_DAY_START_HOUR * 3600000 + 86400000;
+}
+
 /** Display an ISO date in the reader's locale (falls back to the raw string). */
 export function formatDate(iso: string, lang: "ar" | "en"): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);

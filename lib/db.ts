@@ -516,6 +516,16 @@ export type DowntimeEvent = {
   startedAt: number;   // epoch ms
   endedAt: number | null; // epoch ms, null while running
   createdBy: string;   // verified caller's email (or uid when no email claim)
+  /**
+   * TRUE when nobody tapped stop and the stop time was reconstructed instead —
+   * the operator walked off at end of shift. Estimated minutes are capped at the
+   * end of the event's factory day, and stay flagged everywhere downstream so a
+   * guess is never mistaken for a measurement. Nothing sets this automatically:
+   * a human has to review the stoppage and close it (see closeStaleDowntime).
+   */
+  estimated: boolean;
+  /** who closed it — empty for a tapped stop (that was `createdBy` at the machine). */
+  closedBy: string;
   createdAt?: number;
 };
 type DowntimeDoc = Omit<DowntimeEvent, "id">;
@@ -530,17 +540,35 @@ function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
     startedAt: d.startedAt ?? 0,
     endedAt: d.endedAt ?? null,
     createdBy: d.createdBy ?? "",
+    estimated: d.estimated ?? false,
+    closedBy: d.closedBy ?? "",
     createdAt: d.createdAt,
   };
 }
 
+const byDateDesc = (a: DowntimeEvent, b: DowntimeEvent) =>
+  a.date < b.date ? 1 : a.date > b.date ? -1 : (b.startedAt ?? 0) - (a.startedAt ?? 0);
+
+/**
+ * Events within an inclusive "YYYY-MM-DD" range.
+ *
+ * Bounded on purpose: the OEE engine recomputes this on every request, and an
+ * unbounded read of the whole collection would cost a full scan that grows
+ * without limit as stoppages accumulate. Both constraints are a range on the
+ * SAME field, so Firestore serves it from the automatic single-field index —
+ * still no composite index, which is the rule this file is built around.
+ */
+export async function getDowntimeEventsBetween(from: string, to: string): Promise<DowntimeEvent[]> {
+  const snap = await getDocs(
+    query(collection(db, PCOL.downtime), where("date", ">=", from), where("date", "<=", to)),
+  );
+  return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
+}
+
+/** Every event. Only for the CSV export, which genuinely wants the lot. */
 export async function getDowntimeEvents(): Promise<DowntimeEvent[]> {
   const snap = await getDocs(collection(db, PCOL.downtime));
-  return rows<DowntimeDoc>(snap)
-    .map((r) => shapeDowntime(r.id, r))
-    .sort((a, b) =>
-      a.date < b.date ? 1 : a.date > b.date ? -1 : (b.startedAt ?? 0) - (a.startedAt ?? 0)
-    );
+  return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
 }
 
 /** The still-running events (endedAt === null) — what the phone shows as "stop". */
@@ -566,14 +594,18 @@ export async function addDowntimeEvent(input: Omit<DowntimeEvent, "id" | "create
  * duration the client sends, so a wrong phone clock cannot invent downtime.
  * Already-stopped events are left untouched (a double-tapped stop is a no-op).
  */
-export async function stopDowntimeEvent(id: string, endedAt = Date.now()) {
+export async function stopDowntimeEvent(
+  id: string,
+  opts: { endedAt?: number; estimated?: boolean; closedBy?: string } = {},
+) {
+  const { endedAt = Date.now(), estimated = false, closedBy = "" } = opts;
   const ref = doc(db, PCOL.downtime, id);
   const snap = await getDoc(ref);
   if (!snap.exists()) return { ok: false as const, reason: "not_found" };
   const d = snap.data() as DowntimeDoc;
   if (d.endedAt != null) return { ok: true as const, minutes: d.minutes ?? 0, already: true };
   const minutes = Math.max(0, Math.round((endedAt - (d.startedAt ?? endedAt)) / 60000));
-  await updateDoc(ref, { endedAt, minutes });
+  await updateDoc(ref, { endedAt, minutes, estimated, closedBy });
   return { ok: true as const, minutes, already: false };
 }
 

@@ -38,6 +38,39 @@ export type DowntimeEventLike = {
   createdBy: string;
 };
 
+/* ------------------------ unclosed stoppages ------------------------------ */
+
+/**
+ * A stoppage whose factory day has ENDED while it is still running.
+ *
+ * This is the likeliest real failure of the capture: the operator taps start,
+ * the shift ends, nobody taps stop. The event then has no duration, so it is
+ * excluded from Availability — which under-counts downtime while every number
+ * on the page still looks healthy. That silence is the danger, so these are
+ * surfaced to the OWNER (dashboard home + the monthly report), not left on the
+ * entry page where only the floor would see them.
+ *
+ * Nothing closes them automatically. A human reviews and closes each one, which
+ * marks it `estimated` — an unreviewed guess must never reach Availability.
+ */
+export function isStaleOpen(
+  e: { endedAt: number | null; date: string },
+  today: string,
+): boolean {
+  return e.endedAt == null && !!e.date && e.date < today;
+}
+
+/**
+ * Minutes to record when closing a stoppage nobody stopped: elapsed time, capped
+ * at the end of its own factory day. The machine cannot have been down past the
+ * shift it was logged in, so the cap is what keeps a forgotten tap from
+ * inventing days of downtime.
+ */
+export function estimatedStopMinutes(startedAt: number, factoryDayEndMs: number): number {
+  if (!factoryDayEndMs || factoryDayEndMs <= startedAt) return 0;
+  return Math.max(0, Math.round((factoryDayEndMs - startedAt) / 60000));
+}
+
 export type DowntimeRun = {
   date: string;
   machine: string;

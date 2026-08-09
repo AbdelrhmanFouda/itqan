@@ -8,7 +8,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { distributeDowntime, downtimeKey, downtimeCsv, type DowntimeRun } from "../lib/downtime.ts";
+import {
+  distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen, estimatedStopMinutes,
+  type DowntimeRun,
+} from "../lib/downtime.ts";
+import { factoryDayEnd, factoryDay } from "../lib/dates.ts";
 
 const run = (date: string, machine: string, plannedMin = 720, downtimeMin = 0): DowntimeRun =>
   ({ date, machine, plannedMin, downtimeMin });
@@ -91,6 +95,44 @@ test("empty input is a no-op", () => {
   const r = distributeDowntime([], new Map());
   assert.deepEqual(r.perRun, []);
   assert.equal(r.unallocatedMin, 0);
+});
+
+/* ---------------------- unclosed stoppages (follow-up A) ------------------ */
+
+test("a stoppage is only stale once its OWN factory day has ended", () => {
+  const today = "2026-08-07";
+  assert.equal(isStaleOpen({ endedAt: null, date: "2026-08-06" }, today), true);
+  assert.equal(isStaleOpen({ endedAt: null, date: "2026-08-07" }, today), false, "still today");
+  assert.equal(isStaleOpen({ endedAt: 1, date: "2026-08-06" }, today), false, "already closed");
+  assert.equal(isStaleOpen({ endedAt: null, date: "" }, today), false, "no date to judge by");
+});
+
+test("a 02:00 stoppage is NOT stale — it belongs to the previous day's shift", () => {
+  // 00:00Z on the 8th = 02:00 Cairo, which factoryDay() files under the 7th.
+  const at = Date.parse("2026-08-08T00:00:00Z");
+  assert.equal(factoryDay(at), "2026-08-07");
+  assert.equal(isStaleOpen({ endedAt: null, date: "2026-08-07" }, factoryDay(at)), false);
+  // …and once the shift rolls over at 08:00 Cairo, it IS stale.
+  const next = Date.parse("2026-08-08T06:00:00Z");
+  assert.equal(factoryDay(next), "2026-08-08");
+  assert.equal(isStaleOpen({ endedAt: null, date: "2026-08-07" }, factoryDay(next)), true);
+});
+
+test("an estimated close is capped at the end of its factory day", () => {
+  const dayEnd = factoryDayEnd("2026-08-07");         // 08:00 Cairo on the 8th
+  assert.equal(new Date(dayEnd).toISOString(), "2026-08-08T06:00:00.000Z");
+  // Started 14:00 Cairo (12:00Z) → 18 hours to the end of the shift day.
+  const started = Date.parse("2026-08-07T12:00:00Z");
+  assert.equal(estimatedStopMinutes(started, dayEnd), 18 * 60);
+  // A full 24h shift's worth is the ceiling, never "days since".
+  const early = Date.parse("2026-08-07T06:00:00Z");   // 08:00 Cairo, shift start
+  assert.equal(estimatedStopMinutes(early, dayEnd), 24 * 60);
+});
+
+test("estimatedStopMinutes never returns a negative or a bogus value", () => {
+  assert.equal(estimatedStopMinutes(Date.parse("2026-08-09T00:00:00Z"), factoryDayEnd("2026-08-07")), 0);
+  assert.equal(estimatedStopMinutes(1, 0), 0, "unparseable day");
+  assert.equal(factoryDayEnd("not-a-date"), 0);
 });
 
 test("CSV quotes separators and carries a BOM for Excel", () => {
