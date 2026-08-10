@@ -22,6 +22,7 @@ import { scaleHours, type ScaleMode, type Shift } from "@/lib/sheet-import";
 
 type DraftRow = {
   id: string;
+  index: number | null;
   machinePaper: string; productPaper: string;
   hoursPaper: (number | null)[]; actualPaper: number | null; note: string | null;
   machine: string; product: string;
@@ -385,6 +386,13 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
                             className="w-4 h-4"
                           />
                           {r.include ? t.include : t.skipped}
+                          {/* The paper's own «#». A row that keeps its machine and
+                              product but takes the line below's numbers is the
+                              observed failure on a real photo, and the printed
+                              number is the only way to see it. */}
+                          {r.index !== null && (
+                            <span className="text-xs text-gray-400" dir="ltr">{t.paperRow} {r.index}</span>
+                          )}
                         </label>
                         <span
                           className={`text-xs px-2.5 py-1 rounded-full border ${

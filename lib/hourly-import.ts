@@ -45,6 +45,8 @@ const isOccupied = (r: SheetRecord) =>
 
 export type DraftRow = {
   id: string;
+  /** the row's printed «#» on the paper, so a slipped row is visible */
+  index: number | null;
   /** exactly as the model read it off the paper */
   machinePaper: string;
   productPaper: string;
@@ -201,7 +203,10 @@ function dateForNewRow(iso: string, rawDateFor: Map<string, string>): string {
 
 export async function buildDraft(vision: {
   date: string | null; shift: Shift | null; shiftHeading: string; model: string;
-  rows: { machine: string; product: string; hours: (number | null)[]; actualTotal: number | null; note: string | null }[];
+  rows: {
+    machine: string; product: string; hours: (number | null)[];
+    actualTotal: number | null; note: string | null; index: number | null;
+  }[];
 }): Promise<ImportDraft> {
   const iso = normalizeDate(vision.date ?? "");
   if (!iso) return { ok: false, reason: "no_date", detail: vision.date ?? "" };
@@ -221,6 +226,7 @@ export async function buildDraft(vision: {
 
     return {
       id: `r${i}`,
+      index: r.index,
       machinePaper: r.machine,
       productPaper: r.product,
       hoursPaper: r.hours,

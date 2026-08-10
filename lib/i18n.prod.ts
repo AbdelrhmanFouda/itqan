@@ -191,6 +191,8 @@ export const pd = {
         cavitiesHint: "The paper counts shots; the sheet counts pieces. This multiplier comes from «الرئيسي» and is not yet confirmed — check it.",
         cavitiesMissing: "No cavity count in Master — set the multiplier yourself.",
         paperReading: "On paper",
+
+        paperRow: "paper row",
         machine: "Machine",
         product: "Product",
         actual: "Counted (الفعلي)",
@@ -455,6 +457,8 @@ export const pd = {
         cavitiesHint: "الورقة بتعدّ الضربات والشيت بيعدّ القطع. المعامل ده جاي من «الرئيسي» ولسه مش مؤكَّد — راجعه.",
         cavitiesMissing: "مفيش عدد عيون في «الرئيسي» — اكتب المعامل بنفسك.",
         paperReading: "في الورقة",
+
+        paperRow: "سطر",
         machine: "الماكينة",
         product: "المنتج",
         actual: "الأجمالي الفعلي",

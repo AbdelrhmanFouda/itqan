@@ -423,16 +423,58 @@ Flash has a free tier and Pro does not; Pro would be ~$1/month; Flash-Lite is th
 vision tier and wrong for handwritten Arabic-Indic digits. A bake-off against Claude was
 attempted and is **inconclusive** — see the gotcha about the local Gemini key.
 
+### The first real photo — measured 2026-08-10, read this before tuning anything
+
+A real evening sheet (09/08/2026) was run end to end and scored against the rows that same
+page produced in «تسجيل الإنتاج». A row counts as clean when `sheetEvening ÷ paperValue`
+is a whole number 1–12 — that tests alignment AND digits without hand-transcribing.
+
+| Model | Score | Time |
+|---|---|---|
+| `gemini-2.5-flash` | **3/9** | 20 s |
+| `claude-opus-5` | **2/8** (dropped a row) | 126 s |
+| `claude-sonnet-5` | **2/9** | 57 s |
+| `gemini-2.5-pro` | — | HTTP 429, not on the free tier |
+
+**Do not respond to this by shopping for a better model.** Three models across two vendors
+score the same, disagree with each other, and disagree with *themselves* between runs at
+temperature 0. What they get right is telling: the printed columns (date, heading, all nine
+machine codes) are read perfectly every time, and both stopped machines correctly returned
+twelve nulls plus «توقف صيانة» rather than zeros.
+
+**The bottleneck is the photograph.** It arrived via WhatsApp — 1600×1200 and hard-
+compressed — hand-held at an angle with the page filling under half the frame, leaving
+**≈54 px per grid row** for handwritten Arabic-Indic digits. A flat, square-on, frame-
+filling shot sent as the original file is ≈250 px per row. Fix the photo before touching
+the prompt again.
+
+**The dangerous failure is row slip, not a misread digit.** A row keeps its correct machine
+and product and takes the numbers from the line below — زراير read 151 (EXT 55L's value)
+while still labelled زراير. The name looks right, so nothing in the preview flags it. That
+is why the prompt now anchors every row to its printed «#» and returns it, and why the
+preview shows «سطر N» — the printed number is the only way to see a slip. It is also why
+the multiplier stays visible: 1062 ÷ 118 = 9 exactly is what caught this one.
+
+The prompt was rewritten around these findings — see the comment above `PROMPT` in
+`lib/sheet-vision.ts`. The old wording said hours run *"left to right in the printed column
+order 8:00 … 7:00"*, which contradicts itself on a right-to-left page: 8:00 is the
+**rightmost** hour column. That one line is worth understanding before editing the prompt.
+
+**If a better photo does not fix it**, the structural fix is to crop each row band and read
+one row per request — row slip becomes impossible by construction. ~9 requests a page,
+still cents on Flash. Not built.
+
 ### Still open
 
 - The two questions above are unanswered. `docs/QUESTIONS-SHEET-OWNER.md` is written out in
   Egyptian Arabic for whoever types the sheet; the answers change only DEFAULTS, not code.
-- **No real photo has been run through this yet.** The Gemini path was verified live
-  (`gemini-2.5-flash`, HTTP 200) and every rule is unit-tested, but the prompt has never
-  met an actual photograph of the paper. Expect the first run to need prompt tuning, and
-  read the preview carefully before the first confirm.
 - «الفعلي» is multiplied by the same per-row multiplier as the hours. Whether the paper's
-  «الفعلي» is shots or already pieces is question 3 in that doc.
+  «الفعلي» is shots or already pieces is question 3 in that doc — and the totals column is
+  the worst-read part of the page (زراير read 1812 where the sheet says 22,609), so treat
+  a blank there as the safe default and check it by hand.
+- **`GEMINI_API_KEY` was never invalid** — the value in `.env.local` was one 53-character
+  token pasted twice. Halved on 2026-08-10; `gemini-2.5-flash` returns HTTP 200. The old
+  gotcha entry below is kept only so the symptom stays searchable.
 
 ## Conventions
 
