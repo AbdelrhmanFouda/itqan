@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import {
   shiftHourKeys, detectShift, parseCell, matchSheetRow, buildRowChanges,
   writableKeys, SHEET_HOUR_KEYS, FORMULA_KEYS, HOURS_PER_SHIFT,
+  scaleHours, sumCavities, findFreeRows, validateRowChanges, IDENTITY_KEYS,
+  BAND_FIRST_ROW, BAND_LAST_ROW,
   type ExtractedRow, type SheetRow,
 } from "../lib/sheet-import.ts";
 import { readFileSync } from "node:fs";
@@ -159,4 +161,138 @@ test("a missing actual total is omitted rather than blanked", () => {
 test("a written zero IS carried through", () => {
   const c = buildRowChanges("evening", row({ hours: [0, ...Array(11).fill(null)] }));
   assert.equal(c.h20, "0");
+});
+
+/* --------------------------- shots → pieces ------------------------------- */
+
+test("cavities parse the way Master actually writes them", () => {
+  // Verbatim shapes from «الرئيسي» H. This parser used to live in lib/jobs.ts;
+  // the import must multiply by exactly what the job maths divides by.
+  assert.equal(sumCavities("8"), 8);
+  assert.equal(sumCavities("4+4"), 8);
+  assert.equal(sumCavities("2 وش&2 كفر"), 4);
+  assert.equal(sumCavities("1 طقم"), 1);
+  assert.equal(sumCavities(""), 0);
+  assert.equal(sumCavities("غير متاح / N/A"), 0);
+});
+
+test("the three measured products scale paper → sheet exactly", () => {
+  // 09/08/2026: كرسي 23→23 (×1), كفر شفاف 80→160 (×2), زراير 118→1062 (×9).
+  assert.deepEqual(scaleHours([23], 1), [23]);
+  assert.deepEqual(scaleHours([80], 2), [160]);
+  assert.deepEqual(scaleHours([118], 9), [1062]);
+});
+
+test("a null hour stays null through scaling — it must never become a zero", () => {
+  // A 0 claims the machine ran and made nothing, which drags the day's
+  // efficiency down for a cell nobody filled in.
+  assert.deepEqual(scaleHours([null, 10, null], 3), [null, 30, null]);
+  assert.deepEqual(scaleHours([null, 10, null], 3, "flatten"), [null, 30, null]);
+  assert.deepEqual(scaleHours([null, null], 9, "flatten"), [null, null]);
+});
+
+test("flatten writes ONE constant, and only where the paper had a reading", () => {
+  // The historical shape: on paper `١١٨ ١١٨ ١١٩ ١١٩`, in the sheet `1062 ×11`.
+  const paper = [118, 118, 119, 119, null];
+  // mean 118.5 × 9 cavities = 1066.5 → 1067, close to the 1062 actually typed.
+  assert.deepEqual(scaleHours(paper, 9, "flatten"), [1067, 1067, 1067, 1067, null]);
+  // Faithful keeps each hour's own reading; only the shape differs.
+  assert.deepEqual(scaleHours(paper, 9, "faithful"), [1062, 1062, 1071, 1071, null]);
+});
+
+test("a nonsense multiplier falls back to ×1 rather than destroying the row", () => {
+  assert.deepEqual(scaleHours([23], 0), [23]);
+  assert.deepEqual(scaleHours([23], -5), [23]);
+  assert.deepEqual(scaleHours([23], NaN), [23]);
+});
+
+/* ----------------------------- free rows ---------------------------------- */
+
+test("a new row is found INSIDE the pre-filled band, never after it", () => {
+  // Appending would land on row 999 — past the formulas, past the AF:AH spill
+  // and past the validation, producing a row with no computed columns at all.
+  const occupied = new Set<number>();
+  for (let r = BAND_FIRST_ROW; r <= 206; r++) occupied.add(r);
+  const { rows, bandExhausted } = findFreeRows(occupied, 3);
+  assert.deepEqual(rows, [207, 208, 209]);
+  assert.equal(bandExhausted, false);
+  assert.ok(rows.every((r) => r >= BAND_FIRST_ROW && r <= BAND_LAST_ROW));
+});
+
+test("gaps in the middle of the band are reused", () => {
+  const occupied = new Set([5, 6, 8]);
+  assert.deepEqual(findFreeRows(occupied, 2).rows, [7, 9]);
+});
+
+test("a full band reports itself instead of overflowing past 998", () => {
+  const occupied = new Set<number>();
+  for (let r = BAND_FIRST_ROW; r <= BAND_LAST_ROW; r++) occupied.add(r);
+  const { rows, bandExhausted } = findFreeRows(occupied, 1);
+  assert.deepEqual(rows, []);
+  assert.equal(bandExhausted, true, "the owner must extend the band by hand");
+});
+
+/* --------------------- identity columns and the allow-list ----------------- */
+
+test("an UPDATE never rewrites the identity columns it matched on", () => {
+  const c = buildRowChanges("evening", row(), "update", {
+    date: "09/08/2026", shift: "مسائية", machine: "PQ 1 — 550", product: "كرسي",
+  });
+  for (const k of IDENTITY_KEYS) assert.equal(k in c, false, `${k} must not be rewritten`);
+});
+
+test("a CREATE writes the identity columns, or the blank row is unfindable forever", () => {
+  const c = buildRowChanges("evening", row(), "create", {
+    date: "09/08/2026", shift: "مسائية", machine: "PQ 1 — 550", product: "كرسي",
+  });
+  assert.equal(c.date, "09/08/2026");
+  assert.equal(c.shift, "مسائية");
+  assert.equal(c.machine, "PQ 1 — 550");
+  assert.equal(c.product, "كرسي");
+  assert.equal(c.h20, "23");
+});
+
+test("the allow-list refuses a formula column in BOTH modes", () => {
+  for (const mode of ["update", "create"] as const) {
+    for (const k of FORMULA_KEYS) {
+      const v = validateRowChanges({ [k]: "999" }, "evening", mode);
+      assert.equal(v.ok, false, `${k} in ${mode} must be refused`);
+      assert.deepEqual(v.ok === false && v.bad, [k]);
+    }
+  }
+});
+
+test("the allow-list refuses the OTHER shift's hours", () => {
+  // Writing h08 from an evening page would file a night's output as a morning's.
+  assert.equal(validateRowChanges({ h08: "1" }, "evening").ok, false);
+  assert.equal(validateRowChanges({ h20: "1" }, "morning").ok, false);
+  assert.equal(validateRowChanges({ h20: "1" }, "evening").ok, true);
+});
+
+test("the allow-list refuses identity columns on an UPDATE but allows them on CREATE", () => {
+  assert.equal(validateRowChanges({ product: "كرسي" }, "evening", "update").ok, false);
+  assert.equal(validateRowChanges({ product: "كرسي" }, "evening", "create").ok, true);
+});
+
+test("every change set buildRowChanges can produce passes its own allow-list", () => {
+  // The two must never drift: the builder is what runs, the validator is what
+  // guards, and a column the builder emits but the validator rejects would
+  // abort every import with no way to tell why.
+  for (const shift of ["morning", "evening"] as const) {
+    for (const mode of ["update", "create"] as const) {
+      const c = buildRowChanges(shift, row(), mode, {
+        date: "09/08/2026", shift: "مسائية", machine: "PQ 1 — 550", product: "كرسي",
+      });
+      assert.equal(validateRowChanges(c, shift, mode).ok, true, `${shift}/${mode}`);
+      for (const k of FORMULA_KEYS) assert.equal(k in c, false);
+    }
+  }
+});
+
+test("writableKeys never contains a formula column, whatever the mode", () => {
+  for (const shift of ["morning", "evening"] as const) {
+    for (const mode of ["update", "create"] as const) {
+      for (const k of FORMULA_KEYS) assert.equal(writableKeys(shift, mode).has(k), false);
+    }
+  }
 });

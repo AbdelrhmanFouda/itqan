@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
+import { useAuth } from "@/context/AuthContext";
+import { hasFullAccess } from "@/lib/roles";
 import { pd } from "@/lib/i18n.prod";
 import { Stat, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
+import PaperImport from "@/components/dashboard/paper-import";
 
 type HourlyRow = {
   row: number; date: string; shift: string; machine: string; product: string;
@@ -25,9 +28,15 @@ const effCls = (e: number | null) =>
 
 export default function HourlyPage() {
   const { lang } = useLang();
+  const { profile } = useAuth();
   const p = pd[lang];
   const t = p.hourly;
   const isAr = lang === "ar";
+  // The paper-sheet import is the OWNER's review surface, not a floor one. This
+  // page is also `worker`'s, and that flow must not gain a control, a question
+  // or a word of English — so the button simply is not rendered for them. The
+  // routes enforce the same rule server-side; this is only the UX half.
+  const canImport = profile?.role ? hasFullAccess(profile.role) : false;
 
   const [data, setData] = useState<Payload | null>(null);
   const [date, setDate] = useState<string>("");
@@ -62,6 +71,7 @@ export default function HourlyPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
         <div className="flex items-center gap-2">
+          {canImport && <PaperImport onWritten={(d) => load(d)} />}
           <select
             className={`${inputCls} w-auto`}
             value={date}

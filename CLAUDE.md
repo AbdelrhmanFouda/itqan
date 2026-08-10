@@ -309,10 +309,37 @@ Domain semantics:
   server-side without firebase-admin (Google securetoken certs, `aud`/`iss` = itqan-5f802),
   because org policy blocks service-account keys.
 
-## Reading the paper sheet — IN PROGRESS, read before touching it
+## Reading the paper sheet — BUILT (2026-08-10), read before touching it
 
-The goal: photograph the paper production sheet, have Gemini read it, show the owner an
-**editable preview**, and only on his confirmation write into «تسجيل الإنتاج».
+Photograph the paper production sheet → Gemini reads it → the owner gets an **editable
+preview** → only on his confirmation does anything reach «تسجيل الإنتاج».
+
+| Piece | File |
+|---|---|
+| Pure maths + every rule that fails silently | `lib/sheet-import.ts` (44 tests) |
+| The Gemini vision call | `lib/sheet-vision.ts` |
+| Read the sheet, resolve names, write | `lib/hourly-import.ts` |
+| Extract (owner/manager only, writes nothing) | `POST /api/hourly/import` |
+| Commit (owner/manager only, the ONLY write path) | `POST /api/hourly/import/commit` |
+| The editable grid | `components/dashboard/paper-import.tsx` |
+| Entry point | a button on `/dashboard/hourly`, **owner/manager only** |
+
+The button is role-gated on purpose. `/dashboard/hourly` is also `worker`'s page, and that
+flow may not gain a control, a question or a word of English — so workers see the page
+exactly as before. Both routes enforce the same rule server-side with `requireRole(req, [])`.
+
+**The two phases deliberately do not trust each other.** `buildDraft()` resolves the photo
+against the sheet and returns a preview; `commitDraft()` throws all of that away and
+re-derives every row number, name and free row from a FRESH read before writing. The
+browser's row numbers are a claim, not an instruction — the preview may have sat open for
+minutes while the crew edited the tab. A row that fails any check aborts the WHOLE import;
+a partial write into a shared log is harder to find than no write. This is the opposite of
+the assistant's accept/reject confirm, which is safe there only because the server itself
+built the payload seconds earlier.
+
+Writes go through `updateRecordsInTab()` (new, in `lib/sheets.ts`) — every cell of every
+row in ONE bridge POST. `/exec` returns HTML error pages under load, so ten sequential
+POSTs would be ten chances to half-apply an import.
 
 ### The paper
 
@@ -320,20 +347,48 @@ One page per SHIFT covering EVERY machine — not one page per machine.
 `الأنتاج اليومي لماكينات الحقن — الوردية المسائية | 09/08/2026`, then per row:
 `# | التاريخ | الماكينة/الكود | المنتج/الاسطمبة | 8:00 … 7:00 (twelve) | سستم | الفعلي`.
 
-### Two findings that change everything — verified, not assumed
+### Findings — verified against the live tab, not assumed
 
 1. **The paper counts SHOTS; the sheet counts PIECES.** Measured on 09/08/2026:
-   كرسي paper ~23 → sheet 23 (**×1**), كفر شفاف ~80 → 160 (**×2**), زراير ~118 → 1062
-   (**×9**). Exact integers across three products — it is the mould's cavity count.
-   **An import must multiply each cell by cavities from «الرئيسي», or it understates
-   production by up to 9×.** ⚠ Not yet confirmed by the owner in words; confirm before
-   writing anything.
+   كرسي paper 23 → sheet 23 (**×1**), كفر شفاف ~80 → 160 (**×2**), زراير 118 → 1062
+   (**×9**). **But «الرئيسي» H is NOT a reliable source for that multiplier** — re-checked
+   on 2026-08-10 against all ten rows of 09/08, and only four are even *divisible* by
+   Master's cavity count in both halves:
+
+   | Product | Master cav | Morning | Evening | |
+   |---|---|---|---|---|
+   | غطاء كبير زي بلاست | 4 | 564 | 652 | ✅ 141 / 163 |
+   | كرسي · عجلة مكنسة · جوان عجلة مكنسة | 1 | | | ✅ trivially |
+   | كفر شفاف العداد الكبير | 2 | **155** | 160 | ❌ 155 is odd |
+   | غطاء برميل احمر | 2 | **167** | — | ❌ 167 is prime |
+   | جراب كامل مكنسة | 4 | **258** | **135** | ❌ neither |
+   | حامل عجله | 8 | **1107** | **945** | ❌ by 8 — ✅ by **9** |
+   | زراير | 7 | 1239 | 1062 | ❌ 1239 needs **7**, 1062 needs **9** |
+
+   Consistent with the standing warning that Master holds the **design** count while moulds
+   run with cavities blocked. So the import defaults the multiplier from Master, shows it
+   next to the raw paper reading, and makes it **editable per row** — it never applies it
+   silently. Questions for whoever types the sheet: `docs/QUESTIONS-SHEET-OWNER.md`.
 2. **The sheet is NOT a transcription.** On paper the hours vary (`١١٨ ١١٨ ١١٩ ١١٩`); in
-   the sheet every row is ONE constant repeated eleven times (`1062 ×11`). Whoever types it
-   takes a representative rate, multiplies by cavities and fills right. So the existing
-   hourly columns carry **no real hour-to-hour variation** — per-hour analysis on historic
-   rows cannot show anything. A faithful import would produce data that looks different
-   from every historical row. The owner has not chosen faithful-vs-flattened yet.
+   the sheet every row is ONE constant repeated. Re-verified across **all ten** rows of
+   09/08: every shift-half of every row holds exactly one distinct value, repeated 8–11
+   times. Not a sample of one — it is how this sheet has always been filled. So historic
+   hourly columns carry **no real hour-to-hour variation** and per-hour analysis on them
+   shows nothing. The import defaults to **faithful** (each hour's own reading) with a
+   one-click **flatten** toggle, because faithful loses no information and the toggle makes
+   the choice reversible; the owner has still not ruled on which he wants.
+3. **There is NO «الوردية» column.** Verified 2026-08-10 — the real header row 4 is
+   `A التاريخ | B الماكينة/كود | C المنتج/الاسطمبة | D..AA the 24 hours | AB سستم |
+   AC الفعلي | AD المتوقع | AE الكفاءة | AF الهالك | AG حالة السجل | AH أساس احتساب الهالك`.
+   Both shifts share ONE row and the shift is implied purely by which half carries numbers.
+   `ENTITIES.hourly` still declares a `shift` field; `colIndex` finds no header, drops it,
+   and `HourlyRow.shift` has therefore always been `""`. Harmless, but do not "fix" it by
+   adding a column — that is a sheet change the owner must approve.
+4. **The band is real and roomy.** Live counts on 2026-08-10: last occupied row **228**,
+   **770 blank rows** left in 5…998. Blank rows carry no formula output at all (AB does not
+   render a `0`), so occupancy is unambiguous — but `findFreeRows` is still computed from
+   the identity/data columns only, never from AB, because a formula that started rendering
+   `0` would otherwise report the band full at row 5 and silently disable new rows.
 
 ### The write path — worked out, not yet built
 
@@ -368,11 +423,16 @@ Flash has a free tier and Pro does not; Pro would be ~$1/month; Flash-Lite is th
 vision tier and wrong for handwritten Arabic-Indic digits. A bake-off against Claude was
 attempted and is **inconclusive** — see the gotcha about the local Gemini key.
 
-### Still to build
+### Still open
 
-Extract endpoint → editable preview (must be editable; a misread digit has to be fixable)
-→ row writer → server-side re-validation on confirm. Note the assistant's existing confirm
-flow is accept/reject only and does NOT re-validate on confirm — do not copy that here.
+- The two questions above are unanswered. `docs/QUESTIONS-SHEET-OWNER.md` is written out in
+  Egyptian Arabic for whoever types the sheet; the answers change only DEFAULTS, not code.
+- **No real photo has been run through this yet.** The Gemini path was verified live
+  (`gemini-2.5-flash`, HTTP 200) and every rule is unit-tested, but the prompt has never
+  met an actual photograph of the paper. Expect the first run to need prompt tuning, and
+  read the preview carefully before the first confirm.
+- «الفعلي» is multiplied by the same per-row multiplier as the hours. Whether the paper's
+  «الفعلي» is shots or already pieces is question 3 in that doc.
 
 ## Conventions
 

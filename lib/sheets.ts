@@ -439,6 +439,50 @@ export async function updateRecord(entity: string, row: number, changes: Record<
   return postUpdates(plan.tab, plan.updates);
 }
 
+/**
+ * Update SEVERAL rows of one tab in a SINGLE bridge POST.
+ *
+ * The bridge takes `updates:[{row,col,value}]` across arbitrary rows, so a
+ * ten-row import is one request instead of ten. That matters here for two
+ * reasons: `/exec` returns HTML error pages under load (ten sequential POSTs is
+ * ten chances to hit one), and a half-applied import is far worse than a failed
+ * one — with a single POST the rows land together or not at all.
+ *
+ * Master-view entities are refused outright: their writes must go through
+ * `mapToMaster`'s identity check, and silently doing the wrong thing in bulk is
+ * exactly the failure this codebase has already paid for once.
+ */
+export async function updateRecordsInTab(
+  entity: string,
+  edits: { row: number; changes: Record<string, string> }[],
+): Promise<UpdateResult & { cells?: number }> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  const cfg = ENTITIES[entity];
+  if (!cfg) return { ok: false, reason: "bad_entity" };
+  if (MASTER_VIEWS.has(entity)) return { ok: false, reason: "master_view_not_supported" };
+  if (edits.length === 0) return { ok: true, cells: 0 };
+  if (edits.some((e) => !Number.isFinite(e.row) || e.row < 2)) return { ok: false, reason: "bad_row" };
+
+  const { values, title } = await fetchSheet(cfg.tab);
+  if (values.length < 2) return { ok: false, reason: "empty_sheet" };
+  const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
+
+  const updates: Cell[] = [];
+  for (const { row, changes } of edits) {
+    for (const [field, value] of Object.entries(changes)) {
+      const f = cfg.fields.find((x) => x.key === field);
+      if (!f) return { ok: false, reason: `unknown_field:${field}` };
+      const ci = colIndex(headers, f.keywords);
+      // A field with no column is a silent data loss in bulk — refuse instead.
+      if (ci < 0) return { ok: false, reason: `no_column:${field}` };
+      updates.push({ row, col: ci + 1, value: value ?? "" });
+    }
+  }
+  if (updates.length === 0) return { ok: true, cells: 0 };
+  const res = await postUpdates(title, updates);
+  return { ...res, cells: updates.length };
+}
+
 // Locate the edited record's Master row by its ID, then map fields → Master columns.
 async function mapToMaster(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
