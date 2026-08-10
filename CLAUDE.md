@@ -349,26 +349,34 @@ One page per SHIFT covering EVERY machine — not one page per machine.
 
 ### Findings — verified against the live tab, not assumed
 
-1. **The paper counts SHOTS; the sheet counts PIECES.** Measured on 09/08/2026:
-   كرسي paper 23 → sheet 23 (**×1**), كفر شفاف ~80 → 160 (**×2**), زراير 118 → 1062
-   (**×9**). **But «الرئيسي» H is NOT a reliable source for that multiplier** — re-checked
-   on 2026-08-10 against all ten rows of 09/08, and only four are even *divisible* by
-   Master's cavity count in both halves:
+1. **The paper counts SHOTS; the sheet counts PIECES, and the multiplier IS «الرئيسي» H.**
+   Confirmed on 2026-08-10 against the owner's own reading of the paper, on five products:
 
-   | Product | Master cav | Morning | Evening | |
+   | Product | Paper, per hour | Master cav | × | Sheet |
    |---|---|---|---|---|
-   | غطاء كبير زي بلاست | 4 | 564 | 652 | ✅ 141 / 163 |
-   | كرسي · عجلة مكنسة · جوان عجلة مكنسة | 1 | | | ✅ trivially |
-   | كفر شفاف العداد الكبير | 2 | **155** | 160 | ❌ 155 is odd |
-   | غطاء برميل احمر | 2 | **167** | — | ❌ 167 is prime |
-   | جراب كامل مكنسة | 4 | **258** | **135** | ❌ neither |
-   | حامل عجله | 8 | **1107** | **945** | ❌ by 8 — ✅ by **9** |
-   | زراير | 7 | 1239 | 1062 | ❌ 1239 needs **7**, 1062 needs **9** |
+   | كرسي | 23 | 1 | 23 | **23** |
+   | غطاء كبير زي بلاست | 163 | 4 | 652 | **652** |
+   | حامل عجله | 118 | 8 | 944 | **945** |
+   | زراير | 151 | 7 | 1057 | **1062** |
+   | كفر شفاف العداد الكبير | 80 | 2 | 160 | **160** |
 
-   Consistent with the standing warning that Master holds the **design** count while moulds
-   run with cavities blocked. So the import defaults the multiplier from Master, shows it
-   next to the raw paper reading, and makes it **editable per row** — it never applies it
-   silently. Questions for whoever types the sheet: `docs/QUESTIONS-SHEET-OWNER.md`.
+   The sheet's per-row constant is `round(mean(paper hours) × cavities)`, which is why two
+   rows land a few units off a single hour's reading: `1062 ÷ 7 = 151.71`, and the owner
+   confirms that row is **151s with a 152 among them**. The mean is fractional by design.
+
+   ⚠️ **An earlier version of this file claimed the opposite** — that Master's cavity count
+   was unreliable because only four of ten rows were exactly divisible by it. That analysis
+   was wrong twice over, and both mistakes are easy to repeat:
+   - It divided the sheet value by **one observed hour** and demanded a whole number. The
+     typist multiplies the **mean**, which is usually fractional (77.5, 118.1, 151.7), so a
+     non-integer result is the expected outcome, not evidence against Master.
+   - Its زراير row rested on a paper value of **118**, which was a misread of `١٥١`. In this
+     handwriting `٥` closes into a loop that reads as `٨`. That single glyph produced a
+     phantom "×9 where Master says 7" and, from it, a wrong conclusion about the whole
+     column. **When a derived multiplier disagrees with Master, suspect the digit first.**
+
+   The multiplier still defaults from Master, is shown next to the raw paper reading, and is
+   **editable per row** — but it is now a well-supported default rather than a guess.
 2. **The sheet is NOT a transcription.** On paper the hours vary (`١١٨ ١١٨ ١١٩ ١١٩`); in
    the sheet every row is ONE constant repeated. Re-verified across **all ten** rows of
    09/08: every shift-half of every row holds exactly one distinct value, repeated 8–11
@@ -469,11 +477,11 @@ evening where the sheet value divides cleanly, so the correct paper reading is *
 
 | Input | Gold score |
 |---|---|
-| Photo 1 (hand-held, angled, WhatsApp) | 2/5 |
+| Photo 1 (hand-held, angled, WhatsApp) | 2/6 |
 | Photo 2 **sent sideways** | catastrophic — hallucinated 20 rows, duplicated PQ 13 across the blanks |
-| Photo 2, rotation corrected | 2/5 |
-| Photo 2, rotated **+ cropped to the table** | **4/5**, stable over three runs |
-| Photo 2, rotated + cropped + one request per row | 3/5 — *worse* |
+| Photo 2, rotation corrected | 2/6 |
+| Photo 2, rotated **+ cropped to the table** | **6/6** |
+| Photo 2, rotated + cropped + one request per row | worse — see below |
 
 Three things this settles:
 
@@ -489,13 +497,17 @@ Three things this settles:
    build the per-row crop pipeline the earlier note suggested — this is the measurement
    that retires that idea.
 
-**The residual failure has a mechanism.** On the best run the errors are not scattered —
-rows 3–6 are shifted up by exactly one (جوان عجلة مكنسة takes حامل عجله's numbers, حامل
-عجله takes زراير's, زراير takes EXT 55L's, EXT gets nothing) while rows 1, 2, 8 and 9 are
-correct. The desync starts at row 3, which is **mostly dashes and blanks**, and re-syncs at
-row 7, which carries «متوقف صيانة» written across it. The model loses vertical registration
-across a visually empty row and regains it at a strongly marked one. A sparse row is
-therefore the hazard, not a dense one — which is the opposite of the intuition.
+4. **There is no row-slip bug.** An earlier revision of this file described a confident
+   mechanism — "rows 3–6 shift up by one, desyncing at a sparse row and resyncing at a
+   marked one". **That was an artifact of the wrong gold values above.** Once زراير is 151
+   and حامل عجله is 118, every row the model returned on the cropped image is correct, and
+   the "shift" disappears. The lesson is about method, not vision: a plausible mechanism was
+   fitted to a pattern that only existed in the yardstick. Re-derive before theorising.
+
+**Reading the paper by eye: the handwriting sits BELOW its printed row label.** Each
+product name in the right-hand column aligns with the band *under* it, not the one beside
+it. That offset is what makes hand-checking a photo error-prone — and it is how the `١٥١`
+misread survived into two documents.
 
 **The lever nobody has pulled yet is a non-WhatsApp original.** Both photos came through
 WhatsApp, which caps the long edge at 1600 px. A phone original is 3000–4000 px. Combined
