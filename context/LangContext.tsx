@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Lang } from "@/lib/i18n";
+import { isArabicOnlyPath } from "@/lib/arabic-only";
 
 /**
  * Language, remembered.
@@ -34,17 +35,6 @@ const LangContext = createContext<{
   lang: Lang;
   setLang: (l: Lang) => void;
 }>({ lang: "en", setLang: () => {} });
-
-/**
- * Routes that are ALWAYS Arabic, whatever is stored and whoever is signed in.
- * The downtime capture page is used by workers who do not read English, so
- * Arabic there must not depend on a preference or on finding a toggle.
- * Forced at render time only — the stored preference is left alone, so the
- * owner opening this page does not have the rest of the site switched on him.
- */
-const ARABIC_ONLY = ["/dashboard/downtime"];
-export const isArabicOnlyPath = (p: string | null | undefined): boolean =>
-  !!p && ARABIC_ONLY.some((r) => p === r || p.startsWith(`${r}/`));
 
 export function LangProvider({ children }: { children: ReactNode }) {
   // Initialised from storage during the very first client render, so the tree

@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useLang, isArabicOnlyPath } from "@/context/LangContext";
+import { useLang } from "@/context/LangContext";
+import { isArabicOnlyPath } from "@/lib/arabic-only";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { t } from "@/lib/i18n";
