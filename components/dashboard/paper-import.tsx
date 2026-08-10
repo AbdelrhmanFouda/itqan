@@ -263,6 +263,10 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
 
         <div className="p-4 sm:p-5 space-y-4">
           <p className="text-sm text-gray-500">{t.intro}</p>
+          {/* Framing is the single biggest lever on accuracy — measured, not
+              guessed: the same page scored 2/5 whole-frame and 4/5 once the
+              background was cropped away, with no extra pixels involved. */}
+          {!draft && <p className="text-xs text-gray-400">{t.tips}</p>}
 
           <div className="flex flex-wrap items-center gap-3">
             <input

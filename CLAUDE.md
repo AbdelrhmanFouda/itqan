@@ -460,9 +460,46 @@ The prompt was rewritten around these findings — see the comment above `PROMPT
 order 8:00 … 7:00"*, which contradicts itself on a right-to-left page: 8:00 is the
 **rightmost** hour column. That one line is worth understanding before editing the prompt.
 
-**If a better photo does not fix it**, the structural fix is to crop each row band and read
-one row per request — row slip becomes impossible by construction. ~9 requests a page,
-still cents on Flash. Not built.
+### Second photo, same page — what actually moves the number
+
+A second shot of the SAME page (flat on a table, whole page in frame, but photographed
+sideways and again via WhatsApp) was scored against a tighter metric: five rows of 09/08
+evening where the sheet value divides cleanly, so the correct paper reading is **known**
+(كرسي 23, غطاء كبير 163, زراير 118, كفر شفاف 80, غطاء برميل احمر stopped).
+
+| Input | Gold score |
+|---|---|
+| Photo 1 (hand-held, angled, WhatsApp) | 2/5 |
+| Photo 2 **sent sideways** | catastrophic — hallucinated 20 rows, duplicated PQ 13 across the blanks |
+| Photo 2, rotation corrected | 2/5 |
+| Photo 2, rotated **+ cropped to the table** | **4/5**, stable over three runs |
+| Photo 2, rotated + cropped + one request per row | 3/5 — *worse* |
+
+Three things this settles:
+
+1. **Framing is the biggest lever, and it is free.** Cropping added no pixels — it only
+   removed the table, the chair and the other papers — and it took the score from 2/5 to
+   4/5. It is also what finally read `163` instead of `63`, an error present in *every*
+   previous run across both photos and all three models. A photo that fills the frame is
+   that crop, taken for nothing.
+2. **Orientation must be right before the model sees it.** A sideways page does not degrade
+   gracefully; it collapses.
+3. **One-request-per-row makes it WORSE.** Tested twice. The model uses neighbouring rows to
+   calibrate digit shapes and row boundaries, and isolating a row throws that away. Do not
+   build the per-row crop pipeline the earlier note suggested — this is the measurement
+   that retires that idea.
+
+**The residual failure has a mechanism.** On the best run the errors are not scattered —
+rows 3–6 are shifted up by exactly one (جوان عجلة مكنسة takes حامل عجله's numbers, حامل
+عجله takes زراير's, زراير takes EXT 55L's, EXT gets nothing) while rows 1, 2, 8 and 9 are
+correct. The desync starts at row 3, which is **mostly dashes and blanks**, and re-syncs at
+row 7, which carries «متوقف صيانة» written across it. The model loses vertical registration
+across a visually empty row and regains it at a strongly marked one. A sparse row is
+therefore the hazard, not a dense one — which is the opposite of the intuition.
+
+**The lever nobody has pulled yet is a non-WhatsApp original.** Both photos came through
+WhatsApp, which caps the long edge at 1600 px. A phone original is 3000–4000 px. Combined
+with filling the frame, that is roughly 4× the pixels per digit over anything measured here.
 
 ### Still open
 

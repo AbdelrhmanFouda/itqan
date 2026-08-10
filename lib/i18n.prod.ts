@@ -171,6 +171,8 @@ export const pd = {
         open: "Read paper sheet",
         title: "Read the paper production sheet",
         intro: "Photograph one shift's page. Nothing is saved until you press write, and the photo itself is never stored.",
+
+        tips: "Lay the page flat, shoot straight down with the phone sideways so the page fills the frame, and send the original file — not through WhatsApp, which shrinks it. Framing matters more than anything else: the same page read twice as accurately once the background was cropped out.",
         pick: "Choose a photo",
         retake: "Choose another photo",
         reading: "Reading the photo…",
@@ -437,6 +439,8 @@ export const pd = {
         open: "قراءة ورقة الإنتاج",
         title: "قراءة ورقة الإنتاج المصوّرة",
         intro: "صوّر ورقة وردية واحدة. لا يُكتب أي شيء في الشيت إلا بعد ضغطك على «اكتب»، والصورة نفسها لا تُحفظ في أي مكان.",
+
+        tips: "حط الورقة مفرودة على الترابيزة، وصوّر من فوق بالظبط والموبايل بالعرض، وخلي الورقة مالية الكادر كله. وابعت الملف الأصلي — مش من واتساب لأنه بيصغّر الصورة. طريقة التصوير أهم حاجة: نفس الورقة اتقرت بضعف الدقة لما شيلنا الخلفية.",
         pick: "اختر صورة",
         retake: "اختر صورة أخرى",
         reading: "جاري قراءة الصورة…",
