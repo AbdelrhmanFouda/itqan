@@ -128,7 +128,26 @@ sidebar and `canAccess()`.
   `/dashboard/downtime` is a phone-first Arabic page: pick machine → pick reason → start →
   stop, **four taps, no typing**. That constraint is evidence-driven — the six sheet columns
   that need typing are empty across 417 rows, while the tapped hourly log has 20 unbroken
-  days. `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
+  days. **Treat it as a hard constraint: no extra tap, question, menu, free-text field or
+  word of English may be added to that flow.** Raise it with the owner instead.
+  - The reason buttons are the owner's own eight (`DOWNTIME_CAPTURE_REASONS`), in his order,
+    «أخرى» last. ONE FLAT LIST — never grouped into planned/unplanned sections or a
+    two-step pick; that distinction is none of the worker's business.
+  - Each reason carries `planned` (and `organisational`) as **metadata set in code**. The
+    worker is never asked it and never sees it. It surfaces only on owner-facing surfaces:
+    `explain.plannedDowntimeMin` / `unplannedDowntimeMin` / `organisationalDowntimeMin` and
+    the monthly report, so the report can state what share of downtime was avoidable.
+    ⚠ Those keys are named `*DowntimeMin` on purpose — `explain.plannedMin` already means
+    planned PRODUCTION time and would be silently overwritten by a key called `plannedMin`.
+  - Unknown reason keys count as **unplanned**, so a stray value cannot flatter the
+    avoidable-downtime number.
+  - `ALL_DOWNTIME_REASONS` keeps the retired keys (Breakdown, Material, No order, Quality
+    hold, None) resolving for display and grouping — they are still in the sheet's own
+    «سبب التوقف» vocabulary, and dropping them would make sheet-side downtime ungroupable.
+  - **The page is always Arabic** (`ARABIC_ONLY` in `context/LangContext.tsx`), whatever is
+    stored and whoever is signed in — it is used by people who do not read English. The
+    language toggle is hidden there rather than left dead. The forcing is render-only, so
+    an owner visiting the page does not have the rest of the site switched on him. `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
   including the reads, because the rows carry `createdBy`.
   - The server stamps `startedAt` and computes minutes from the STORED start on stop, so a
     phone with a wrong clock cannot invent downtime that would flow into Availability.
@@ -282,6 +301,9 @@ Domain semantics:
 
 - i18n: `lib/i18n*.ts` — `en` and `ar` objects MUST keep the same shape. UI strings never
   hardcoded. `dir={isAr ? "rtl" : "ltr"}` on containers.
+- **Language is remembered** (`localStorage["itqan.lang"]`) and restored by an inline script
+  in `app/layout.tsx` BEFORE hydration, so there is no flash of English. It used to reset to
+  English on every mount. That script and `LANG_STORAGE_KEY` must stay in sync.
 - Charts are hand-built SVG in `components/dashboard/charts.tsx` — no chart libraries.
 - Mobile: base Tailwind classes are the phone layout; desktop is preserved under `md:`/`sm:`
   overrides. Tables get an `sm:hidden`/`md:hidden` card-list twin instead of shrinking.

@@ -1,4 +1,4 @@
-import { getRecords } from "@/lib/sheets";
+import { getRecords, type SheetRecord } from "@/lib/sheets";
 import {
   computeOEE, oeeBy, oeeByMachine, weakestFactor, topLoss, suspectStandards,
   type RunInput, type MoldStandard,
@@ -7,6 +7,7 @@ import { normalizeDate, latinDigits } from "@/lib/dates";
 import { loadHourlyRows, deriveScrap, type HourlyRow } from "@/lib/hourly";
 import { distributeDowntime } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
+import { isPlannedDowntime, isOrganisationalDowntime } from "@/lib/prod-meta";
 
 /**
  * The OEE dataset — one function, one truth. Reads the sheet's Production tab,
@@ -34,6 +35,81 @@ const num = (v: unknown) => {
 /** Join key for molds/machines: Arabic digits → Latin, lowercase, collapsed spaces. */
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/* -------------------------------------------------------------------------- */
+/* Shared with /api/runs.                                                      */
+/*                                                                             */
+/* Downtime is joined onto sheet runs in TWO places now — here for OEE, and in */
+/* /api/runs for every page that reads a run list. The join only produces the   */
+/* same minutes in both if the run key, the planned time and the stub rule are  */
+/* identical, so those three live here and are imported rather than re-written. */
+/* Re-implementing any of them is how the Overview tile and /performance came   */
+/* to disagree in the first place.                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The physical machine id for a run: the code label when logged, else the
+ * tonnage. Tonnage alone is ambiguous — PQ 5 and PQ 7 are both 100 t — so the
+ * code wins wherever the crew wrote one.
+ */
+export const machineKeyOf = (machineCode: string | undefined, machine: string | undefined) =>
+  (machineCode || "").trim() || latinDigits((machine || "—").trim());
+
+/**
+ * Planned minutes per machine, from the machines REGISTRY (one row per physical
+ * machine, no dates). Indexed by code label ("PQ 7 — 100"), bare code and
+ * tonnage so any of the three spellings a run might carry will hit.
+ */
+export function buildShiftLengthIndex(records: SheetRecord[]): Map<string, number> {
+  const lenByKey = new Map<string, number>();
+  for (const m of records) {
+    const len = num(m.shiftLength);
+    if (len <= 0) continue;
+    const code = (m.code || "").trim();
+    const name = latinDigits((m.name || "").trim());
+    const label = code ? `${code} — ${name}` : name ? `${name} — بدون كود` : "";
+    for (const k of [label, code, name]) {
+      const nk = normKey(k);
+      if (nk && !lenByKey.has(nk)) lenByKey.set(nk, len);
+    }
+  }
+  return lenByKey;
+}
+
+/**
+ * Planned time for one run: its own planned column → the machine's registry
+ * shift length → DEFAULT_SHIFT_MIN.
+ *
+ * This matters more than it looks. «الإنتاج» has no planned-minutes column at
+ * all, so `ownPlannedMin` is 0 on every one of its rows and the fallback is
+ * what supplies the number. distributeDowntime() gives each run only
+ * `plannedMin − downtimeMin` of headroom — with plannedMin left at 0 there is no
+ * headroom anywhere, every captured minute comes back as `unallocatedMin`, and
+ * the merge silently produces zero.
+ */
+export function resolvePlannedMin(
+  ownPlannedMin: number,
+  machineKey: string,
+  rawMachine: string | undefined,
+  lenByKey: Map<string, number>,
+): number {
+  if (ownPlannedMin > 0) return ownPlannedMin;
+  return lenByKey.get(normKey(machineKey)) ?? lenByKey.get(normKey(rawMachine)) ?? DEFAULT_SHIFT_MIN;
+}
+
+/**
+ * A row with nothing logged at all — no good units, no scrap, no downtime.
+ * Excluded from OEE, and excluded from the downtime spread as well: an empty
+ * row still has planned minutes, so it would otherwise absorb a share of the
+ * day's stoppage here and not in OEE, and the two totals would part company.
+ */
+// Takes Record<string, unknown> rather than a three-optional-field shape: the
+// callers pass a SheetRecord ({row:number} & Record<string,string>), and TS's
+// weak-type check rejects that against an all-optional parameter.
+export const isStubRun = (r: Record<string, unknown>): boolean => {
+  const blank = (v: unknown) => !v || !String(v).trim();
+  return blank(r.goodUnits) && blank(r.scrapUnits) && blank(r.downtimeMin);
+};
 
 export type OEEData = Awaited<ReturnType<typeof buildOEEData>>;
 
@@ -67,24 +143,13 @@ export async function buildOEEData(month: string | null) {
   // Planned time: the machines tab is a REGISTRY (one row per physical machine,
   // keyed by code — no dates). Planned minutes = that machine's shift length,
   // looked up by its code label ("PQPI 4 — 220"), bare code, or tonnage.
-  const lenByKey = new Map<string, number>();
-  for (const m of machinesTab.records) {
-    const len = num(m.shiftLength);
-    if (len <= 0) continue;
-    const code = (m.code || "").trim();
-    const name = latinDigits((m.name || "").trim());
-    const label = code ? `${code} — ${name}` : name ? `${name} — بدون كود` : "";
-    for (const k of [label, code, name]) {
-      const nk = normKey(k);
-      if (nk && !lenByKey.has(nk)) lenByKey.set(nk, len);
-    }
-  }
+  // Shared with /api/runs — see buildShiftLengthIndex().
+  const lenByKey = buildShiftLengthIndex(machinesTab.records);
   const machinesTabFound = machinesTab.records.length > 0;
 
   // Classify + normalize the raw rows.
-  type Raw = (typeof prod.records)[number];
   const isBlank = (v: string | undefined) => !v || !String(v).trim();
-  const isStub = (r: Raw) => isBlank(r.goodUnits) && isBlank(r.scrapUnits) && isBlank(r.downtimeMin);
+  const isStub = isStubRun; // shared with /api/runs — see isStubRun()
 
   let stubs = 0, withMold = 0, withScrap = 0, withDowntime = 0;
   const plannedSource = { column: 0, machines: 0, default: 0 };
@@ -102,7 +167,7 @@ export async function buildOEEData(month: string | null) {
 
     // Physical machine = the code label when logged (several tonnages have
     // TWO machines — the code is the only unique id), else the tonnage.
-    const machine = (r.machineCode || "").trim() || latinDigits((r.machine || "—").trim());
+    const machine = machineKeyOf(r.machineCode, r.machine);
     const date = normalizeDate(r.date);
     // Join key: mold CODE when logged, else the PRODUCT NAME (what
     // supervisors actually write) — Master standards are keyed by both.
@@ -110,13 +175,11 @@ export async function buildOEEData(month: string | null) {
     const moldLabel = (r.mold || r.product || "").trim();
 
     const ownPlanned = num(r.plannedMin);
-    let plannedMin: number;
-    if (ownPlanned > 0) { plannedMin = ownPlanned; plannedSource.column++; }
-    else {
-      const fromPlan = lenByKey.get(normKey(machine)) ?? lenByKey.get(normKey(r.machine));
-      if (fromPlan) { plannedMin = fromPlan; plannedSource.machines++; }
-      else { plannedMin = DEFAULT_SHIFT_MIN; plannedSource.default++; }
-    }
+    const plannedMin = resolvePlannedMin(ownPlanned, machine, r.machine, lenByKey);
+    // Which of the three sources answered — reported in `readiness`.
+    if (ownPlanned > 0) plannedSource.column++;
+    else if (lenByKey.has(normKey(machine)) || lenByKey.has(normKey(r.machine))) plannedSource.machines++;
+    else plannedSource.default++;
 
     if (moldKey) {
       const cur = moldUnits.get(moldKey) ?? { label: moldLabel, units: 0, hasStd: standards.has(moldKey) };
@@ -262,8 +325,40 @@ export async function buildOEEData(month: string | null) {
   for (const r of runs) addPareto(r.downtimeReason || "None", num(r.sheetDowntimeMin));
   for (const e of capturedInPeriod) addPareto(e.reason, e.minutes);
   const downtime = Object.entries(reasonMap)
-    .map(([reason, minutes]) => ({ reason, minutes }))
+    .map(([reason, minutes]) => ({
+      reason,
+      minutes,
+      // Metadata carried from lib/prod-meta.ts — set in code, never asked of the
+      // worker. It exists so owner-facing surfaces can separate scheduled work
+      // from failures; the capture page shows one flat list and never mentions it.
+      planned: isPlannedDowntime(reason),
+      organisational: isOrganisationalDowntime(reason),
+    }))
     .sort((a, b) => b.minutes - a.minutes);
+
+  // Planned vs unplanned split — how much of the lost time was avoidable.
+  // Unknown reasons count as UNPLANNED (see isPlannedDowntime), so a stray value
+  // can never flatter this number.
+  const plannedMinTotal = downtime.filter((d) => d.planned).reduce((s, d) => s + d.minutes, 0);
+  const unplannedMinTotal = downtime.filter((d) => !d.planned).reduce((s, d) => s + d.minutes, 0);
+  const organisationalMinTotal = downtime
+    .filter((d) => d.organisational)
+    .reduce((s, d) => s + d.minutes, 0);
+  // ⚠ Named *DowntimeMin, NOT plannedMin. `explain.plannedMin` already means the
+  // planned PRODUCTION time; a key called plannedMin here would silently
+  // overwrite it when this is spread into explain, and quietly corrupt both the
+  // "how is this calculated" panel and the AI digest.
+  const downtimeSplit = {
+    plannedDowntimeMin: plannedMinTotal,
+    unplannedDowntimeMin: unplannedMinTotal,
+    /** «عدم وجود عامل» and friends — a rota problem, not a machine problem. */
+    organisationalDowntimeMin: organisationalMinTotal,
+    /** Share of recorded downtime that was NOT scheduled work (0..1). */
+    unplannedDowntimeShare:
+      plannedMinTotal + unplannedMinTotal > 0
+        ? unplannedMinTotal / (plannedMinTotal + unplannedMinTotal)
+        : 0,
+  };
 
   // Daily trend — OEE factors + scrap per ISO day. Undated runs are excluded
   // from the trend (still in the totals above).
@@ -356,6 +451,12 @@ export async function buildOEEData(month: string | null) {
     overspeedMin: Math.round(overall.overspeedMin),
     goodUnits: overall.goodUnits,
     scrapUnits: overall.scrapUnits,
+    /**
+     * How much of the recorded downtime was scheduled work versus failure.
+     * OWNER-FACING ONLY — the worker is never asked which kind a stoppage is;
+     * the classification is metadata on the reason (lib/prod-meta.ts).
+     */
+    ...downtimeSplit,
   };
 
   return {

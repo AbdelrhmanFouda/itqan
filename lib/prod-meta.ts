@@ -56,28 +56,93 @@ export const jobStatusToSheet = (v: string): string => JOB_STATUS_AR[v] ?? v;
 export const jobPriorityToSheet = (v: string): string => JOB_PRIORITY_AR[v] ?? v;
 export const DOWNTIME_REASONS = ["None", "Mold change", "Breakdown", "Material", "No order", "Quality hold", "Other"];
 
+export type DowntimeReason = {
+  /** Stored value. English and STABLE — the Arabic wording can be reworded
+   *  later without orphaning captured history. */
+  key: string;
+  /** What the floor sees. The only half a worker ever reads. */
+  ar: string;
+  /** Owner-facing surfaces only (never rendered on the capture page). */
+  en: string;
+  /**
+   * Was this stoppage scheduled work, or a failure?
+   *
+   * ⚠ METADATA ONLY — set once, here, in code. The worker is never asked it,
+   * never sees it and never chooses it, and the buttons are NEVER grouped by it:
+   * a flat list keeps a distinction that is none of his business off his screen.
+   * It exists purely so owner-facing surfaces (OEE explain, the performance page,
+   * the monthly report) can say what share of downtime was avoidable.
+   */
+  planned: boolean;
+  /**
+   * Organisational rather than mechanical — nobody was there to run the machine.
+   * The monthly report gives this its own line instead of letting it disappear
+   * into a per-machine breakdown, because the fix is a rota, not a spanner.
+   */
+  organisational?: boolean;
+};
+
 /**
- * The five buttons on the phone capture page (/dashboard/downtime).
+ * The buttons on the phone capture page (/dashboard/downtime).
  *
- * The stored `reason` is the canonical ENGLISH key so downtime captured on the
- * phone lands in the SAME Pareto bucket as downtime typed into the sheet's
- * «سبب التوقف» column — four of these five already exist in DOWNTIME_REASONS
- * above; only "Maintenance" is new. The operator only ever sees `ar`.
+ * The owner's own list, in the owner's own order — most frequent first, «أخرى»
+ * last, so the common case is the nearest tap. ONE FLAT LIST: no groups, no
+ * headers, no sub-menus, no categories. The interaction is machine → reason →
+ * start, then stop, and it must stay exactly that.
  *
- * Order is deliberate: the two most frequent stoppages first, «أخرى» last, so
- * the common case is the nearest tap.
+ * The stored `reason` is the canonical English key, so phone-captured downtime
+ * lands in the same Pareto bucket as anything typed into the sheet's «سبب
+ * التوقف» column. "Mold change", "Maintenance" and "Other" keep the keys they
+ * already had.
  */
-export const DOWNTIME_CAPTURE_REASONS: { key: string; ar: string; en: string }[] = [
-  { key: "Breakdown", ar: "مش شغالة", en: "Not running" },
-  { key: "Mold change", ar: "تغيير اسطمبة", en: "Mold change" },
-  { key: "Maintenance", ar: "صيانة", en: "Maintenance" },
-  { key: "Material", ar: "خامة خلصت", en: "Out of material" },
-  { key: "Other", ar: "أخرى", en: "Other" },
+export const DOWNTIME_CAPTURE_REASONS: DowntimeReason[] = [
+  { key: "Setup",            ar: "ضبط منتج",                  en: "Product setup",     planned: true },
+  { key: "Nozzle burn",      ar: "حرق فونيه",                 en: "Nozzle burn",       planned: false },
+  { key: "Mold change",      ar: "تغيير الاسطمبة",            en: "Mold change",       planned: true },
+  { key: "Mold maintenance", ar: "صيانة الاسطمبة",            en: "Mold maintenance",  planned: false },
+  { key: "Maintenance",      ar: "صيانة في الماكينة",          en: "Machine maintenance", planned: false },
+  { key: "Material drying",  ar: "تجفيف خامة",                en: "Material drying",   planned: true },
+  { key: "No operator",      ar: "توقف بسبب عدم وجود عامل",    en: "No operator",       planned: false, organisational: true },
+  { key: "Other",            ar: "أخرى",                      en: "Other",             planned: false },
 ];
 
+/**
+ * Keys that are no longer offered as buttons but MUST still resolve.
+ *
+ * The sheet's own «سبب التوقف» vocabulary (DOWNTIME_REASONS above) still holds
+ * these, so anything typed there — now or in the future — would otherwise be
+ * ungroupable and would fall back to showing a bare English key on an Arabic
+ * page. Retired for capture, kept for display and grouping.
+ */
+const RETIRED_DOWNTIME_REASONS: DowntimeReason[] = [
+  { key: "Breakdown",    ar: "عطل",              en: "Breakdown",    planned: false },
+  { key: "Material",     ar: "خامة",             en: "Material",     planned: false },
+  { key: "No order",     ar: "لا يوجد أمر شغل",   en: "No order",     planned: false, organisational: true },
+  { key: "Quality hold", ar: "إيقاف للجودة",      en: "Quality hold", planned: false },
+  { key: "None",         ar: "لا يوجد",           en: "None",         planned: true },
+];
+
+/** Every key that can appear in data — offered or retired. Lookup only. */
+export const ALL_DOWNTIME_REASONS: DowntimeReason[] = [
+  ...DOWNTIME_CAPTURE_REASONS,
+  ...RETIRED_DOWNTIME_REASONS,
+];
+
+const reasonFor = (key: string) => ALL_DOWNTIME_REASONS.find((r) => r.key === key);
+
 /** Canonical downtime key → the crew's Arabic wording (falls back to the key). */
-export const downtimeReasonAr = (key: string): string =>
-  DOWNTIME_CAPTURE_REASONS.find((r) => r.key === key)?.ar ?? key;
+export const downtimeReasonAr = (key: string): string => reasonFor(key)?.ar ?? key;
+
+/**
+ * Was this downtime planned? Unknown keys count as UNPLANNED — an unrecognised
+ * stoppage is not evidence that it was scheduled, and calling it planned would
+ * quietly flatter the avoidable-downtime number.
+ */
+export const isPlannedDowntime = (key: string): boolean => reasonFor(key)?.planned ?? false;
+
+/** Organisational (a rota problem, not a machine problem). */
+export const isOrganisationalDowntime = (key: string): boolean =>
+  reasonFor(key)?.organisational ?? false;
 // Shift definitions. Canonical English value stored in the sheet; UI label is
 // localised via lib/i18n.prod.ts `runs.shifts` (index-aligned with this array).
 export const SHIFTS = ["Day", "Night"];

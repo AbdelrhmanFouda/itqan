@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useLang } from "@/context/LangContext";
+import { useLang, isArabicOnlyPath } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { t } from "@/lib/i18n";
@@ -141,13 +141,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <span className="text-xs text-gray-400 hidden md:inline">
             {profile.email} · <span className="text-blue-600 font-medium">{a.roles[profile.role]}</span>
           </span>
-          <button
-            onClick={() => setLang(isAr ? "en" : "ar")}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors"
-          >
-            <Globe size={12} />
-            {isAr ? "EN" : "عربي"}
-          </button>
+          {/* Hidden on the Arabic-only routes: the downtime capture page is
+              always Arabic, so a toggle there would be a control that does
+              nothing. Better absent than dead. */}
+          {!isArabicOnlyPath(pathname) && (
+            <button
+              onClick={() => setLang(isAr ? "en" : "ar")}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors"
+            >
+              <Globe size={12} />
+              {isAr ? "EN" : "عربي"}
+            </button>
+          )}
           <button
             onClick={handleSignOut}
             className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded px-2.5 py-1.5 transition-colors"

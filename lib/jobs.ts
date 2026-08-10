@@ -1,6 +1,11 @@
-import { getRecords } from "@/lib/sheets";
+import { getRecords, type SheetRecord } from "@/lib/sheets";
 import { normalizeDate, latinDigits } from "@/lib/dates";
 import { jobStatusFromSheet, jobPriorityFromSheet } from "@/lib/prod-meta";
+import { distributeDowntime, downtimeKey } from "@/lib/downtime";
+import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
+import {
+  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
+} from "@/lib/oee-data";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
@@ -93,10 +98,18 @@ export async function loadJobs(): Promise<{
   writable: boolean;
   configured: boolean;
 }> {
-  const [jobsTab, prodTab, masterTab] = await Promise.all([
+  const [jobsTab, prodTab, masterTab, machinesTab, captured] = await Promise.all([
     getRecords("jobs"),
     getRecords("production"),
     getRecords("master"),
+    // Downtime is not in the sheet — «الإنتاج»!J has never been filled. It is
+    // captured on a phone into Firestore and joined on below, the same way
+    // /api/runs and buildOEEData do it, so a job's downtime total matches what
+    // the Overview and /performance report for the same runs. Best-effort: if
+    // either source is unreachable the page degrades to "no downtime measured"
+    // instead of failing.
+    getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
+    loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
   ]);
 
   // Product → standards, first row wins (same as the sheet's VLOOKUP).
@@ -114,20 +127,55 @@ export async function loadJobs(): Promise<{
   }
 
   // Shape production rows once, keyed by normalized product/mold.
-  const runs = prodTab.records
-    .map((r) => ({
-      id: String(r.row),
-      key: normKey(r.mold) || normKey(r.product),
-      date: normalizeDate(r.date),
-      machine: latinDigits((r.machine || "").trim()),
-      goodUnits: num(r.goodUnits),
-      scrapUnits: num(r.scrapUnits),
-      downtimeMin: num(r.downtimeMin),
-      downtimeReason: r.downtimeReason || "None",
-      operator: r.operator || "",
-      note: r.note || "",
-    }))
-    .filter((r) => r.key);
+  // NOTE: shaped BEFORE the `.filter(r => r.key)` below so the downtime spread
+  // sees every row of the day. A run with no product name still consumed the
+  // machine's planned minutes, so dropping it first would hand its share of the
+  // stoppage to the other runs and inflate them.
+  const shaped = prodTab.records.map((r) => ({
+    id: String(r.row),
+    key: normKey(r.mold) || normKey(r.product),
+    date: normalizeDate(r.date),
+    machine: latinDigits((r.machine || "").trim()),
+    goodUnits: num(r.goodUnits),
+    scrapUnits: num(r.scrapUnits),
+    downtimeMin: num(r.downtimeMin),
+    downtimeReason: r.downtimeReason || "None",
+    operator: r.operator || "",
+    note: r.note || "",
+  }));
+
+  // Phone-captured downtime, spread across each day+machine's runs — identical
+  // key, planned-minutes fallback and stub rule to buildOEEData (see the shared
+  // helpers in lib/oee-data.ts) so the totals cannot drift apart.
+  const lenByKey = buildShiftLengthIndex(machinesTab.records);
+  const live: number[] = [];
+  prodTab.records.forEach((rec, i) => { if (!isStubRun(rec)) live.push(i); });
+  const spread = distributeDowntime(
+    live.map((i) => {
+      const rec = prodTab.records[i];
+      const mk = machineKeyOf(rec.machineCode, rec.machine);
+      return {
+        date: shaped[i].date || "",
+        machine: mk,
+        plannedMin: resolvePlannedMin(num(rec.plannedMin), mk, rec.machine, lenByKey),
+        downtimeMin: shaped[i].downtimeMin,
+      };
+    }),
+    captured.byKey,
+  );
+  live.forEach((i, j) => {
+    const add = spread.perRun[j];
+    if (add <= 0) return;
+    const rec = prodTab.records[i];
+    const known = shaped[i].downtimeReason && shaped[i].downtimeReason !== "None";
+    shaped[i].downtimeMin += add;
+    if (!known) {
+      shaped[i].downtimeReason =
+        captured.dominantByKey.get(downtimeKey(shaped[i].date, machineKeyOf(rec.machineCode, rec.machine))) ?? "Other";
+    }
+  });
+
+  const runs = shaped.filter((r) => r.key);
 
   const matches = (job: JobShaped) => {
     const keys = new Set([normKey(job.moldCode), normKey(job.product)].filter(Boolean));

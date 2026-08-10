@@ -32,7 +32,7 @@ export type DraftOEE = {
     performanceKnown: boolean;
     goodUnits: number; scrapUnits: number; downtimeMin: number; plannedMin: number;
   };
-  downtime: { reason: string; minutes: number }[];
+  downtime: { reason: string; minutes: number; planned?: boolean; organisational?: boolean }[];
   machines: { machine: string; oee: number; performanceKnown: boolean; weakest: string | null }[];
   readiness: {
     runs: number;
@@ -41,7 +41,13 @@ export type DraftOEE = {
     downtimeUnallocatedMin: number;
     staleOpen: { machine: string; date: string; reason: string }[];
   };
-  explain: { availabilityMeasured: boolean; qualityMeasured: boolean };
+  explain: {
+    availabilityMeasured: boolean;
+    qualityMeasured: boolean;
+    plannedDowntimeMin?: number;
+    unplannedDowntimeMin?: number;
+    organisationalDowntimeMin?: number;
+  };
   runCount: number;
 };
 
@@ -129,9 +135,36 @@ export function buildReportDraft(
     issues.push("أهم أسباب التوقف:");
     for (const r of top) {
       const share = total > 0 ? ` (${((r.minutes / total) * 100).toFixed(0)}%)` : "";
-      issues.push(`• ${reasonAr(r.reason)} — ${int(r.minutes)} دقيقة${share}`);
+      // Planned/unplanned is stated here, on the owner's page. It is never asked
+      // of the worker — it is metadata on the reason itself.
+      const kind = r.planned ? " — مخطط" : " — غير مخطط";
+      issues.push(`• ${reasonAr(r.reason)} — ${int(r.minutes)} دقيقة${share}${kind}`);
     }
     issues.push("");
+  }
+
+  // How much of the stoppage time was avoidable.
+  const plannedMin = d.explain.plannedDowntimeMin ?? 0;
+  const unplannedMin = d.explain.unplannedDowntimeMin ?? 0;
+  if (plannedMin + unplannedMin > 0) {
+    const share = (unplannedMin / (plannedMin + unplannedMin)) * 100;
+    issues.push(
+      `التوقف المخطط: ${int(plannedMin)} دقيقة · غير المخطط: ${int(unplannedMin)} دقيقة ` +
+        `(${share.toFixed(0)}% من وقت التوقف كان يمكن تفاديه).`,
+      "",
+    );
+  }
+
+  // «توقف بسبب عدم وجود عامل» is organisational, not mechanical — the fix is a
+  // rota, not a spanner. It gets its own line so it cannot disappear inside a
+  // per-machine breakdown where it would look like a machine fault.
+  const orgMin = d.explain.organisationalDowntimeMin ?? 0;
+  if (orgMin > 0) {
+    issues.push(
+      `⚠ ${int(orgMin)} دقيقة توقف سببها تنظيمي (مش عطل في الماكينة) — زي عدم وجود عامل. ` +
+        "دي بتتحل بجدول الورديات مش بالصيانة.",
+      "",
+    );
   }
 
   // Stoppages nobody closed — they are MISSING from the numbers above.
