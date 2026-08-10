@@ -1,8 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
+import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Stat, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
+import { authedFetch } from "@/lib/authed-fetch";
+import { uploadHourlyPhoto, removeUploadedPhoto } from "@/lib/photo-upload";
+import { PHOTO_ACCEPT } from "@/lib/photos";
 
 type HourlyRow = {
   row: number; date: string; shift: string; machine: string; product: string;
@@ -23,8 +27,15 @@ const effCls = (e: number | null) =>
   : e >= 0.75 ? "border-amber-300 bg-amber-50 text-amber-700"
   : "border-red-200 bg-red-50 text-red-700";
 
+type Photo = {
+  id: string; date: string; machine: string; path: string; url: string;
+  sizeBytes: number; createdBy: string; createdAt?: number;
+};
+type MachineInfo = { label: string };
+
 export default function HourlyPage() {
   const { lang } = useLang();
+  const { user, loading: authLoading } = useAuth();
   const p = pd[lang];
   const t = p.hourly;
   const isAr = lang === "ar";
@@ -32,6 +43,90 @@ export default function HourlyPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [date, setDate] = useState<string>("");
   const [loading, setLoading] = useState(true);
+
+  /* ------------------------- log-sheet photos --------------------------- */
+  // A photo of the PAPER sheet, so the record survives the gap between the crew
+  // filling it in and somebody typing it into «تسجيل الإنتاج».
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [machines, setMachines] = useState<MachineInfo[]>([]);
+  const [busyMachine, setBusyMachine] = useState<string | null>(null);
+  const [photoErr, setPhotoErr] = useState(false);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const pendingMachine = useRef<string>("");
+
+  const loadPhotos = useCallback(async (d: string) => {
+    if (!d) return;
+    try {
+      const res = await authedFetch(`/api/hourly-photos?date=${d}`);
+      if (res.ok) setPhotos((await res.json()).photos ?? []);
+    } catch {
+      /* the table is still useful without them */
+    }
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/machines")
+      .then((r) => r.json())
+      .then((d) => setMachines(d.machines ?? []))
+      .catch(() => setMachines([]));
+  }, []);
+
+  // Wait for the session: /api/hourly-photos is guarded, and authedFetch reads
+  // auth.currentUser, which is null for the first moments after a page load.
+  useEffect(() => {
+    if (authLoading || !user || !date) return;
+    loadPhotos(date);
+  }, [authLoading, user, date, loadPhotos]);
+
+  /** Tapping a machine opens the camera straight away — the machine is implied,
+   *  so there is no picker step and nothing to type. */
+  function capture(machine: string) {
+    if (busyMachine) return;
+    setPhotoErr(false);
+    pendingMachine.current = machine;
+    fileInput.current?.click();
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same machine be photographed twice in a row
+    const machine = pendingMachine.current;
+    if (!file || !machine || !date) return;
+
+    setBusyMachine(machine);
+    setPhotoErr(false);
+    let uploaded: { path: string; url: string; sizeBytes: number } | null = null;
+    try {
+      uploaded = await uploadHourlyPhoto(file, date, machine);
+      const res = await authedFetch("/api/hourly-photos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, machine, ...uploaded }),
+      });
+      if (!res.ok) throw new Error("meta_failed");
+      await loadPhotos(date);
+    } catch {
+      setPhotoErr(true);
+      // Don't leave bytes in the bucket that nothing points at.
+      if (uploaded) await removeUploadedPhoto(uploaded.path);
+    }
+    setBusyMachine(null);
+  }
+
+  async function deletePhoto(ph: Photo) {
+    if (!confirm(t.photoConfirmDelete)) return;
+    try {
+      const res = await authedFetch(`/api/hourly-photos?id=${ph.id}`, { method: "DELETE" });
+      if (res.ok) {
+        // The server cannot touch Storage (it is unauthenticated there); the
+        // browser can, as the signed-in user.
+        await removeUploadedPhoto(ph.path);
+        await loadPhotos(date);
+      }
+    } catch {
+      setPhotoErr(true);
+    }
+  }
 
   async function load(d?: string) {
     setLoading(true);
@@ -88,6 +183,80 @@ export default function HourlyPage() {
           <Stat label={t.machines} value={data.totals.machines} />
         </div>
       )}
+
+      {/* ---- Photos of the paper log sheet ----------------------------------
+           Above the table on purpose: the whole point is to capture the sheet
+           BEFORE anyone types it up, so a worker must meet this first. One tap
+           per machine opens the camera; there is nothing to type. */}
+      <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <h2 className="font-semibold text-gray-900">{t.photos}</h2>
+          <span className="text-xs text-gray-500">{date}</span>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">{t.photosHint}</p>
+
+        <input
+          ref={fileInput}
+          type="file"
+          accept={PHOTO_ACCEPT}
+          capture="environment"
+          onChange={onFile}
+          className="hidden"
+        />
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+          {machines.map((m) => {
+            const busy = busyMachine === m.label;
+            const count = photos.filter((ph) => ph.machine === m.label).length;
+            return (
+              <button
+                key={m.label}
+                onClick={() => capture(m.label)}
+                disabled={!!busyMachine || !date}
+                className="min-h-[56px] rounded-xl border-2 border-gray-300 bg-white px-3 py-2 text-base font-semibold text-gray-900 transition active:scale-[0.98] hover:border-blue-400 disabled:opacity-50 disabled:active:scale-100"
+              >
+                <span className="block truncate">{m.label}</span>
+                <span className="block text-xs font-normal text-gray-500">
+                  {busy ? t.photoUploading : count > 0 ? `📷 ${count}` : "＋"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {photoErr && (
+          <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {t.photoFailed}
+          </p>
+        )}
+
+        {photos.length === 0 ? (
+          <p className="mt-3 text-sm text-gray-400">{t.photosNone}</p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {photos.map((ph) => (
+              <figure key={ph.id} className="rounded-lg border border-gray-200 overflow-hidden">
+                <a href={ph.url} target="_blank" rel="noopener noreferrer" title={t.photoOpen}>
+                  {/* Plain <img>: these are user photos on a Firebase Storage
+                      domain, not build-time assets, so next/image would need a
+                      remote-pattern allowlist for no benefit here. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={ph.url} alt={`${ph.machine} — ${ph.date}`} className="h-28 w-full object-cover" />
+                </a>
+                <figcaption className="px-2 py-1.5">
+                  <span className="block truncate text-xs font-medium text-gray-800">{ph.machine}</span>
+                  <button
+                    onClick={() => deletePhoto(ph)}
+                    className="mt-0.5 text-xs text-red-600 hover:underline"
+                  >
+                    {t.photoDelete}
+                  </button>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </section>
 
       {loading && data === null ? (
         <Spinner text={p.common.loading} />

@@ -7,7 +7,7 @@ import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
   buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
-} from "@/lib/oee-data";
+} from "@/lib/run-join";
 
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
 // data model). Each run is one row; the sheet row number is its id.

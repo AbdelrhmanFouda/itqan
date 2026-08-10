@@ -12,7 +12,9 @@ const firebaseConfig: FirebaseOptions = {
 };
 
 // Reuse the existing app during hot-reload / serverless reuse.
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+// Exported so lib/photo-upload.ts can reach Firebase Storage without
+// initialising a second app.
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 export const auth = getAuth(app);

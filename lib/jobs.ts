@@ -5,7 +5,7 @@ import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
   buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
-} from "@/lib/oee-data";
+} from "@/lib/run-join";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.

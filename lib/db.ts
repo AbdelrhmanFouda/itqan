@@ -279,6 +279,7 @@ const PCOL = {
   jobs: "jobs",
   runs: "productionRuns",
   downtime: "downtimeEvents",
+  hourlyPhotos: "hourlyPhotos",
 } as const;
 
 /* ------------------------------- Molds ------------------------------ */
@@ -611,6 +612,71 @@ export async function stopDowntimeEvent(
 
 export async function deleteDowntimeEvent(id: string) {
   await deleteDoc(doc(db, PCOL.downtime, id));
+  return { ok: true };
+}
+
+/* ----------------------- Hourly log-sheet photos -------------------------- */
+
+/**
+ * Metadata for a photo of the PAPER hourly log. The bytes live in Firebase
+ * Storage at `path`; only this record is in Firestore — see lib/photos.ts for
+ * why the image is not inlined here.
+ *
+ * Keyed to DAY + MACHINE, matching a «تسجيل الإنتاج» row. Several photos per
+ * key are expected (a shift can fill more than one sheet), so this is a plain
+ * collection, not one doc per row.
+ */
+export type HourlyPhoto = {
+  id: string;
+  date: string;        // YYYY-MM-DD, factory day (08:00→07:00)
+  machine: string;     // «الماكينات»!J label, e.g. "PQ 7 — 100"
+  path: string;        // Firebase Storage object path
+  url: string;         // download URL, resolved at upload time
+  sizeBytes: number;
+  createdBy: string;   // verified caller's email (or uid)
+  createdAt?: number;
+};
+type HourlyPhotoDoc = Omit<HourlyPhoto, "id">;
+
+function shapeHourlyPhoto(id: string, d: Partial<HourlyPhotoDoc>): HourlyPhoto {
+  return {
+    id,
+    date: d.date ?? "",
+    machine: d.machine ?? "",
+    path: d.path ?? "",
+    url: d.url ?? "",
+    sizeBytes: d.sizeBytes ?? 0,
+    createdBy: d.createdBy ?? "",
+    createdAt: d.createdAt,
+  };
+}
+
+/** Photos for one factory day. Bounded by a single-field equality — no index. */
+export async function getHourlyPhotos(date: string): Promise<HourlyPhoto[]> {
+  const snap = await getDocs(query(collection(db, PCOL.hourlyPhotos), where("date", "==", date)));
+  return rows<HourlyPhotoDoc>(snap)
+    .map((r) => shapeHourlyPhoto(r.id, r))
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+}
+
+export async function addHourlyPhoto(input: Omit<HourlyPhoto, "id" | "createdAt">) {
+  const ref = await addDoc(collection(db, PCOL.hourlyPhotos), {
+    ...input,
+    createdAt: Date.now(),
+  });
+  return { id: ref.id, ...input };
+}
+
+export async function getHourlyPhoto(id: string): Promise<HourlyPhoto | null> {
+  const snap = await getDoc(doc(db, PCOL.hourlyPhotos, id));
+  if (!snap.exists()) return null;
+  return shapeHourlyPhoto(snap.id, snap.data() as HourlyPhotoDoc);
+}
+
+/** Removes the METADATA only — the caller deletes the Storage object, which it
+ *  can do as the signed-in user. */
+export async function deleteHourlyPhoto(id: string) {
+  await deleteDoc(doc(db, PCOL.hourlyPhotos, id));
   return { ok: true };
 }
 

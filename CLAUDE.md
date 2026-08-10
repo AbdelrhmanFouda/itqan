@@ -178,6 +178,24 @@ sidebar and `canAccess()`.
   - Queries are **date-bounded** (`getDowntimeEventsBetween`) because OEE recomputes on every
     request; only the CSV export reads the whole collection. Both bounds are a range on the
     same field, so no composite index is needed — the rule `lib/db.ts` is built around.
+- **Hourly log-sheet photos** — `lib/photos.ts` (pure: paths, sizing) +
+  `lib/photo-upload.ts` (browser: compress + upload) + `/api/hourly-photos` (guarded
+  metadata) + a capture strip on `/dashboard/hourly`. A photo of the PAPER sheet, keyed to
+  **day + machine** — the shape of a «تسجيل الإنتاج» row — so the record survives the gap
+  between the crew filling the sheet in and somebody typing it up.
+  - **Firebase Storage is a NEW subsystem here**, the app's first use of it. The images go
+    straight from the phone to Storage using the client SDK **while signed in**, so unlike
+    the Firestore writes elsewhere in this app `request.auth` is real and `storage.rules`
+    is genuine enforcement. The server never touches the bytes; it records metadata and
+    stamps `createdBy` from the verified token.
+  - ⚠ `storage.rules` must be **published by hand** (Firebase console → Storage → Rules),
+    and Storage must be **enabled** on the project first. Same trap as `firestore.rules`:
+    pushing to git deploys neither.
+  - Photos are downscaled to 1600px / JPEG 0.75 in the browser before upload — a phone
+    file is 3–8 MB, a workshop's wifi is not, and the owner pays for the bytes. 1600px is
+    chosen so the *numbers on the sheet stay readable*; it is a document, not a thumbnail.
+  - Naming: "storage" in this repo already means the materials warehouse («المخزن»,
+    `lib/storage.ts`, the `storage` role). Anything to do with images is `photos`.
 - **Monthly report draft (phase 3)** — `/dashboard/reports` was a blank manual form, which is
   why it was empty. `GET /api/reports/draft?month=YYYY-MM` (guarded) composes an ARABIC draft
   from `buildOEEData(month)` + the **existing** `generateReview()` in `lib/ai-review.ts`,
