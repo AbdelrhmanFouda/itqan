@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
-import { hasFullAccess } from "@/lib/roles";
+import { hasFullAccess, isOwnerEmail } from "@/lib/roles";
 import { pd } from "@/lib/i18n.prod";
 import { Stat, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
 import PaperImport from "@/components/dashboard/paper-import";
@@ -28,7 +28,7 @@ const effCls = (e: number | null) =>
 
 export default function HourlyPage() {
   const { lang } = useLang();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const p = pd[lang];
   const t = p.hourly;
   const isAr = lang === "ar";
@@ -36,7 +36,14 @@ export default function HourlyPage() {
   // page is also `worker`'s, and that flow must not gain a control, a question
   // or a word of English — so the button simply is not rendered for them. The
   // routes enforce the same rule server-side; this is only the UX half.
-  const canImport = profile?.role ? hasFullAccess(profile.role) : false;
+  //
+  // The email check is not redundant. `roleFor()` resolves the owner from the
+  // EMAIL alone, before Firestore is touched, so the server lets the owner
+  // through even when `users/{uid}` is missing, stale, or still loading. Gating
+  // the button on the profile alone would hide it from the one person it is
+  // built for, with a working API behind it and no error to explain why.
+  const canImport =
+    isOwnerEmail(user?.email) || (profile?.role ? hasFullAccess(profile.role) : false);
 
   const [data, setData] = useState<Payload | null>(null);
   const [date, setDate] = useState<string>("");
