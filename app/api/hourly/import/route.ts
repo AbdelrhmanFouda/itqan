@@ -6,17 +6,24 @@ import { buildDraft } from "@/lib/hourly-import";
 /**
  * POST /api/hourly/import — read a photographed paper production sheet.
  *
- * Guarded, and to owner/manager only. This is the OWNER's review surface, not a
- * shop-floor one: the crew's page is «تسجيل الإنتاج» as a read-only view and
- * the four-tap downtime page, and neither may gain a step. It is also the only
- * route in the app that spends a vision call per request, so it is not left
- * open the way the operational reads are.
+ * Guarded, and open to ANY APPROVED ROLE — the same rule the rest of the app's
+ * mutating routes use, and the same one that already lets a shop-floor account
+ * drive the assistant. The owner asked for one page that looks the same for
+ * everyone (2026-08-10), so the button is not role-gated and this must not be
+ * either; a visible control that 401s is worse than no control.
+ *
+ * ⚠️ This is the only route in the app that spends a VISION call per request,
+ * and the Gemini free tier rate-limits: a 429 was hit during testing on
+ * 2026-08-10. Several people photographing at shift change will see
+ * `vision_failed`. It degrades safely — nothing is written and the UI says so —
+ * but if that becomes common, add a per-user daily cap the way /api/agent does
+ * (`AI_AGENT_DAILY_LIMIT` + the Firestore `usage/{uid}` counter).
  *
  * The photo is read and DISCARDED. Nothing is stored — not in Firestore, not in
  * a bucket. Firebase Storage was tried and deliberately abandoned; the owner's
  * instruction was "send the image straight to Gemini and never store it".
  *
- * This route WRITES NOTHING. It returns a draft for the owner to correct;
+ * This route WRITES NOTHING. It returns a draft to correct;
  * POST /api/hourly/import/commit is the only path to the sheet.
  */
 
@@ -28,7 +35,7 @@ const MAX_BASE64_CHARS = 8_000_000;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 export async function POST(req: NextRequest) {
-  const g = await requireRole(req, []); // [] ⇒ owner/manager only (hasFullAccess)
+  const g = await requireRole(req); // any APPROVED role — see the note above
   if ("deny" in g) return g.deny;
 
   let body: { imageBase64?: unknown; mimeType?: unknown };

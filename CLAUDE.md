@@ -319,14 +319,24 @@ preview** → only on his confirmation does anything reach «تسجيل الإن
 | Pure maths + every rule that fails silently | `lib/sheet-import.ts` (44 tests) |
 | The Gemini vision call | `lib/sheet-vision.ts` |
 | Read the sheet, resolve names, write | `lib/hourly-import.ts` |
-| Extract (owner/manager only, writes nothing) | `POST /api/hourly/import` |
-| Commit (owner/manager only, the ONLY write path) | `POST /api/hourly/import/commit` |
+| Extract (writes nothing) | `POST /api/hourly/import` |
+| Commit (the ONLY write path) | `POST /api/hourly/import/commit` |
 | The editable grid | `components/dashboard/paper-import.tsx` |
-| Entry point | a button on `/dashboard/hourly`, **owner/manager only** |
+| Entry point | a button on `/dashboard/hourly` — **everyone who can reach the page** |
 
-The button is role-gated on purpose. `/dashboard/hourly` is also `worker`'s page, and that
-flow may not gain a control, a question or a word of English — so workers see the page
-exactly as before. Both routes enforce the same rule server-side with `requireRole(req, [])`.
+**Do not re-gate this by role.** It shipped owner-only and the owner reversed it on
+2026-08-10: *"the pages should be the same for all, they should all see it."* One page that
+renders two ways is precisely what he did not want. Both routes therefore take a bare
+`requireRole(req)` — any approved role — which is also the standing convention for mutating
+routes here, and the same one that already lets a shop-floor account drive the assistant
+with writes included. The safety is the two-press confirmation and the server-side
+re-validation, not the role list, and those apply to whoever is signed in.
+
+⚠️ **Extract spends a vision call per request and the Gemini free tier rate-limits** — a 429
+was hit during testing on 2026-08-10. Several people photographing at shift change will get
+`vision_failed`; it degrades safely (nothing written, the UI says so). If it becomes common,
+add a per-user daily cap the way `/api/agent` does — `AI_AGENT_DAILY_LIMIT` plus the
+Firestore `usage/{uid}` counter — rather than narrowing who may use the feature.
 
 **The two phases deliberately do not trust each other.** `buildDraft()` resolves the photo
 against the sheet and returns a preview; `commitDraft()` throws all of that away and

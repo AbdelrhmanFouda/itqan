@@ -7,7 +7,11 @@ import { HOURS_PER_SHIFT, type Shift } from "@/lib/sheet-import";
  * POST /api/hourly/import/commit — write a confirmed draft into «تسجيل الإنتاج».
  *
  * The ONLY path from a photograph to the sheet, and it is reached only by an
- * explicit press on the preview. Owner/manager only, same as the extract route.
+ * explicit press on the preview. Open to any APPROVED role, same as the extract
+ * route and the same as every other mutating route here — the assistant already
+ * lets a shop-floor account write, with the actor taken from the verified token.
+ * «تسجيل الإنتاج» has no notes column to stamp provenance into, so the actor is
+ * recorded in the server log by `commitDraft()` rather than in the sheet.
  *
  * Everything the browser sends is re-derived server-side in `commitDraft()`
  * from a fresh read of the workbook. This route's own job is narrower: refuse
@@ -28,7 +32,7 @@ function coerceCell(v: unknown): number | null | undefined {
 }
 
 export async function POST(req: NextRequest) {
-  const g = await requireRole(req, []); // [] ⇒ owner/manager only (hasFullAccess)
+  const g = await requireRole(req); // any APPROVED role — see the note above
   if ("deny" in g) return g.deny;
 
   let body: { date?: unknown; shift?: unknown; rows?: unknown };
