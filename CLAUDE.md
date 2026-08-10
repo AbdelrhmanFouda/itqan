@@ -178,24 +178,18 @@ sidebar and `canAccess()`.
   - Queries are **date-bounded** (`getDowntimeEventsBetween`) because OEE recomputes on every
     request; only the CSV export reads the whole collection. Both bounds are a range on the
     same field, so no composite index is needed — the rule `lib/db.ts` is built around.
-- **Hourly log-sheet photos** — `lib/photos.ts` (pure: paths, sizing) +
-  `lib/photo-upload.ts` (browser: compress + upload) + `/api/hourly-photos` (guarded
-  metadata) + a capture strip on `/dashboard/hourly`. A photo of the PAPER sheet, keyed to
-  **day + machine** — the shape of a «تسجيل الإنتاج» row — so the record survives the gap
-  between the crew filling the sheet in and somebody typing it up.
-  - **Firebase Storage is a NEW subsystem here**, the app's first use of it. The images go
-    straight from the phone to Storage using the client SDK **while signed in**, so unlike
-    the Firestore writes elsewhere in this app `request.auth` is real and `storage.rules`
-    is genuine enforcement. The server never touches the bytes; it records metadata and
-    stamps `createdBy` from the verified token.
-  - ⚠ `storage.rules` must be **published by hand** (Firebase console → Storage → Rules),
-    and Storage must be **enabled** on the project first. Same trap as `firestore.rules`:
-    pushing to git deploys neither.
-  - Photos are downscaled to 1600px / JPEG 0.75 in the browser before upload — a phone
-    file is 3–8 MB, a workshop's wifi is not, and the owner pays for the bytes. 1600px is
-    chosen so the *numbers on the sheet stay readable*; it is a document, not a thumbnail.
-  - Naming: "storage" in this repo already means the materials warehouse («المخزن»,
-    `lib/storage.ts`, the `storage` role). Anything to do with images is `photos`.
+- **Reading the paper production sheet (IN PROGRESS)** — `lib/sheet-import.ts` (pure maths,
+  18 tests) + `lib/sheet-vision.ts` (Gemini vision). **Not yet wired to any route or page.**
+  See "Reading the paper sheet" below for the full state, the open questions and the two
+  findings that must not be forgotten.
+  - **Firebase Storage was abandoned deliberately.** An earlier version stored photos in a
+    bucket; creating it failed in the console and the owner chose *"send the image straight
+    to Gemini and never store it"* instead. All of that code was removed (`lib/photos.ts`,
+    `lib/photo-upload.ts`, `/api/hourly-photos`, `storage.rules`, the `hourlyPhotos`
+    collection and its rule). **Do not reintroduce Storage without asking** — it needs a
+    bucket, Blaze billing, and rules published by hand.
+  - Naming note if images ever come back: "storage" in this repo already means the
+    materials warehouse («المخزن», `lib/storage.ts`, the `storage` role).
 - **Monthly report draft (phase 3)** — `/dashboard/reports` was a blank manual form, which is
   why it was empty. `GET /api/reports/draft?month=YYYY-MM` (guarded) composes an ARABIC draft
   from `buildOEEData(month)` + the **existing** `generateReview()` in `lib/ai-review.ts`,
@@ -315,6 +309,71 @@ Domain semantics:
   server-side without firebase-admin (Google securetoken certs, `aud`/`iss` = itqan-5f802),
   because org policy blocks service-account keys.
 
+## Reading the paper sheet — IN PROGRESS, read before touching it
+
+The goal: photograph the paper production sheet, have Gemini read it, show the owner an
+**editable preview**, and only on his confirmation write into «تسجيل الإنتاج».
+
+### The paper
+
+One page per SHIFT covering EVERY machine — not one page per machine.
+`الأنتاج اليومي لماكينات الحقن — الوردية المسائية | 09/08/2026`, then per row:
+`# | التاريخ | الماكينة/الكود | المنتج/الاسطمبة | 8:00 … 7:00 (twelve) | سستم | الفعلي`.
+
+### Two findings that change everything — verified, not assumed
+
+1. **The paper counts SHOTS; the sheet counts PIECES.** Measured on 09/08/2026:
+   كرسي paper ~23 → sheet 23 (**×1**), كفر شفاف ~80 → 160 (**×2**), زراير ~118 → 1062
+   (**×9**). Exact integers across three products — it is the mould's cavity count.
+   **An import must multiply each cell by cavities from «الرئيسي», or it understates
+   production by up to 9×.** ⚠ Not yet confirmed by the owner in words; confirm before
+   writing anything.
+2. **The sheet is NOT a transcription.** On paper the hours vary (`١١٨ ١١٨ ١١٩ ١١٩`); in
+   the sheet every row is ONE constant repeated eleven times (`1062 ×11`). Whoever types it
+   takes a representative rate, multiplies by cavities and fills right. So the existing
+   hourly columns carry **no real hour-to-hour variation** — per-hour analysis on historic
+   rows cannot show anything. A faithful import would produce data that looks different
+   from every historical row. The owner has not chosen faithful-vs-flattened yet.
+
+### The write path — worked out, not yet built
+
+- **UPDATE is safe.** `updateRecord("hourly", row, changes)` → `mapInTab`, which emits only
+  the CHANGED cells; the formula columns are never touched. `row` is the 1-based sheet row,
+  exactly what `HourlyRow.row` carries. h08/h09 resolve correctly thanks to `normHeader`.
+- **NEVER `appendRecord` here.** It builds one cell per header and writes `""` for every
+  omitted field — which would blank `AB سستم`, `AD المتوقع`, `AE الكفاءة` on that row.
+- **NEVER the bridge's `append` action either.** It is `sheet.appendRow()` → `getLastRow()+1`
+  = **row 999**, because the formulas run to 998. That lands past the formula band, past the
+  `AF:AH` spill and past the validation, producing a row with no computed columns.
+- **A new row (mould changed mid-day) = find the next blank row inside 5–998 and UPDATE it.**
+  `AB`/`AD`/`AE` are per-row formulas already pre-filled to 998, and A/B/C validation too,
+  so a row written inside that band inherits everything. Data ended ~row 206; **~776 free
+  rows remain**, after which the band must be extended by hand in the sheet.
+- **Match on date + machine + PRODUCT.** On 09/08 PQ 12 — 180 has two rows — عجلة مكنسة
+  (morning) and جوان عجلة مكنسة (evening) — because the mould changed.
+- `AF/AG/AH` are ARRAYFORMULA spills anchored at row 5. Never write into them.
+
+### The shift mapping
+
+`lib/sheet-import.ts` owns it. The sheet has 24 hour columns (indices 3–26, `08:00→07:00`);
+a paper sheet has 12. **Morning fills the first twelve, evening the last twelve — so an
+evening paper's "8:00" is the sheet's `20:00`.** Getting this backwards files a night's
+output as a morning's, silently. `detectShift()` reads «مسائية»/«صباحية» from the heading
+and returns `null` when it cannot tell — **ask, never assume.**
+
+### Model choice
+
+`gemini-2.5-flash` (`AI_VISION_MODEL` overrides). Rationale at ~2 sheets/day (~60/month):
+Flash has a free tier and Pro does not; Pro would be ~$1/month; Flash-Lite is the weakest
+vision tier and wrong for handwritten Arabic-Indic digits. A bake-off against Claude was
+attempted and is **inconclusive** — see the gotcha about the local Gemini key.
+
+### Still to build
+
+Extract endpoint → editable preview (must be editable; a misread digit has to be fixable)
+→ row writer → server-side re-validation on confirm. Note the assistant's existing confirm
+flow is accept/reject only and does NOT re-validate on confirm — do not copy that here.
+
 ## Conventions
 
 - i18n: `lib/i18n*.ts` — `en` and `ar` objects MUST keep the same shape. UI strings never
@@ -347,6 +406,12 @@ Domain semantics:
   Symptom to recognise: downtime capture appears to work, the page shows no error, and
   Availability quietly stays at 100% — because `loadDowntimeTotals()` catches the failure
   and degrades to the pre-phase-2 state on purpose.
+- ⚠ **The `GEMINI_API_KEY` in the local `.env.local` is INVALID** (2026-08-10): a direct
+  call returns `401 … Expected OAuth 2 access token`, on both `?key=` and the
+  `x-goog-api-key` header. Production works — the report draft returns `Source: gemini` —
+  so **Vercel holds a different, working key**. Copy the Vercel value into `.env.local`
+  before testing anything Gemini-related locally, or you will conclude the code is broken
+  when it is the key.
 - Vercel build runs the typecheck — a bad type fails the deploy.
 - Turbopack can serve a stale compile error after export refactors — request the route URL
   to force recompile; corrupted `.next` → delete `.next` + `tsconfig.tsbuildinfo`.

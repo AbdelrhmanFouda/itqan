@@ -59,12 +59,6 @@ service cloud.firestore {
     // requireRole; the server reaches Firestore through the unauthenticated
     // client SDK, so this must stay open exactly like the collections above.
     match /downtimeEvents/{doc}   { allow read, write: if true; }
-    // Metadata for photos of the paper hourly log sheet. The IMAGES live in
-    // Firebase Storage (see storage.rules) — this only holds date/machine/path/
-    // url/createdBy. Written by /api/hourly-photos, which verifies the caller's
-    // ID token; the server reaches Firestore through the unauthenticated client
-    // SDK, so this must stay open like the collections above.
-    match /hourlyPhotos/{doc}     { allow read, write: if true; }
     // Daily AI-review cache (one doc per day per period) — written by /api/ai-review.
     match /aiReviews/{doc}        { allow read, write: if true; }
 
