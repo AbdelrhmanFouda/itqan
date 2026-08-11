@@ -434,12 +434,31 @@ evening paper's "8:00" is the sheet's `20:00`.** Getting this backwards files a 
 output as a morning's, silently. `detectShift()` reads «مسائية»/«صباحية» from the heading
 and returns `null` when it cannot tell — **ask, never assume.**
 
-### Model choice
+### Model choice — settled by measurement, 2026-08-10
 
-`gemini-2.5-flash` (`AI_VISION_MODEL` overrides). Rationale at ~2 sheets/day (~60/month):
-Flash has a free tier and Pro does not; Pro would be ~$1/month; Flash-Lite is the weakest
-vision tier and wrong for handwritten Arabic-Indic digits. A bake-off against Claude was
-attempted and is **inconclusive** — see the gotcha about the local Gemini key.
+`gemini-2.5-flash`, overridable with **`AI_VISION_MODEL`** (env only, no code change). The
+bake-off is no longer inconclusive. Same photo, same prompt, same six-row gold set:
+
+| Model | Score |
+|---|---|
+| **`gemini-2.5-flash`** | **6/6** |
+| `claude-sonnet-5` | 3/6 |
+| `claude-opus-5` | returned unparseable output |
+| `gemini-2.5-pro` | untested — 429s without billing |
+
+Flash is simultaneously the cheapest option and the most accurate one here, so **do not
+reach for a bigger model to fix a bad read.** Every failure measured so far has been the
+photograph (framing, orientation, WhatsApp compression), and a stronger model does not
+correct any of them.
+
+**Quota, not capability, is the operational limit.** The free tier allows 20 requests a
+minute *per Google Cloud project* — not per key, so minting a second key changes nothing.
+Enabling billing on the existing key is what lifts the cap and is also what makes
+`gemini-2.5-pro` reachable at all. `callGemini()` retries a 429 twice regardless.
+
+If Pro is ever worth trying, it needs no deploy: set `AI_VISION_MODEL=gemini-2.5-pro` in
+Vercel and redeploy. Score it against the gold set in this section before keeping it —
+Flash is the incumbent at 6/6 and Pro is slower and dearer.
 
 ### The first real photo — measured 2026-08-10, read this before tuning anything
 
