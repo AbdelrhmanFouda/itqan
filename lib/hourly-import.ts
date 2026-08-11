@@ -99,11 +99,11 @@ type Resolved = {
  * Re-run on commit rather than cached: the whole point of the second pass is
  * that the sheet may have changed while the preview sat open.
  */
-async function readContext(): Promise<Resolved> {
+async function readContext(fresh = false): Promise<Resolved> {
   const [hourly, master, machines] = await Promise.all([
-    getRecords("hourly"),
-    getRecords("master"),
-    getRecords("machines"),
+    getRecords("hourly", { fresh }),
+    getRecords("master", { fresh }),
+    getRecords("machines", { fresh }),
   ]);
 
   // Machines: the identity everywhere is «PQ n — ton» (hidden col J), built the
@@ -318,7 +318,11 @@ export async function commitDraft(payload: CommitPayload, actor: string): Promis
     return { ok: false, reason: "no_rows" };
   }
 
-  const ctx = await readContext();
+  // fresh: true — bypass the read cache. This function exists to re-derive
+  // every row number from the sheet as it is RIGHT NOW; a cached copy, even a
+  // 45-second-old one, would defeat that and could write onto a row somebody
+  // filled while the preview sat open.
+  const ctx = await readContext(true);
   const outcomes: RowOutcome[] = [];
   const edits: { row: number; changes: Record<string, string> }[] = [];
   const claimed = new Set<number>();

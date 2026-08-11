@@ -253,7 +253,58 @@ const TAB_ALIASES: Record<string, string[]> = {
   "لوحة البيانات": ["Dashboard"],
 };
 
-async function fetchSheet(tab: string): Promise<{ title: string; values: string[][] }> {
+/* ------------------------- the read cache ---------------------------------
+ * Measured on production 2026-08-12, with the bridge itself answering every
+ * tab in ~2.5s: /api/runs took 71s and returned [], /api/hourly 22s and
+ * returned nothing, while «الإنتاج» held 455 rows and «تسجيل الإنتاج» 994.
+ *
+ * There was no cache at all — every route re-read every tab, `cache: "no-store"`
+ * on each. Opening the dashboard fires several routes at once and each reads
+ * three or four tabs, so a dozen-plus simultaneous requests hit one Apps Script
+ * deployment, which serialises them and starts failing. The failures were then
+ * swallowed by the candidate loop's empty catch, so the app rendered "no data"
+ * rather than an error. Slow and silently empty are the same bug.
+ *
+ * Two rules make this safe rather than merely fast:
+ *  - NEVER cache an empty result. Pinning a transient failure for a minute
+ *    would turn one bad moment into a minute of a blank dashboard — a worse
+ *    version of the thing being fixed.
+ *  - Writes and pre-write validation must opt out (`fresh`). `commitDraft()`
+ *    exists to re-derive row numbers from the sheet as it is RIGHT NOW; letting
+ *    it read a minute-old copy would defeat the whole confirm-before-write
+ *    guarantee and could write onto a row somebody else just filled.
+ */
+const SHEET_TTL_MS = 45_000;
+type SheetRead = { title: string; values: string[][] };
+const sheetCache = new Map<string, { at: number; value: SheetRead }>();
+const sheetInflight = new Map<string, Promise<SheetRead>>();
+
+/** Drop cached reads — call after any write so the next read sees it. */
+export function invalidateSheetCache(tab?: string): void {
+  if (tab) sheetCache.delete(tab);
+  else sheetCache.clear();
+}
+
+async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
+  if (!fresh) {
+    const hit = sheetCache.get(tab);
+    if (hit && Date.now() - hit.at < SHEET_TTL_MS) return hit.value;
+    // Coalesce: several routes asking for the same tab at once share one call
+    // instead of racing each other into the throttle.
+    const flying = sheetInflight.get(tab);
+    if (flying) return flying;
+  }
+  const p = fetchSheetUncached(tab)
+    .then((v) => {
+      if (v.values.length > 0) sheetCache.set(tab, { at: Date.now(), value: v });
+      return v;
+    })
+    .finally(() => { if (sheetInflight.get(tab) === p) sheetInflight.delete(tab); });
+  if (!fresh) sheetInflight.set(tab, p);
+  return p;
+}
+
+async function fetchSheetUncached(tab: string): Promise<SheetRead> {
   // Preferred: Apps Script (works on a private sheet, no API key).
   // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
   // have drifted between "Production"/"production" etc., so retry casings and
@@ -262,18 +313,33 @@ async function fetchSheet(tab: string): Promise<{ title: string; values: string[
     const lower = tab.toLowerCase();
     const cap = lower.charAt(0).toUpperCase() + lower.slice(1);
     const candidates = Array.from(new Set([tab, ...(TAB_ALIASES[tab] ?? []), lower, cap, tab.toUpperCase()]));
+    let lastProblem = "";
     for (const name of candidates) {
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
         const res = await fetch(u, { cache: "no-store", redirect: "follow" });
         if (res.ok) {
-          const json = (await res.json()) as { values?: string[][] };
-          if (json.values && json.values.length > 0) return { title: name, values: json.values };
+          // Under load the bridge answers with an HTML error page, not JSON.
+          // Parsing that threw into an empty catch, which is how a throttled
+          // moment became a silently blank dashboard.
+          const body = await res.text();
+          try {
+            const json = JSON.parse(body) as { values?: string[][] };
+            if (json.values && json.values.length > 0) return { title: name, values: json.values };
+            lastProblem = `"${name}" returned no rows`;
+          } catch {
+            lastProblem = `"${name}" returned ${body.trim().startsWith("<") ? "an HTML error page (bridge throttled?)" : "unparseable output"}`;
+          }
+        } else {
+          lastProblem = `"${name}" HTTP ${res.status}`;
         }
-      } catch {
-        /* try the next casing, then fall through to the API-key path */
+      } catch (e) {
+        lastProblem = `"${name}" ${e instanceof Error ? e.message : "request failed"}`;
       }
     }
+    // Loud, because the caller cannot tell "tab is empty" from "read failed" —
+    // both arrive as [] — and the UI will render an empty page either way.
+    console.error(`[sheets] all ${candidates.length} candidate(s) failed for tab "${tab}": ${lastProblem}`);
   }
   // Fallback: public read via API key.
   if (!SHEET_ID || !API_KEY) return { title: tab, values: [] };
@@ -348,12 +414,15 @@ export type RecordsResult = {
   writable: boolean;
 };
 
-export async function getRecords(entity: string): Promise<RecordsResult> {
+export async function getRecords(
+  entity: string,
+  opts: { fresh?: boolean } = {},
+): Promise<RecordsResult> {
   const cfg = ENTITIES[entity];
   const empty: RecordsResult = { records: [], fields: [], longFields: [], labels: {}, writable: sheetsWritable() };
   if (!cfg) return empty;
 
-  const { values } = await fetchSheet(cfg.tab);
+  const { values } = await fetchSheet(cfg.tab, opts.fresh);
   if (values.length < 2) return empty;
 
   const h = findHeaderRow(values, cfg.fields);
@@ -463,7 +532,7 @@ export async function updateRecordsInTab(
   if (edits.length === 0) return { ok: true, cells: 0 };
   if (edits.some((e) => !Number.isFinite(e.row) || e.row < 2)) return { ok: false, reason: "bad_row" };
 
-  const { values, title } = await fetchSheet(cfg.tab);
+  const { values, title } = await fetchSheet(cfg.tab, true);
   if (values.length < 2) return { ok: false, reason: "empty_sheet" };
   const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
 
@@ -488,7 +557,7 @@ async function mapToMaster(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
 ): Promise<{ tab: string; updates: Cell[] } | { reason: string }> {
   // 1) read the view tab → the ID of the edited row (ID/No. is its first column)
-  const view = await fetchSheet(cfg.tab);
+  const view = await fetchSheet(cfg.tab, true);
   if (view.values.length < 2) return { reason: "empty_view" };
   const viewHeaders = view.values[findHeaderRow(view.values, cfg.fields)] ?? [];
   const viewIdCol = Math.max(0, colIndex(viewHeaders, ID_KEYWORDS));
@@ -498,7 +567,7 @@ async function mapToMaster(
   if (!id) return { reason: "no_id" };
 
   // 2) read Master → find the row with that ID; map each field → its Master column
-  const master = await fetchSheet(MASTER_TAB);
+  const master = await fetchSheet(MASTER_TAB, true);
   if (master.values.length < 2) return { reason: "empty_master" };
   const mh = findHeaderRow(master.values, cfg.fields);
   const mHeaders = master.values[mh] ?? [];
@@ -562,7 +631,7 @@ async function mapToMaster(
 async function mapInTab(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
 ): Promise<{ tab: string; updates: Cell[] } | { reason: string }> {
-  const { values, title } = await fetchSheet(cfg.tab);
+  const { values, title } = await fetchSheet(cfg.tab, true);
   if (values.length < 2) return { reason: "empty_sheet" };
   const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
   const updates: Cell[] = [];
@@ -592,6 +661,9 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
     });
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    // A stale copy after a successful write would show the crew their own
+    // edit missing for the rest of the TTL.
+    if (json.ok) invalidateSheetCache();
     return json.ok ? { ok: true } : { ok: false, reason: json.error || "script_error" };
   } catch {
     return { ok: false, reason: "request_failed" };
@@ -608,7 +680,7 @@ export async function appendRecord(entity: string, values: Record<string, string
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
 
-  const { values: sheetVals, title } = await fetchSheet(cfg.tab);
+  const { values: sheetVals, title } = await fetchSheet(cfg.tab, true);
   if (sheetVals.length === 0) return { ok: false, reason: "no_tab" };
   const headers = sheetVals[findHeaderRow(sheetVals, cfg.fields)] ?? [];
   if (headers.length === 0) return { ok: false, reason: "no_headers" };
@@ -636,6 +708,6 @@ export async function deleteRecord(entity: string, row: number): Promise<UpdateR
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   if (!Number.isFinite(row) || row < 2) return { ok: false, reason: "bad_row" };
-  const { title } = await fetchSheet(cfg.tab); // resolve the tab's real casing
+  const { title } = await fetchSheet(cfg.tab, true); // resolve the tab's real casing
   return postAction({ tab: title, deleteRow: row });
 }
