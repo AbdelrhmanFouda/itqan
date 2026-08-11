@@ -150,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {!isArabicOnlyPath(pathname) && (
             <button
               onClick={() => setLang(isAr ? "en" : "ar")}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors"
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors"
             >
               <Globe size={12} />
               {isAr ? "EN" : "عربي"}
@@ -158,7 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
           <button
             onClick={handleSignOut}
-            className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded px-2.5 py-1.5 transition-colors"
+            className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors"
           >
             {a.auth.signOut}
           </button>

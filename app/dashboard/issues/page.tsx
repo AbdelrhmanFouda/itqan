@@ -151,7 +151,10 @@ export default function IssuesPage() {
             <button
               key={s || "all"}
               onClick={() => setStatusFilter(s)}
-              className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors ${
+              // Segmented filter, 28px measured. Unlike the status pill this
+              // one can simply grow — it is already a button visually, so a
+              // taller phone version costs nothing.
+              className={`text-xs px-3 py-1.5 min-h-10 sm:min-h-0 rounded-md font-medium transition-colors ${
                 statusFilter === s ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-900"
               }`}
             >
