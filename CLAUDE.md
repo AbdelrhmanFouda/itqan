@@ -252,6 +252,58 @@ Domain semantics:
 - Reports from the floor identify machines unreliably by code — resolve by PRODUCT NAME
   through the registry when validating.
 
+## The sheet read path — fixed 2026-08-12, and easy to undo by accident
+
+**Symptom reported:** "the app loads for too long and it is fetching nothing."
+Measured against production while the bridge itself answered every tab in ~2.5s:
+
+| | before | cold now | warm now |
+|---|---|---|---|
+| `/api/runs` | **71s → `[]`** (the tab has 455 rows) | 3.2s ✓ | 0.83s |
+| `/api/hourly` | **22s → empty** (994 rows) | 0.65s ✓ | 0.48s |
+| `/api/oee` | 30s | 2.9s ✓ | 0.62s |
+
+Three causes, and the first two produced the *same* symptom — a blank page, not
+an error:
+
+1. **No cache existed.** `fetchSheet` used `cache: "no-store"` on every call.
+   Opening the dashboard fires several routes, each reading three or four tabs.
+2. **The Apps Script deployment runs serially.** Firing four reads at once did
+   not make them faster, it made some fail — and under load the bridge answers
+   with an **HTML error page**, so `JSON.parse` threw straight into the
+   candidate loop's empty `catch`.
+3. **Every failure looked like emptiness.** A refused read and a genuinely empty
+   tab both arrived as `[]`.
+
+What is there now, and why each piece must stay:
+
+- **Next's data cache** (`next: { revalidate: 45, tags: [SHEET_CACHE_TAG] }`),
+  *not* an in-memory Map. A Map lives and dies with a serverless instance — the
+  first attempt used one and the second request measured **slower** than the
+  first, because it landed on a cold instance.
+- ⚠️ **`revalidate` and `cache: "no-store"` conflict — set both and Next ignores
+  BOTH**, silently disabling the cache. Fresh reads must set exactly one.
+- **A one-at-a-time queue** around every bridge GET. This is what stopped the
+  empty responses; the cache alone did not.
+- **A retry of the real tab name after 1.5s and 4s.** A bridge that refused
+  because it was busy usually answers a moment later.
+- **Empty results are never cached** — pinning a transient failure for 45s would
+  be a worse version of the original bug.
+- **Writes and pre-write validation read `fresh`**, bypassing the cache
+  entirely. `commitDraft()` exists to re-derive row numbers from the sheet as it
+  is *right now*; a 45-second-old copy would defeat confirm-before-write.
+- **`?fresh=1` on `/api/hourly`**, which the paper import passes when reloading
+  after a write, so nobody is shown their own rows missing. Tag invalidation is
+  the optimisation; this flag is the guarantee — `updateTag` (the
+  read-your-own-writes primitive) is Server-Actions-only and unavailable in a
+  Route Handler, and `revalidateTag`'s `profile: "max"` means
+  stale-while-revalidate, which is exactly wrong straight after a write.
+
+**If sheet pages ever go blank again, look here first**, and check the server log
+for `[sheets] every attempt failed for tab "…"` — that line distinguishes "the
+tab is empty" from "the bridge refused", which is the distinction that was
+missing for the entire life of this bug.
+
 ## The bridge (apps-script.gs)
 
 - Bound to the sheet, deployed as web app (Execute as owner / access Anyone), token-gated.
