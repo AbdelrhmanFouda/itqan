@@ -155,6 +155,13 @@ export async function readSheetPhoto(base64: string, mimeType: string): Promise<
       // page can say "busy, try again shortly" instead of "it broke" — the
       // difference matters to whoever is standing on the floor with a phone.
       const reason = res.status === 429 ? "rate_limited" : "vision_failed";
+      // Log the body once. A bare status told us nothing when this failed on
+      // phones but not desktops; Gemini's message names the actual cause.
+      console.error(
+        `[sheet-vision] ${VISION_MODEL} HTTP ${res.status} for ${mimeType}, ` +
+          `${Math.round(base64.length / 1024)} KB base64: ` +
+          (await res.text().catch(() => "")).slice(0, 300),
+      );
       return { ok: false, reason, detail: `gemini_${res.status}` };
     }
     const j = await res.json();

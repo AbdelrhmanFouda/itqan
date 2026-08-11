@@ -224,6 +224,10 @@ export const pd = {
           unreadable: "Nothing could be read from that photo — try a straighter, brighter one.",
           no_date: "No date could be read from the page.",
           bad_mime: "That file is not an image.",
+
+          decode_failed: "This phone could not open that photo. Try again, or pick a JPEG from the gallery.",
+
+          too_large: "That photo is too large even after shrinking — take it a bit further back.",
           image_too_large: "That photo is too large.",
           machine_unknown: "Machine not in the registry",
           product_unknown: "Product not in Master",
@@ -494,6 +498,10 @@ export const pd = {
           unreadable: "مش قادر يقرأ حاجة من الصورة دي — جرّب صورة أوضح وأكثر استواءً.",
           no_date: "مش قادر يقرأ التاريخ من الورقة.",
           bad_mime: "الملف ده مش صورة.",
+
+          decode_failed: "الموبايل ده مش قادر يفتح الصورة دي. جرّب تاني، أو اختار صورة JPEG من الاستوديو.",
+
+          too_large: "الصورة كبيرة أوي حتى بعد التصغير — صوّر من مسافة أبعد شوية.",
           image_too_large: "الصورة كبيرة جدًا.",
           machine_unknown: "الماكينة مش في السجل",
           product_unknown: "المنتج مش في «الرئيسي»",

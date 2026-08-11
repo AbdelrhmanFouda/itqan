@@ -27,9 +27,17 @@ import { buildDraft } from "@/lib/hourly-import";
  * POST /api/hourly/import/commit is the only path to the sheet.
  */
 
+/**
+ * A vision call on a full page takes 20–30 s measured, and the platform's
+ * default function timeout is well under that on some plans — which would kill
+ * the request mid-read and surface as an unexplained failure. Ask for headroom
+ * explicitly rather than depending on whatever the default happens to be.
+ */
+export const maxDuration = 60;
+
 // A phone photo compressed client-side lands around 300–600 KB → ~800 KB of
-// base64. This cap is generous enough for an uncompressed capture that slipped
-// through and small enough that the route cannot be used to push megabytes.
+// base64. The client now caps itself at 3.5M chars; this stays above that so a
+// legitimate payload is never rejected here, while still refusing megabytes.
 const MAX_BASE64_CHARS = 8_000_000;
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
