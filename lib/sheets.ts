@@ -316,6 +316,26 @@ async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
   return p;
 }
 
+/**
+ * One bridge request at a time.
+ *
+ * The Apps Script deployment executes serially, so firing four tab reads at
+ * once does not make them faster — it makes some of them fail. Measured on
+ * production 2026-08-12 with the shared cache already in place: a COLD
+ * /api/runs, which reads three tabs in a Promise.all, took 45s and returned []
+ * while a warm one took 0.7s and returned 154 KB. Racing ourselves was the
+ * whole difference between correct and empty.
+ *
+ * Queueing makes a cold read slower and right rather than fast and wrong; the
+ * 45s cache means almost nobody pays it.
+ */
+let bridgeQueue: Promise<unknown> = Promise.resolve();
+function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const run = bridgeQueue.then(fn, fn);
+  bridgeQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRead> {
   // Preferred: Apps Script (works on a private sheet, no API key).
   // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
@@ -325,19 +345,28 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
     const lower = tab.toLowerCase();
     const cap = lower.charAt(0).toUpperCase() + lower.slice(1);
     const candidates = Array.from(new Set([tab, ...(TAB_ALIASES[tab] ?? []), lower, cap, tab.toUpperCase()]));
+    // The real tab name first, then aliases, then one more go at the real name
+    // after a pause — a bridge that refused because it was busy will usually
+    // answer a moment later, and the alternative is handing the UI an empty
+    // page that looks exactly like "there is no data".
+    const plan: (string | number)[] = [...candidates, 1500, tab, 4000, tab];
     let lastProblem = "";
-    for (const name of candidates) {
+    for (const step of plan) {
+      if (typeof step === "number") { await new Promise((r) => setTimeout(r, step)); continue; }
+      const name = step;
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
         // `revalidate` and `cache: "no-store"` conflict — Next ignores BOTH if
         // they are set together, which would silently disable the cache. Pick
         // exactly one.
-        const res = await fetch(u, {
-          redirect: "follow",
-          ...(fresh
-            ? { cache: "no-store" as const }
-            : { next: { revalidate: SHEET_TTL_SEC, tags: [SHEET_CACHE_TAG] } }),
-        });
+        const res = await queued(() =>
+          fetch(u, {
+            redirect: "follow",
+            ...(fresh
+              ? { cache: "no-store" as const }
+              : { next: { revalidate: SHEET_TTL_SEC, tags: [SHEET_CACHE_TAG] } }),
+          }),
+        );
         if (res.ok) {
           // Under load the bridge answers with an HTML error page, not JSON.
           // Parsing that threw into an empty catch, which is how a throttled
@@ -359,7 +388,7 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
     }
     // Loud, because the caller cannot tell "tab is empty" from "read failed" —
     // both arrive as [] — and the UI will render an empty page either way.
-    console.error(`[sheets] all ${candidates.length} candidate(s) failed for tab "${tab}": ${lastProblem}`);
+    console.error(`[sheets] every attempt failed for tab "${tab}" (last: ${lastProblem})`);
   }
   // Fallback: public read via API key.
   if (!SHEET_ID || !API_KEY) return { title: tab, values: [] };
