@@ -176,6 +176,8 @@ export const pd = {
         pick: "Choose a photo",
         retake: "Choose another photo",
         reading: "Reading the photo…",
+
+        rotated: "The page was sideways — turned it to read it. Hold the phone sideways next time and it will be quicker.",
         date: "Date",
         shift: "Shift",
         morning: "Morning (08:00 → 19:00)",
@@ -450,6 +452,8 @@ export const pd = {
         pick: "اختر صورة",
         retake: "اختر صورة أخرى",
         reading: "جاري قراءة الصورة…",
+
+        rotated: "الورقة كانت مقلوبة — لفّيناها عشان نقراها. المرة الجاية امسك الموبايل بالعرض وهتبقى أسرع.",
         date: "التاريخ",
         shift: "الوردية",
         morning: "صباحية (٠٨:٠٠ → ١٩:٠٠)",

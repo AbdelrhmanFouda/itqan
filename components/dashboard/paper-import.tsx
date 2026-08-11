@@ -92,43 +92,39 @@ async function decodeImage(file: File): Promise<ImageBitmap | HTMLImageElement> 
  */
 const MAX_BASE64_CHARS = 3_500_000; // comfortably inside the platform body cap
 
-async function compress(
-  file: File,
-): Promise<{ base64: string; mimeType: string } | { error: "decode_failed" | "too_large" }> {
-  let src: ImageBitmap | HTMLImageElement;
-  try {
-    src = await decodeImage(file);
-  } catch {
-    return { error: "decode_failed" };
-  }
-
-  const w0 = src instanceof HTMLImageElement ? src.naturalWidth : src.width;
-  const h0 = src instanceof HTMLImageElement ? src.naturalHeight : src.height;
-  if (!w0 || !h0) return { error: "decode_failed" };
-
-  // Step down until the payload fits. 1800px keeps the grid legible — the read
-  // that scored 6/6 was 1600px on the long edge — so quality is traded first.
+/**
+ * Re-encode the decoded image to JPEG, rotated by `deg`, small enough to send.
+ *
+ * Rotation is a first-class parameter because a sideways page is not a
+ * degraded read, it is a failed one: measured 2026-08-10, the same page that
+ * scores 6/6 upright produced twenty hallucinated rows when fed sideways. The
+ * page is landscape and phones are held portrait, so this is the normal case,
+ * not an edge case.
+ */
+function encodeJpeg(
+  src: ImageBitmap | HTMLImageElement, w0: number, h0: number, deg: number,
+): string | null {
   const attempts: [number, number][] = [[1800, 0.85], [1800, 0.7], [1400, 0.7], [1100, 0.6]];
   for (const [maxEdge, quality] of attempts) {
     const scale = Math.min(1, maxEdge / Math.max(w0, h0));
     const w = Math.round(w0 * scale);
     const h = Math.round(h0 * scale);
     const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
+    const quarter = deg % 180 !== 0;
+    canvas.width = quarter ? h : w;
+    canvas.height = quarter ? w : h;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return { error: "decode_failed" };
-    ctx.drawImage(src as CanvasImageSource, 0, 0, w, h);
+    if (!ctx) return null;
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((deg * Math.PI) / 180);
+    ctx.drawImage(src as CanvasImageSource, -w / 2, -h / 2, w, h);
     const url = canvas.toDataURL("image/jpeg", quality);
     const comma = url.indexOf(",");
     if (comma < 0) continue;
     const base64 = url.slice(comma + 1);
-    if (base64.length <= MAX_BASE64_CHARS) {
-      if (!(src instanceof HTMLImageElement)) src.close?.();
-      return { base64, mimeType: "image/jpeg" };
-    }
+    if (base64.length <= MAX_BASE64_CHARS) return base64;
   }
-  if (!(src instanceof HTMLImageElement)) src.close?.();
-  return { error: "too_large" };
+  return null;
 }
 
 const numOrNull = (s: string): number | null => {
@@ -151,6 +147,9 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
   const [shift, setShift] = useState<Shift | "">("");
   const [mode, setMode] = useState<ScaleMode>("faithful");
   const [armed, setArmed] = useState(false);
+  /** Set when the photo only read after being turned — worth telling the user,
+   *  so next time they hold the phone the other way and save two model calls. */
+  const [rotatedBy, setRotatedBy] = useState<number | null>(null);
   const [done, setDone] = useState<{ written: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -182,25 +181,52 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(null); setDone(null); setOutcomes([]); setArmed(false); setBusy("reading");
+    setError(null); setDone(null); setOutcomes([]); setArmed(false);
+    setBusy("reading"); setRotatedBy(null);
     try {
-      const shrunk = await compress(file);
-      if ("error" in shrunk) { setError(msg(shrunk.error)); setBusy(null); return; }
-      const { base64, mimeType } = shrunk;
-      const res = await authedFetch("/api/hourly/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mimeType }),
-      });
-      const j = await res.json();
-      if (!j?.ok) {
+      let src: ImageBitmap | HTMLImageElement;
+      try { src = await decodeImage(file); } catch { setError(msg("decode_failed")); setBusy(null); return; }
+      const w0 = src instanceof HTMLImageElement ? src.naturalWidth : src.width;
+      const h0 = src instanceof HTMLImageElement ? src.naturalHeight : src.height;
+      if (!w0 || !h0) { setError(msg("decode_failed")); setBusy(null); return; }
+
+      // The sheet is landscape. A portrait photo is therefore probably a
+      // sideways page, so try the rotations first — it saves a wasted call in
+      // the common case rather than only rescuing the uncommon one.
+      const order = h0 > w0 ? [90, 270, 0] : [0, 90, 270];
+
+      let lastFail: { reason?: string; detail?: string } | null = null;
+      for (const deg of order) {
+        const base64 = encodeJpeg(src, w0, h0, deg);
+        if (!base64) { lastFail = { reason: "too_large" }; break; }
+        const res = await authedFetch("/api/hourly/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, mimeType: "image/jpeg" }),
+        });
+        const j = await res.json();
+        if (j?.ok) {
+          setDraft(j as Draft); setShift((j as Draft).shift ?? ""); seed(j as Draft, mode);
+          setRotatedBy(deg === 0 ? null : deg);
+          lastFail = null;
+          break;
+        }
+        lastFail = j ?? {};
+        // Only an unreadable page is worth another orientation. A missing key,
+        // a rate limit or a rejected payload will fail identically whichever
+        // way up the image is, and retrying them just burns quota.
+        if (j?.reason !== "unreadable") break;
+      }
+      if (!(src instanceof HTMLImageElement)) src.close?.();
+
+      if (lastFail) {
         // The technical detail (e.g. "gemini_400") rides along in small print.
         // It is not sensitive, and it is the difference between "it broke" and
-        // a phone-only failure someone can actually diagnose from a photo of
-        // the screen — which is how this one was reported.
-        setError(msg(j?.reason) + (j?.detail ? ` (${j.detail})` : ""));
+        // a failure someone can actually diagnose from a photo of the screen —
+        // which is how the phone-only one was reported.
+        setError(msg(lastFail.reason) + (lastFail.detail ? ` (${lastFail.detail})` : ""));
         setDraft(null);
-      } else { setDraft(j as Draft); setShift((j as Draft).shift ?? ""); seed(j as Draft, mode); }
+      }
     } catch {
       setError(t.errors.server_error);
     }
@@ -330,6 +356,11 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
             {draft && (
               <span className="text-xs text-gray-500">
                 {draft.rows.length} {t.rowsRead} · {draft.freeRows} {t.freeRows} · {t.model}: {draft.model}
+              </span>
+            )}
+            {rotatedBy !== null && (
+              <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                {t.rotated}
               </span>
             )}
           </div>
