@@ -43,8 +43,8 @@ function num(v: string | undefined): number | null {
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
-export async function loadHourlyRows(): Promise<HourlyRow[]> {
-  const { records } = await getRecords("hourly");
+export async function loadHourlyRows(opts: { fresh?: boolean } = {}): Promise<HourlyRow[]> {
+  const { records } = await getRecords("hourly", opts);
   return records
     .map((r) => {
       const date = normalizeDate(r.date);

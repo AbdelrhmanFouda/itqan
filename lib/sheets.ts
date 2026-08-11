@@ -11,6 +11,8 @@
  *   GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_SECRET  (Apps Script read+write)
  */
 
+import { revalidateTag } from "next/cache";
+
 const BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const SHEET_ID = process.env.GOOGLE_SHEETS_ID;
 const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
@@ -274,37 +276,47 @@ const TAB_ALIASES: Record<string, string[]> = {
  *    it read a minute-old copy would defeat the whole confirm-before-write
  *    guarantee and could write onto a row somebody else just filled.
  */
-const SHEET_TTL_MS = 45_000;
+const SHEET_TTL_SEC = 45;
+export const SHEET_CACHE_TAG = "sheet-read";
 type SheetRead = { title: string; values: string[][] };
-const sheetCache = new Map<string, { at: number; value: SheetRead }>();
+/** Per-instance only, and only to coalesce simultaneous callers. The real
+ *  cache is Next's data cache, which is shared across serverless instances —
+ *  an in-memory Map is not, which is why a second request that lands on a cold
+ *  instance was measured SLOWER than the first. */
 const sheetInflight = new Map<string, Promise<SheetRead>>();
 
-/** Drop cached reads — call after any write so the next read sees it. */
-export function invalidateSheetCache(tab?: string): void {
-  if (tab) sheetCache.delete(tab);
-  else sheetCache.clear();
+/** Drop cached reads everywhere — called after any successful write. */
+export function invalidateSheetCache(): void {
+  sheetInflight.clear();
+  try {
+    // `updateTag` is the read-your-own-writes primitive, but it is Server
+    // Actions only — every write here is a Route Handler, so it is unavailable.
+    // `revalidateTag` needs an explicit profile in this version; the bare
+    // one-argument form is deprecated. `expire: 0` asks for immediate
+    // expiry rather than the stale-while-revalidate of `profile: "max"`,
+    // which would show the crew their own edit missing.
+    revalidateTag(SHEET_CACHE_TAG, { expire: 0 });
+  } catch {
+    // Outside a request scope this throws; the in-flight clear still happens,
+    // the 45s TTL bounds the staleness, and callers that must not be stale
+    // ask for `fresh` anyway.
+  }
 }
 
 async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
-  if (!fresh) {
-    const hit = sheetCache.get(tab);
-    if (hit && Date.now() - hit.at < SHEET_TTL_MS) return hit.value;
-    // Coalesce: several routes asking for the same tab at once share one call
-    // instead of racing each other into the throttle.
-    const flying = sheetInflight.get(tab);
-    if (flying) return flying;
-  }
-  const p = fetchSheetUncached(tab)
-    .then((v) => {
-      if (v.values.length > 0) sheetCache.set(tab, { at: Date.now(), value: v });
-      return v;
-    })
+  if (fresh) return fetchSheetUncached(tab, true);
+  // Route handlers do not get React's per-render fetch memoization, so two
+  // routes reading the same tab in the same instant would otherwise be two
+  // trips into an Apps Script deployment that serialises them.
+  const flying = sheetInflight.get(tab);
+  if (flying) return flying;
+  const p = fetchSheetUncached(tab, false)
     .finally(() => { if (sheetInflight.get(tab) === p) sheetInflight.delete(tab); });
-  if (!fresh) sheetInflight.set(tab, p);
+  sheetInflight.set(tab, p);
   return p;
 }
 
-async function fetchSheetUncached(tab: string): Promise<SheetRead> {
+async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRead> {
   // Preferred: Apps Script (works on a private sheet, no API key).
   // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
   // have drifted between "Production"/"production" etc., so retry casings and
@@ -317,7 +329,15 @@ async function fetchSheetUncached(tab: string): Promise<SheetRead> {
     for (const name of candidates) {
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
-        const res = await fetch(u, { cache: "no-store", redirect: "follow" });
+        // `revalidate` and `cache: "no-store"` conflict — Next ignores BOTH if
+        // they are set together, which would silently disable the cache. Pick
+        // exactly one.
+        const res = await fetch(u, {
+          redirect: "follow",
+          ...(fresh
+            ? { cache: "no-store" as const }
+            : { next: { revalidate: SHEET_TTL_SEC, tags: [SHEET_CACHE_TAG] } }),
+        });
         if (res.ok) {
           // Under load the bridge answers with an HTML error page, not JSON.
           // Parsing that threw into an empty catch, which is how a throttled

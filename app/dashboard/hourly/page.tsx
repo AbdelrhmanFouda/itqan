@@ -41,10 +41,16 @@ export default function HourlyPage() {
   const [loading, setLoading] = useState(true);
 
 
-  async function load(d?: string) {
+  // `fresh` bypasses the 45s sheet-read cache. Used only after the paper
+  // import writes: without it the crew can be shown their own rows missing,
+  // because the cached copy predates the write.
+  async function load(d?: string, fresh = false) {
     setLoading(true);
     try {
-      const j = (await (await fetch(`/api/hourly${d ? `?date=${d}` : ""}`)).json()) as Payload;
+      const qs = new URLSearchParams();
+      if (d) qs.set("date", d);
+      if (fresh) qs.set("fresh", "1");
+      const j = (await (await fetch(`/api/hourly${qs.toString() ? `?${qs}` : ""}`)).json()) as Payload;
       if (j && Array.isArray(j.rows)) { setData(j); setDate(j.date); }
     } catch { /* keep whatever we have */ }
     setLoading(false);
@@ -69,7 +75,7 @@ export default function HourlyPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
         <div className="flex items-center gap-2">
-          <PaperImport onWritten={(d) => load(d)} />
+          <PaperImport onWritten={(d) => load(d, true)} />
           <select
             className={`${inputCls} w-auto`}
             value={date}

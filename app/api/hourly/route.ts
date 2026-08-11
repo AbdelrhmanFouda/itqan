@@ -7,7 +7,7 @@ import { loadHourlyRows, HOUR_LABELS } from "@/lib/hourly";
 export async function GET(req: NextRequest) {
   try {
     const wantDate = req.nextUrl.searchParams.get("date");
-    const rows = await loadHourlyRows();
+    const rows = await loadHourlyRows({ fresh: req.nextUrl.searchParams.get("fresh") === "1" });
 
     const dates = Array.from(new Set(rows.map((r) => r.date))).sort().reverse();
     const date = wantDate || dates[0] || "";
