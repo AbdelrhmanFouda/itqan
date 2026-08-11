@@ -270,7 +270,44 @@ export default function JobDetailPage() {
       {runs.length === 0 ? (
         <EmptyState text={p.jobs.noRuns} />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <>
+        {/* Phone: one card per run. Seven columns including a delete button;
+            on a 375px screen the delete sat off the right edge, which is both
+            unreachable and — once found by scrolling — easy to hit by accident. */}
+        <div className="sm:hidden bg-white border border-gray-200 rounded-xl divide-y divide-gray-50">
+          {runs.map((r) => (
+            <div key={r.id} className="px-4 py-3 space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-900">{r.date}</div>
+                  <div className="text-xs text-gray-500 truncate">{r.machine || "—"}</div>
+                </div>
+                <button
+                  onClick={() => handleDeleteRun(r.id)}
+                  aria-label={p.common.delete}
+                  className="shrink-0 p-2 -m-1 text-gray-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                <span className="text-green-600 font-medium">{p.runs.good}: {fmt(r.goodUnits)}</span>
+                {r.scrapUnits ? <span className="text-red-500">{p.runs.scrap}: {fmt(r.scrapUnits)}</span> : null}
+                {r.downtimeMin ? (
+                  <span className="text-gray-500">
+                    {p.runs.downtime}: {fmt(r.downtimeMin)} {p.overview.minutes}
+                    {r.downtimeReason && r.downtimeReason !== "None"
+                      ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+              {r.operator ? <div className="text-xs text-gray-400">{p.runs.operator}: {r.operator}</div> : null}
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
             <thead>
               <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
@@ -307,6 +344,7 @@ export default function JobDetailPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Log run modal — appends a production row for this job's product */}

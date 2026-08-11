@@ -362,8 +362,32 @@ type PreviewRow = { values: ValRow; errors: string[]; warnings: string[] };
 function ProductionPreview({ a, rows }: { a: (typeof ag)["en"]; rows: PreviewRow[] }) {
   return (
     <div className="space-y-3">
+      {/* Phone: one card per row.
+          This is a CONFIRM-BEFORE-WRITE surface, not a report — the person
+          reading it is being asked to approve a write to the sheet. The table
+          below is eight columns pinned to 36rem, so on a 375px phone the
+          approver had to scroll sideways to see what they were approving, and
+          the numbers that matter most (good, scrap) sat off-screen. The
+          assistant is available to `worker`, whose device is a phone. */}
+      <div className="sm:hidden space-y-2">
+        {rows.map((r, i) => (
+          <div key={i} className="border border-gray-200 rounded-lg px-3 py-2 text-sm space-y-1">
+            <div className="font-medium text-gray-900">{r.values.product || r.values.mold || "—"}</div>
+            <div className="text-xs text-gray-500">
+              {[r.values.date, r.values.shift, r.values.machine].filter(Boolean).join(" · ") || "—"}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span className="text-emerald-700 font-medium">{a.colGood}: {r.values.goodUnits}</span>
+              <span className="text-red-600 font-medium">{a.colScrap}: {r.values.scrapUnits}</span>
+              {r.values.openCavities ? <span className="text-gray-600">{a.colCavities}: {r.values.openCavities}</span> : null}
+              <span className="text-gray-600">{a.colDowntime}: {r.values.downtimeMin}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* wide table scrolls inside its own container */}
-      <div className="overflow-x-auto -mx-1">
+      <div className="hidden sm:block overflow-x-auto -mx-1">
         <table className="w-full text-xs min-w-[36rem]">
           <thead>
             <tr className="text-gray-400 text-start">

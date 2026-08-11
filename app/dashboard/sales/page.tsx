@@ -99,7 +99,34 @@ export default function SalesPage() {
               <div className={`px-5 py-3 border-b border-gray-100 font-semibold text-gray-900 ${isAr ? "text-right" : ""}`}>
                 {client}
               </div>
-              <div className="overflow-x-auto">
+              {/* Phone: one card per order. Seven columns cannot be read at
+                  375px, and the two numbers that matter (remaining, due) are
+                  the ones furthest right — i.e. the first to scroll away. */}
+              <div className="sm:hidden divide-y divide-gray-50">
+                {byClient[client].map((j) => {
+                  const made = produced[j.id] ?? 0;
+                  const remaining = Math.max(0, (Number(j.qtyOrdered) || 0) - made);
+                  return (
+                    <div key={j.id} className="px-4 py-3 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900">{j.code}</div>
+                          <div className="text-xs text-gray-500 truncate">{j.product}</div>
+                        </div>
+                        <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                        <span className="text-gray-700">{a.sales.ordered}: {fmt(Number(j.qtyOrdered) || 0)}</span>
+                        <span className="text-green-600">{a.sales.produced}: {fmt(made)}</span>
+                        <span className="text-gray-900 font-medium">{a.sales.remaining}: {fmt(remaining)}</span>
+                      </div>
+                      <div className="text-xs text-gray-500">{a.sales.due}: {j.dueDate || "—"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
                   <thead>
                     <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">

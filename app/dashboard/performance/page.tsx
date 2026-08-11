@@ -398,7 +398,24 @@ export default function PerformancePage() {
                 <div className="mt-3">
                   <h3 className={`text-xs font-semibold text-red-700 mb-1 ${isAr ? "text-right" : ""}`}>{t.suspectsTitle}</h3>
                   <p className={`text-xs text-gray-500 mb-2 ${isAr ? "text-right" : ""}`}>{t.suspectsIntro}</p>
-                  <div className="overflow-x-auto">
+                  {/* Phone: one card per suspect standard. Five numeric
+                      columns at text-xs is unreadable at 375px, and this panel
+                      exists to make a wrong Master cycle obvious. */}
+                  <div className="sm:hidden space-y-2">
+                    {data.suspects.map((s) => (
+                      <div key={s.mold} className="border border-red-100 bg-red-50/40 rounded-lg px-3 py-2">
+                        <div className="font-medium text-gray-900 text-sm">{s.mold}</div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs mt-1">
+                          <span className="text-gray-600" dir="ltr">{t.sMasterCyc}: {s.masterCycleSec}s × {s.cavities}</span>
+                          <span className="text-red-600 font-semibold" dir="ltr">{t.sImplied}: ≈{s.impliedCycleSec}s</span>
+                          <span className="text-gray-600" dir="ltr">{t.sRatio}: {Math.round(s.ratio * 100)}%</span>
+                          <span className="text-gray-600">{t.sUnits}: {fmtNum(s.units, isAr)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="hidden sm:block overflow-x-auto">
                     <table className="w-full text-xs" dir={isAr ? "rtl" : "ltr"}>
                       <thead>
                         <tr className="text-gray-400">

@@ -94,7 +94,49 @@ export default function ApprovalsPage() {
 
       {/* All users */}
       <h2 className="font-semibold text-gray-900 mb-3">{a.approvals.allUsers}</h2>
-      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+      {/* Phone: one card per user. The table below carries four columns
+          including a select and a button, which on a 375px screen means
+          sideways scrolling to reach the control you came for. */}
+      <div className="sm:hidden space-y-2">
+        {users.map((u) => {
+          const isSelf = u.uid === user?.uid;
+          const isOwner = u.role === "owner";
+          return (
+            <div key={u.uid} className="bg-white border border-gray-200 rounded-xl px-4 py-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-900 truncate">
+                    {u.displayName || u.email}
+                    {isSelf ? <span className="text-xs text-gray-400"> ({a.approvals.you})</span> : null}
+                  </div>
+                  <div className="text-xs text-gray-400 truncate">{u.email}</div>
+                </div>
+                <Pill text={statusLabel(u.status)} tone={statusTone(u.status)} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {isOwner || isSelf ? (
+                  <span className="text-sm text-gray-700">{u.role ? a.roles[u.role] : a.roles.none}</span>
+                ) : (
+                  <select
+                    className={`${inputCls} w-auto`}
+                    value={u.role && u.role !== "owner" ? u.role : REQUESTABLE_ROLES[0]}
+                    onChange={(e) => changeRole(u.uid, e.target.value as Role)}
+                  >
+                    {REQUESTABLE_ROLES.map((r) => (
+                      <option key={r} value={r}>{a.roles[r]}</option>
+                    ))}
+                  </select>
+                )}
+                {!isOwner && !isSelf && u.status === "approved" && (
+                  <Btn variant="ghost" onClick={() => revoke(u.uid)}>{a.approvals.revoke}</Btn>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
           <thead>
             <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
