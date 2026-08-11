@@ -101,14 +101,20 @@ const MAX_BASE64_CHARS = 3_500_000; // comfortably inside the platform body cap
  * page is landscape and phones are held portrait, so this is the normal case,
  * not an edge case.
  */
+/** A crop in normalized 0..1 coordinates of the source image. */
+export type Crop = { x: number; y: number; w: number; h: number };
+const FULL: Crop = { x: 0, y: 0, w: 1, h: 1 };
+
 function encodeJpeg(
-  src: ImageBitmap | HTMLImageElement, w0: number, h0: number, deg: number,
+  src: ImageBitmap | HTMLImageElement, w0: number, h0: number, deg: number, crop: Crop = FULL,
 ): string | null {
+  const sx = Math.round(crop.x * w0), sy = Math.round(crop.y * h0);
+  const sw = Math.max(1, Math.round(crop.w * w0)), sh = Math.max(1, Math.round(crop.h * h0));
   const attempts: [number, number][] = [[1800, 0.85], [1800, 0.7], [1400, 0.7], [1100, 0.6]];
   for (const [maxEdge, quality] of attempts) {
-    const scale = Math.min(1, maxEdge / Math.max(w0, h0));
-    const w = Math.round(w0 * scale);
-    const h = Math.round(h0 * scale);
+    const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+    const w = Math.round(sw * scale);
+    const h = Math.round(sh * scale);
     const canvas = document.createElement("canvas");
     const quarter = deg % 180 !== 0;
     canvas.width = quarter ? h : w;
@@ -117,7 +123,7 @@ function encodeJpeg(
     if (!ctx) return null;
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate((deg * Math.PI) / 180);
-    ctx.drawImage(src as CanvasImageSource, -w / 2, -h / 2, w, h);
+    ctx.drawImage(src as CanvasImageSource, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
     const url = canvas.toDataURL("image/jpeg", quality);
     const comma = url.indexOf(",");
     if (comma < 0) continue;
@@ -125,6 +131,17 @@ function encodeJpeg(
     if (base64.length <= MAX_BASE64_CHARS) return base64;
   }
   return null;
+}
+
+/** A screen-sized preview of the decoded image, so the crop step shows exactly
+ *  what will be sent — including HEIC, which an <img> cannot always render. */
+function previewUrl(src: ImageBitmap | HTMLImageElement, w0: number, h0: number): string {
+  const scale = Math.min(1, 900 / Math.max(w0, h0));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w0 * scale);
+  canvas.height = Math.round(h0 * scale);
+  canvas.getContext("2d")?.drawImage(src as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8);
 }
 
 const numOrNull = (s: string): number | null => {
@@ -152,6 +169,12 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
   const [rotatedBy, setRotatedBy] = useState<number | null>(null);
   const [done, setDone] = useState<{ written: number } | null>(null);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
+  /** The chosen photo, held decoded so cropping never re-decodes it (HEIC is slow). */
+  const srcRef = useRef<{ src: ImageBitmap | HTMLImageElement; w0: number; h0: number } | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [crop, setCrop] = useState<Crop | null>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const imgBoxRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const msg = (code: string | undefined) =>
@@ -175,29 +198,83 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
   function reset() {
     setDraft(null); setRows([]); setShift(""); setError(null);
     setDone(null); setOutcomes([]); setArmed(false);
+    setPreview(null); setCrop(null); setRotatedBy(null);
+    const held = srcRef.current;
+    if (held && !(held.src instanceof HTMLImageElement)) held.src.close?.();
+    srcRef.current = null;
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  /* --------- drawing the crop box: pointer coords → normalized 0..1 -------- */
+  const pointToNorm = (e: React.PointerEvent) => {
+    const r = imgBoxRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+    };
+  };
+  const onDragStart = (e: React.PointerEvent) => {
+    const p = pointToNorm(e);
+    if (!p) return;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dragRef.current = p;
+    setCrop({ x: p.x, y: p.y, w: 0, h: 0 });
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    const s = dragRef.current;
+    if (!s) return;
+    const p = pointToNorm(e);
+    if (!p) return;
+    setCrop({
+      x: Math.min(s.x, p.x), y: Math.min(s.y, p.y),
+      w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y),
+    });
+  };
+  const onDragEnd = () => {
+    dragRef.current = null;
+    // A tap rather than a drag should not leave a useless sliver behind.
+    setCrop((c) => (c && (c.w < 0.05 || c.h < 0.05) ? null : c));
+  };
+
+  /** Step 1 — decode and show the photo so a crop can be drawn on it. No model
+   *  call happens here. Cropping the background away is the single largest
+   *  accuracy lever measured (2/6 → 6/6 on the same photo), and only the person
+   *  holding the page knows where the table is. */
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null); setDone(null); setOutcomes([]); setArmed(false);
-    setBusy("reading"); setRotatedBy(null);
+    setRotatedBy(null); setDraft(null); setCrop(null);
     try {
-      let src: ImageBitmap | HTMLImageElement;
-      try { src = await decodeImage(file); } catch { setError(msg("decode_failed")); setBusy(null); return; }
+      const src = await decodeImage(file);
       const w0 = src instanceof HTMLImageElement ? src.naturalWidth : src.width;
       const h0 = src instanceof HTMLImageElement ? src.naturalHeight : src.height;
-      if (!w0 || !h0) { setError(msg("decode_failed")); setBusy(null); return; }
+      if (!w0 || !h0) { setError(msg("decode_failed")); return; }
+      srcRef.current = { src, w0, h0 };
+      setPreview(previewUrl(src, w0, h0));
+    } catch {
+      setError(msg("decode_failed"));
+    }
+  }
 
+  /** Step 2 — send it, cropped if a box was drawn. */
+  async function read(cropped: Crop | null) {
+    const held = srcRef.current;
+    if (!held) return;
+    const { src, w0, h0 } = held;
+    setError(null); setBusy("reading"); setRotatedBy(null);
+    try {
       // The sheet is landscape. A portrait photo is therefore probably a
       // sideways page, so try the rotations first — it saves a wasted call in
       // the common case rather than only rescuing the uncommon one.
-      const order = h0 > w0 ? [90, 270, 0] : [0, 90, 270];
+      const region = cropped ?? FULL;
+      const rw = region.w * w0, rh = region.h * h0;
+      const order = rh > rw ? [90, 270, 0] : [0, 90, 270];
 
       let lastFail: { reason?: string; detail?: string } | null = null;
       for (const deg of order) {
-        const base64 = encodeJpeg(src, w0, h0, deg);
+        const base64 = encodeJpeg(src, w0, h0, deg, region);
         if (!base64) { lastFail = { reason: "too_large" }; break; }
         const res = await authedFetch("/api/hourly/import", {
           method: "POST",
@@ -217,7 +294,6 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
         // way up the image is, and retrying them just burns quota.
         if (j?.reason !== "unreadable") break;
       }
-      if (!(src instanceof HTMLImageElement)) src.close?.();
 
       if (lastFail) {
         // The technical detail (e.g. "gemini_400") rides along in small print.
@@ -344,14 +420,18 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
           {!draft && <p className="text-xs text-gray-400">{t.tips}</p>}
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* NO `capture` attribute. With it, a phone opens the camera and
+                never offers the photo library — so a page already photographed
+                (or one taken carefully and transferred) could not be chosen at
+                all. Plain accept="image/*" gives the OS sheet: take a photo, or
+                pick an existing one. */}
             <input
               ref={fileRef}
               type="file"
               accept="image/*"
-              capture="environment"
               onChange={onFile}
               disabled={busy !== null}
-              className="text-sm file:me-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-500 disabled:opacity-50"
+              className="text-sm file:me-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-3 file:text-sm file:font-medium file:text-white hover:file:bg-blue-500 disabled:opacity-50"
             />
             {draft && (
               <span className="text-xs text-gray-500">
@@ -364,6 +444,48 @@ export default function PaperImport({ onWritten }: { onWritten: (date: string) =
               </span>
             )}
           </div>
+
+          {/* ---- crop step: drag a box round the table, then read ---- */}
+          {preview && !draft && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">{t.cropHint}</p>
+              <div
+                ref={imgBoxRef}
+                onPointerDown={onDragStart}
+                onPointerMove={onDragMove}
+                onPointerUp={onDragEnd}
+                onPointerCancel={onDragEnd}
+                className="relative inline-block max-w-full touch-none select-none cursor-crosshair rounded-lg overflow-hidden border border-gray-200"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={preview} alt="" className="block max-w-full max-h-[50vh] w-auto pointer-events-none" />
+                {crop && crop.w > 0 && crop.h > 0 && (
+                  // A single bordered box. `box-shadow: 0 0 0 9999px` dims
+                  // everything OUTSIDE it in one declaration — no second layer
+                  // to keep in sync and nothing to punch back through.
+                  <div
+                    className="absolute border-2 border-blue-400 pointer-events-none"
+                    style={{
+                      left: `${crop.x * 100}%`, top: `${crop.y * 100}%`,
+                      width: `${crop.w * 100}%`, height: `${crop.h * 100}%`,
+                      boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)",
+                    }}
+                  />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Btn onClick={() => read(crop)} disabled={busy !== null}>
+                  {crop ? t.readCrop : t.readWhole}
+                </Btn>
+                {crop && (
+                  <Btn variant="outline" onClick={() => read(null)} disabled={busy !== null}>
+                    {t.readWhole}
+                  </Btn>
+                )}
+                {crop && <Btn variant="ghost" onClick={() => setCrop(null)}>{t.clearCrop}</Btn>}
+              </div>
+            </div>
+          )}
 
           {busy === "reading" && <Spinner text={t.reading} />}
 

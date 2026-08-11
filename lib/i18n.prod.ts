@@ -174,6 +174,14 @@ export const pd = {
 
         tips: "Lay the page flat, shoot straight down with the phone sideways so the page fills the frame, and send the original file — not through WhatsApp, which shrinks it. Framing matters more than anything else: the same page read twice as accurately once the background was cropped out.",
         pick: "Choose a photo",
+
+        cropHint: "Drag a box around the table only — leaving out the desk and background is the single biggest thing that improves the reading. Or just press read to use the whole photo.",
+
+        readCrop: "Read the selected part",
+
+        readWhole: "Read the whole photo",
+
+        clearCrop: "Clear selection",
         retake: "Choose another photo",
         reading: "Reading the photo…",
 
@@ -450,6 +458,14 @@ export const pd = {
 
         tips: "حط الورقة مفرودة على الترابيزة، وصوّر من فوق بالظبط والموبايل بالعرض، وخلي الورقة مالية الكادر كله. وابعت الملف الأصلي — مش من واتساب لأنه بيصغّر الصورة. طريقة التصوير أهم حاجة: نفس الورقة اتقرت بضعف الدقة لما شيلنا الخلفية.",
         pick: "اختر صورة",
+
+        cropHint: "ارسم مربع حوالين الجدول بس — إن الخلفية والترابيزة يبقوا برّه هو أكتر حاجة بتحسّن القراءة. أو اضغط اقرأ على طول عشان يقرأ الصورة كلها.",
+
+        readCrop: "اقرأ الجزء المحدد",
+
+        readWhole: "اقرأ الصورة كلها",
+
+        clearCrop: "إلغاء التحديد",
         retake: "اختر صورة أخرى",
         reading: "جاري قراءة الصورة…",
 
