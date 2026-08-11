@@ -317,7 +317,7 @@ export default function PerformancePage() {
           <EmptyState text={t.empty} />
           {period === "month" && data.months.length > 0 && (
             <p className="text-center mt-3">
-              <button onClick={() => setPeriod("all")} className="text-xs text-blue-600 hover:underline">{t.tryAll}</button>
+              <button onClick={() => setPeriod("all")} className="inline-flex items-center min-h-11 sm:min-h-0 text-xs text-blue-600 hover:underline">{t.tryAll}</button>
             </p>
           )}
         </div>

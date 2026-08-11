@@ -119,7 +119,11 @@ export default function IssuesPage() {
     <button
       onClick={() => cycleStatus(issue)}
       title={t.tapStatus}
-      className={`shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap transition-colors ${statusCls(issue.status)}`}
+      // 26px measured, and the floor taps this to move an issue along. The
+      // pill stays small so the list still scans, but an invisible ::after
+      // grows the hit area to ~46px rather than making the badge look like a
+      // button. Same trick suits any small pill that is actually tappable.
+      className={`relative shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap transition-colors after:content-[''] after:absolute after:-inset-2.5 sm:after:hidden ${statusCls(issue.status)}`}
     >
       {t.statusLabels[issue.status] || issue.status}
     </button>

@@ -80,7 +80,7 @@ export default function HourlyPage() {
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
-          <button onClick={() => load(date)} className="text-xs text-blue-600 hover:underline">{t.refresh}</button>
+          <button onClick={() => load(date)} className="inline-flex items-center min-h-11 sm:min-h-0 text-xs text-blue-600 hover:underline">{t.refresh}</button>
         </div>
       </div>
       <p className="text-sm text-gray-500 mb-5">{t.subtitle}</p>

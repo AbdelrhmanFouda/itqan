@@ -274,7 +274,7 @@ export default function ReportsPage() {
                 </div>
               </Link>
               <div className={`flex items-center gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
-                <Link href={`/dashboard/reports/${r.id}`} className="text-xs text-blue-600 hover:underline">
+                <Link href={`/dashboard/reports/${r.id}`} className="inline-flex items-center min-h-11 sm:min-h-0 text-xs text-blue-600 hover:underline">
                   {tr.dashboard.viewReport}
                 </Link>
                 <button

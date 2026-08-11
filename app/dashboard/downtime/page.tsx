@@ -176,7 +176,7 @@ export default function DowntimePage() {
         {/* Not a plain <a>: the export route is guarded by a Bearer token, which
             a browser navigation cannot attach — it would 401. Fetch it
             authenticated, then hand the blob to a throwaway link. */}
-        <button onClick={exportCsv} className="text-sm text-blue-600 hover:underline">
+        <button onClick={exportCsv} className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">
           {t.export}
         </button>
       </div>
