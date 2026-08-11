@@ -219,6 +219,8 @@ export const pd = {
         errors: {
           no_provider: "No AI key is configured, so the photo cannot be read.",
           vision_failed: "The reader could not be reached. Try again.",
+
+          rate_limited: "The reader is busy right now — wait a minute and try again.",
           unreadable: "Nothing could be read from that photo — try a straighter, brighter one.",
           no_date: "No date could be read from the page.",
           bad_mime: "That file is not an image.",
@@ -487,6 +489,8 @@ export const pd = {
         errors: {
           no_provider: "مفيش مفتاح ذكاء اصطناعي مضبوط، فمش ممكن قراءة الصورة.",
           vision_failed: "تعذّر الوصول للقارئ. حاول تاني.",
+
+          rate_limited: "القارئ مشغول دلوقتي — استنى دقيقة وحاول تاني.",
           unreadable: "مش قادر يقرأ حاجة من الصورة دي — جرّب صورة أوضح وأكثر استواءً.",
           no_date: "مش قادر يقرأ التاريخ من الورقة.",
           bad_mime: "الملف ده مش صورة.",

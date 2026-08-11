@@ -84,7 +84,7 @@ export type VisionResult = {
   model: string;
 } | {
   ok: false;
-  reason: "no_provider" | "vision_failed" | "unreadable";
+  reason: "no_provider" | "vision_failed" | "unreadable" | "rate_limited";
   detail?: string;
 };
 
@@ -101,16 +101,24 @@ function twelve(hours: unknown): (number | null)[] {
   return out;
 }
 
-export async function readSheetPhoto(base64: string, mimeType: string): Promise<VisionResult> {
-  const provider = pickProvider();
-  // Anthropic could do this too, but the owner's configured key is Gemini and
-  // one vision path is enough; say so plainly rather than half-supporting both.
-  if (!provider || provider.kind !== "gemini") return { ok: false, reason: "no_provider" };
-
-  let text: string;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${provider.key}`,
+/**
+ * One Gemini call, retried through a 429.
+ *
+ * The free tier allows 20 requests a minute, and the API's own answer to a 429
+ * is "Please retry in 4.6s" — it is a per-MINUTE window, not a dead key. Two
+ * supervisors photographing at shift change is enough to trip it, and without
+ * this the second one just sees a failure. Verified against the live quota on
+ * 2026-08-10 while the limit was actually exhausted.
+ *
+ * Only 429 is retried. A 400 or 403 will fail identically every time, and
+ * retrying a 500 risks a duplicate charge on a paid key for no benefit.
+ */
+async function callGemini(key: string, base64: string, mimeType: string): Promise<Response> {
+  const BACKOFF_MS = [6000, 15000]; // the API asks for ~5s; leave headroom
+  let res!: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${key}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -127,8 +135,27 @@ export async function readSheetPhoto(base64: string, mimeType: string): Promise<
         signal: AbortSignal.timeout(90000), // a photo is slower than a digest
       },
     );
+    if (res.status !== 429 || attempt >= BACKOFF_MS.length) return res;
+    await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
+  }
+}
+
+export async function readSheetPhoto(base64: string, mimeType: string): Promise<VisionResult> {
+  const provider = pickProvider();
+  // Anthropic could do this too, but the owner's configured key is Gemini and
+  // one vision path is enough; say so plainly rather than half-supporting both.
+  if (!provider || provider.kind !== "gemini") return { ok: false, reason: "no_provider" };
+
+  let text: string;
+  try {
+    const res = await callGemini(provider.key, base64, mimeType);
     if (!res.ok) {
-      return { ok: false, reason: "vision_failed", detail: `gemini_${res.status}` };
+      // 429 survives the retries above only when the quota is genuinely gone
+      // (the daily cap, not the per-minute one). Report it distinctly so the
+      // page can say "busy, try again shortly" instead of "it broke" — the
+      // difference matters to whoever is standing on the floor with a phone.
+      const reason = res.status === 429 ? "rate_limited" : "vision_failed";
+      return { ok: false, reason, detail: `gemini_${res.status}` };
     }
     const j = await res.json();
     text = j?.candidates?.[0]?.content?.parts?.map((x: { text?: string }) => x.text ?? "").join("") ?? "";
