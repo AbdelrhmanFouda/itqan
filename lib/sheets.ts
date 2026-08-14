@@ -182,6 +182,38 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "efficiency", keywords: ["الكفاءة", "efficiency"] },
     ],
   },
+  // «التوقفات» — the stoppage log, created by ../production/scripts/downtime-tab.gs
+  // on 2026-08-14 and now the SOURCE OF TRUTH for downtime. It replaces the
+  // Firestore-only `downtimeEvents` collection, which is left holding one thing:
+  // the stoppage that is running RIGHT NOW (it has no minutes yet, and !D
+  // requires a number greater than zero, so it cannot be a valid row). The row
+  // is written when somebody taps stop — see app/api/downtime/route.ts.
+  //
+  // Header row 1, data from row 2, bilingual "ar\nen" like every other tab.
+  // FIELD ORDER IS LOAD-BEARING for appendRecord, which gives each real header
+  // to the FIRST field whose keyword it contains, and four of the nine headers
+  // contain the word «التوقف»:
+  //   • `reason` must come before `minutes`, and matches on «سبب» alone;
+  //   • `minutes` therefore matches «زمن التوقف»/«دقيقة», never a bare «التوقف»;
+  //   • `start`/`end` match «بداية»/«نهاية» for the same reason.
+  // Get that wrong and a stoppage's minutes land in the reason column.
+  downtime: {
+    tab: "التوقفات", titleEn: "Downtime Log", titleAr: "التوقفات",
+    fields: [
+      { key: "date", keywords: ["التاريخ", "date"] },
+      // The «الماكينات»!J label ("PQ 7 — 100"), from a dropdown. This is the
+      // join key to «الإنتاج» — tonnage alone would merge PQ 5 with PQ 7.
+      { key: "machine", keywords: ["الماكينة", "machine"] },
+      { key: "reason", keywords: ["سبب", "reason"] },
+      // The ONLY field anything computes from; the sheet validates it > 0.
+      { key: "minutes", keywords: ["زمن التوقف", "دقيقة", "downtime (min)"] },
+      { key: "start", keywords: ["بداية", "started"] },
+      { key: "end", keywords: ["نهاية", "ended"] },
+      { key: "estimated", keywords: ["تقديري", "estimated"] },
+      { key: "loggedBy", keywords: ["بواسطة", "logged"] },
+      { key: "notes", keywords: ["ملاحظ", "note"], long: true },
+    ],
+  },
   // Manual faults/issues log — one row per reported problem on the floor.
   // The AI agent's log_issue tool appends here. Headers are unknown/loosely
   // structured on the live sheet, so keywords are deliberately broad; appendRecord

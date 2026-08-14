@@ -133,6 +133,86 @@ const reasonFor = (key: string) => ALL_DOWNTIME_REASONS.find((r) => r.key === ke
 /** Canonical downtime key → the crew's Arabic wording (falls back to the key). */
 export const downtimeReasonAr = (key: string): string => reasonFor(key)?.ar ?? key;
 
+/* ------------------ the sheet's Arabic ⇄ the app's keys -------------------- */
+/**
+ * «التوقفات» stores the crew's ARABIC wording; everything downstream — the
+ * Pareto, `isPlannedDowntime`, the monthly report — is keyed on the English
+ * key. `downtimeReasonAr` has always mapped key → Arabic; this is the direction
+ * that did not exist, and the one the sheet needs on every read.
+ *
+ * It must be TOTAL over the vocabulary that can actually appear, which is
+ * larger than the eight dropdown values: the five RETIRED keys are in live
+ * data (5 rows of «عطل» and 3 of «خامة» were captured before the list was
+ * settled), so they are in the map too. A word that maps to nothing would land
+ * in «أخرى» and quietly move minutes from one bar of the Pareto to another.
+ */
+
+/**
+ * Fold an Arabic cell to a comparison key: strip harakat, tatweel and the
+ * invisible bidi marks that RTL sheets collect, unify the alef/ya/ta-marbuta
+ * spellings a hand-typed row may differ by, drop terminal punctuation, and
+ * collapse whitespace (some dropdown values carry a trailing tab — «زراير\t»
+ * is the known case in this workbook).
+ *
+ * Latin text passes through lowercased, so the same map also resolves a cell
+ * holding an English key (a pasted export, or a row the assistant wrote).
+ */
+export function normalizeArabic(s: string | undefined): string {
+  return (s ?? "")
+    .replace(/[ً-ْٰـ]/g, "")     // harakat, superscript alef, tatweel
+    .replace(/[​-‏؜﻿]/g, "")     // zero-width + bidi marks
+    .replace(/[أإآٱ]/g, "ا") // أ إ آ ٱ → ا
+    .replace(/ى/g, "ي")                  // ى → ي
+    .replace(/ة/g, "ه")                  // ة → ه
+    .replace(/[؟?!.،,;:]/g, "")          // ؟ ? ! . ، , ; :
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+const REASON_BY_TEXT: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const r of ALL_DOWNTIME_REASONS) {
+    m.set(normalizeArabic(r.ar), r.key);
+    m.set(normalizeArabic(r.key), r.key); // an English key in the cell resolves too
+    m.set(normalizeArabic(r.en), r.key);  // …as does the English label
+  }
+  return m;
+})();
+
+/**
+ * A «سبب التوقف» cell → the canonical key.
+ *
+ * An unrecognised word is returned AS ITSELF, never coerced to "Other" — the
+ * same rule as `jobStatusFromSheet`. A reason nobody has defined should appear
+ * in the Pareto under its own name so it can be seen and either added to the
+ * list or corrected in the sheet; folding it into «أخرى» hides it. Unknown keys
+ * already count as unplanned (`isPlannedDowntime`), so this cannot flatter the
+ * avoidable-downtime figure either.
+ *
+ * A blank cell returns "" — the caller decides what an unrecorded reason means.
+ * It must never become a 0 or an invented value.
+ */
+export const downtimeReasonFromSheet = (v: string | undefined): string => {
+  const raw = (v ?? "").trim();
+  if (!raw) return "";
+  return REASON_BY_TEXT.get(normalizeArabic(raw)) ?? raw;
+};
+
+/** «تقديري؟» — the sheet's two validated values. */
+export const DOWNTIME_YES = "نعم";
+export const DOWNTIME_NO = "لا";
+
+/**
+ * «تقديري؟» → boolean. Anything that is not an explicit yes is FALSE only for
+ * the flag's own purposes; note that the caller must not read a blank as
+ * "measured" without saying so — a blank here means nobody stated it.
+ */
+export const downtimeEstimatedFromSheet = (v: string | undefined): boolean => {
+  const n = normalizeArabic(v);
+  return n === normalizeArabic(DOWNTIME_YES) || n === "yes" || n === "true";
+};
+
 /**
  * Was this downtime planned? Unknown keys count as UNPLANNED — an unrecognised
  * stoppage is not evidence that it was scheduled, and calling it planned would

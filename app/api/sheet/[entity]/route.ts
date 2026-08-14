@@ -11,6 +11,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
     const g = await requireRole(req, ["sales"]);
     if ("deny" in g) return g.deny;
   }
+  // «التوقفات» carries «سُجل بواسطة» — a staff email on every row — so it is
+  // read-guarded for exactly the reason /api/downtime's GET is, and must not
+  // become an open read just because it was added to ENTITIES.
+  if (entity === "downtime") {
+    const g = await requireRole(req);
+    if ("deny" in g) return g.deny;
+  }
   try {
     const data = await getRecords(entity);
     return NextResponse.json({ ...data, configured: sheetsConfigured() });

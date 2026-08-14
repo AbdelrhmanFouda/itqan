@@ -147,6 +147,91 @@ export function factoryDayEnd(isoDate: string): number {
   return startOfDayUtc - CAIRO_OFFSET_MIN * 60000 + FACTORY_DAY_START_HOUR * 3600000 + 86400000;
 }
 
+/* ------------------------- clock times in a cell -------------------------- */
+/**
+ * «التوقفات»!E/F hold an OPTIONAL clock time. Nothing computes from them — the
+ * minutes in !D are the only number the dashboard divides by — but they are
+ * what lets a person reading a row see when the machine actually stopped, and
+ * they are what the CSV export turns back into timestamps.
+ *
+ * The column is formatted hh:mm, so Sheets renders a real time as "14:30"; a
+ * hand-typed cell can also arrive as "2:30 PM", "١٤:٣٠", or with seconds. As
+ * everywhere else in this workbook, parse it in ONE place rather than ad hoc.
+ */
+
+/** "14:30" → 870 minutes past midnight. Returns null when there is no time. */
+export function parseClockMinutes(raw: string | number | undefined | null): number | null {
+  if (raw === undefined || raw === null) return null;
+  let s = latinDigits(String(raw).trim()).replace(/[‎‏؜]/g, "");
+  if (!s) return null;
+  // A cell Sheets stored as a fraction of a day ("0.5" = 12:00).
+  if (/^0?\.\d+$/.test(s)) return Math.round(parseFloat(s) * 1440) % 1440;
+  let pm = false, am = false;
+  s = s.replace(/\s*(am|pm|ص|م)\s*$/i, (_m, x: string) => {
+    const t = x.toLowerCase();
+    if (t === "pm" || t === "م") pm = true;
+    else am = true;
+    return "";
+  }).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  let h = +m[1];
+  const min = +m[2];
+  if (min > 59) return null;
+  if (pm && h < 12) h += 12;
+  if (am && h === 12) h = 0;
+  if (h > 23) return null;
+  return h * 60 + min;
+}
+
+/** Epoch ms → "HH:MM" as the Cairo clock read at that moment. */
+export function formatClock(ms: number): string {
+  if (!ms) return "";
+  const d = new Date(ms + CAIRO_OFFSET_MIN * 60000);
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+}
+
+/**
+ * The instant a clock time refers to WITHIN a factory day, as epoch ms.
+ *
+ * A factory day runs 08:00 → 07:00, so a time before 08:00 belongs to the
+ * calendar day AFTER the row's date — a stoppage logged 02:00 on the 7 Aug row
+ * really happened at 02:00 on 8 Aug. Treating it as 02:00 on the 7th would put
+ * the end of a stoppage six hours before its start.
+ */
+export function factoryDayInstant(isoDate: string, minutesPastMidnight: number | null): number {
+  if (minutesPastMidnight == null) return 0;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) return 0;
+  const midnightUtc = Date.UTC(+m[1], +m[2] - 1, +m[3]) - CAIRO_OFFSET_MIN * 60000;
+  const rollover = minutesPastMidnight < FACTORY_DAY_START_HOUR * 60 ? 86400000 : 0;
+  return midnightUtc + minutesPastMidnight * 60000 + rollover;
+}
+
+/**
+ * A start and an end clock time within one factory day, as epoch ms.
+ *
+ * `factoryDayInstant` is right for a single time and not enough for a PAIR:
+ * 08:00 is simultaneously the first and the last minute of a factory day, and
+ * it is exactly what an estimated close records. Resolved independently, a
+ * stoppage «19:28 → 8:00» ends twelve hours before it starts — 23 of the 37
+ * rows migrated on 2026-08-14 were that shape. An end cannot precede its own
+ * start, so the only available reading is the following morning.
+ *
+ * Equal times are left equal: a start and stop inside the same minute is a
+ * mis-tap, not a 24-hour stoppage.
+ */
+export function factoryDaySpan(
+  isoDate: string,
+  startMin: number | null,
+  endMin: number | null,
+): { startedAt: number; endedAt: number } {
+  const startedAt = factoryDayInstant(isoDate, startMin);
+  let endedAt = factoryDayInstant(isoDate, endMin);
+  if (endedAt && startedAt && endedAt < startedAt) endedAt += 86400000;
+  return { startedAt, endedAt };
+}
+
 /** Display an ISO date in the reader's locale (falls back to the raw string). */
 export function formatDate(iso: string, lang: "ar" | "en"): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);

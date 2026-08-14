@@ -1,14 +1,22 @@
 /**
- * PHASE 2 — downtime maths. Pure computation, no I/O (same rule as lib/oee.ts,
- * so it stays unit-testable without Firebase). The fetching half is
+ * Downtime maths. Pure computation, no I/O (same rule as lib/oee.ts, so it
+ * stays unit-testable without Firebase or the bridge). The fetching half is
  * lib/downtime-data.ts.
  *
- * Downtime is the one piece of factory data that does NOT live in the Google
- * Sheet: «الإنتاج»!J «زمن التوقف» has never been filled once in 417 rows, and
- * the owner ruled the workbook must not gain tabs, columns, formulas or
- * validation. So it is captured on a phone into Firestore `downtimeEvents` and
- * joined onto the sheet's production runs here — exactly the way `deriveScrap()`
- * joins «تسجيل الإنتاج» scrap onto those same runs.
+ * ── Where downtime lives, as of 2026-08-14 ────────────────────────────────
+ * In the SHEET, tab «التوقفات», like «الإنتاج» and «الأعطال». This reverses the
+ * phase-2 arrangement, under which downtime was the one piece of factory data
+ * kept in Firestore because the workbook was frozen; the owner has since had
+ * the tab created (../production/scripts/downtime-tab.gs) and ruled the sheet
+ * the source of truth. Firestore keeps exactly ONE thing now: the stoppage that
+ * is running at this second. It has no minutes yet, and «التوقفات»!D is
+ * validated greater than zero, so an open stoppage cannot be a legal row — the
+ * row is written when somebody taps stop, always with measured minutes. There
+ * is deliberately no "write it as 0 and fix it later" path.
+ *
+ * «الإنتاج»!J «زمن التوقف» is still not the place: it has never been filled once
+ * in 418 rows. Downtime is joined onto production runs from «التوقفات» here,
+ * exactly the way `deriveScrap()` joins «تسجيل الإنتاج» scrap onto those runs.
  *
  * The join key is `date | machine`, where machine is the «الماكينات»!J label
  * ("PQ 7 — 100"). Tonnage alone would merge PQ 5 with PQ 7 (both 100 t).
@@ -69,6 +77,86 @@ export function isStaleOpen(
 export function estimatedStopMinutes(startedAt: number, factoryDayEndMs: number): number {
   if (!factoryDayEndMs || factoryDayEndMs <= startedAt) return 0;
   return Math.max(0, Math.round((factoryDayEndMs - startedAt) / 60000));
+}
+
+/* ------------------------------ the tally --------------------------------- */
+
+/** The fields of a stoppage that any total depends on, whatever the store. */
+export type DowntimeCountable = {
+  date: string;
+  machine: string;
+  reason: string;
+  minutes: number;
+  estimated?: boolean;
+};
+
+/**
+ * A stoppage that can inform a number.
+ *
+ * All three conditions matter and none is cosmetic. No minutes → nothing to
+ * add, and «التوقفات»!D validates > 0 precisely so a zero never becomes one.
+ * No date or no machine → the row cannot be joined to a production run, so
+ * counting it in the headline while it is absent from every per-machine figure
+ * would make two views of the same month disagree.
+ */
+export const countsTowardDowntime = (e: DowntimeCountable): boolean =>
+  !!e.date && !!e.machine && e.minutes > 0;
+
+export type DowntimeTally = {
+  /** `date|machine` → stopped minutes. */
+  byKey: Map<string, number>;
+  /** `date|machine` → the reason with the most minutes that day. */
+  dominantByKey: Map<string, string>;
+  /** canonical reason → minutes, for the Pareto at full fidelity. */
+  byReason: Map<string, number>;
+  /** of the above, how many minutes are a RECONSTRUCTION rather than a measurement. */
+  estimatedMin: number;
+  estimatedCount: number;
+  /** the rows that were actually counted (the rest failed countsTowardDowntime). */
+  counted: DowntimeCountable[];
+};
+
+/**
+ * Total a list of stoppages by day+machine and by reason.
+ *
+ * Kept here, pure, rather than inline in the loader, because it is the same
+ * arithmetic whether the rows came from «التوقفات» or (before 2026-08-14) from
+ * Firestore — and because the migration between the two had to prove the
+ * totals were identical, which needs a function a test can call.
+ *
+ * A row with no reason is tallied as "Other" for GROUPING only. That is not a
+ * claim about the stoppage: `downtimeReasonFromSheet` returns "" for a blank
+ * cell and passes an unknown word through as itself, so the only thing that
+ * lands in this bucket is a genuinely empty «سبب التوقف».
+ */
+export function summarizeDowntime(events: readonly DowntimeCountable[]): DowntimeTally {
+  const byKey = new Map<string, number>();
+  const byReason = new Map<string, number>();
+  const perKeyReason = new Map<string, Map<string, number>>();
+  const counted: DowntimeCountable[] = [];
+  let estimatedMin = 0;
+  let estimatedCount = 0;
+
+  for (const e of events) {
+    if (!countsTowardDowntime(e)) continue;
+    counted.push(e);
+    const k = downtimeKey(e.date, e.machine);
+    byKey.set(k, (byKey.get(k) ?? 0) + e.minutes);
+    const r = e.reason || "Other";
+    byReason.set(r, (byReason.get(r) ?? 0) + e.minutes);
+    const m = perKeyReason.get(k) ?? new Map<string, number>();
+    m.set(r, (m.get(r) ?? 0) + e.minutes);
+    perKeyReason.set(k, m);
+    if (e.estimated) { estimatedMin += e.minutes; estimatedCount++; }
+  }
+
+  const dominantByKey = new Map<string, string>();
+  for (const [k, m] of perKeyReason) {
+    const top = Array.from(m.entries()).sort((a, b) => b[1] - a[1])[0];
+    if (top) dominantByKey.set(k, top[0]);
+  }
+
+  return { byKey, dominantByKey, byReason, estimatedMin, estimatedCount, counted };
 }
 
 export type DowntimeRun = {

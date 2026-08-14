@@ -15,10 +15,11 @@ import {
 // TWO of a run's numbers are not in its own row and are joined on here:
 //
 //   scrapUnits   ← «تسجيل الإنتاج» (سستم − الفعلي), via deriveScrap()
-//   downtimeMin  ← Firestore `downtimeEvents`, via distributeDowntime()
+//   downtimeMin  ← «التوقفات», via distributeDowntime()
 //
 // «الإنتاج»!J «زمن التوقف» has never been filled in 418 rows and will not be —
-// the workbook is frozen and downtime is captured on a phone instead. Without
+// stoppages are logged in their own tab «التوقفات» instead (Firestore until
+// 2026-08-14; see lib/downtime-data.ts). Without
 // the join below every consumer of this route reported downtime as a flat 0
 // while /performance (buildOEEData) showed the real merged minutes: the same
 // metric, two answers, on two pages. The join deliberately reuses buildOEEData's
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
     );
     runs = runs.map((r, i) => (derived[i] > 0 ? { ...r, scrapUnits: derived[i], scrapSource: "hourly" } : r));
 
-    // Downtime captured on the phone, joined on the same way buildOEEData does
+    // Downtime from «التوقفات», joined on the same way buildOEEData does
     // it. Stub rows are held out of the spread for the reason in isStubRun():
     // they have planned minutes but no production, so letting them absorb a
     // share here — where OEE will not — is precisely what would make the

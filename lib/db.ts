@@ -488,11 +488,21 @@ export async function deleteRun(id: string) {
 /* -------------------------- Downtime events ------------------------- */
 
 /**
- * PHASE 2 — downtime capture. This is FACTORY data in Firestore, which the rest
- * of the system deliberately keeps in the Google Sheet. It lives here because
- * the owner ruled the sheet must not gain tabs, columns, formulas or validation,
- * and the bridge must not be redeployed — so there is nowhere in the workbook to
- * put it. See repo CLAUDE.md ("the one exception").
+ * Downtime capture. **The stoppage LOG is the sheet tab «التوقفات»** as of
+ * 2026-08-14 — see lib/downtime-data.ts. What is left here is the running
+ * state: the stoppage a machine is in right now, which has no minutes yet and
+ * therefore no legal row (!D is validated greater than zero). The sheet row is
+ * appended when somebody taps stop.
+ *
+ * So a document in this collection is one of three things:
+ *   • OPEN     — `endedAt: null`. A machine is down at this second.
+ *   • SYNCED   — closed AND `sheetSynced: true`. Its row is in «التوقفات»; kept
+ *                only as a receipt, and read by NOTHING that reports a number.
+ *   • PENDING  — closed but `sheetSynced: false`. The stop was recorded and the
+ *                append failed. Retried on the next read; see the route.
+ * Documents written before the cutover carry no `sheetSynced` field at all,
+ * which is what keeps them out of the pending query — their rows were migrated
+ * by hand and re-appending them would double-count the month.
  *
  * `machine` is the «الماكينات»!J label ("PQ 7 — 100"), the same string the
  * production and hourly tabs use, because that is the only unique machine id —
@@ -526,6 +536,14 @@ export type DowntimeEvent = {
   estimated: boolean;
   /** who closed it — empty for a tapped stop (that was `createdBy` at the machine). */
   closedBy: string;
+  /**
+   * Has this stoppage's row reached «التوقفات»?
+   *
+   * `undefined` on every pre-cutover document (those were migrated by hand and
+   * must never be re-appended), `false` for the moments between closing the
+   * event and the bridge accepting the row, `true` once it is in the sheet.
+   */
+  sheetSynced?: boolean;
   createdAt?: number;
 };
 type DowntimeDoc = Omit<DowntimeEvent, "id">;
@@ -542,6 +560,10 @@ function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
     createdBy: d.createdBy ?? "",
     estimated: d.estimated ?? false,
     closedBy: d.closedBy ?? "",
+    // Left undefined rather than defaulted: "this document predates the sheet"
+    // and "this row has not landed yet" are different states and only one of
+    // them should be retried.
+    sheetSynced: d.sheetSynced,
     createdAt: d.createdAt,
   };
 }
@@ -565,10 +587,38 @@ export async function getDowntimeEventsBetween(from: string, to: string): Promis
   return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
 }
 
-/** Every event. Only for the CSV export, which genuinely wants the lot. */
+/**
+ * Every document, including the pre-cutover archive.
+ *
+ * NOT the CSV export any more — that reads «التوقفات», the source of truth.
+ * This is the migration's safety net: the 2026-08 events that were copied into
+ * the sheet by hand are still here, unaltered, if the copy ever has to be
+ * checked or redone.
+ */
 export async function getDowntimeEvents(): Promise<DowntimeEvent[]> {
   const snap = await getDocs(collection(db, PCOL.downtime));
   return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
+}
+
+/**
+ * Stoppages that were stopped but whose row never reached the sheet.
+ *
+ * A single-field equality, so no composite index — the rule this file is built
+ * around. Pre-cutover documents have no `sheetSynced` field and Firestore's
+ * equality does not match a missing field, so the archive stays out of this
+ * automatically; only rows this app itself failed to append come back.
+ */
+export async function getPendingDowntimeEvents(): Promise<DowntimeEvent[]> {
+  const snap = await getDocs(
+    query(collection(db, PCOL.downtime), where("sheetSynced", "==", false)),
+  );
+  return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
+}
+
+/** The row is in «التوقفات» — stop retrying this one. */
+export async function markDowntimeSynced(id: string) {
+  await updateDoc(doc(db, PCOL.downtime, id), { sheetSynced: true });
+  return { ok: true as const };
 }
 
 /** The still-running events (endedAt === null) — what the phone shows as "stop". */
@@ -593,6 +643,15 @@ export async function addDowntimeEvent(input: Omit<DowntimeEvent, "id" | "create
  * Close an open event. Minutes are computed from the STORED start, never from a
  * duration the client sends, so a wrong phone clock cannot invent downtime.
  * Already-stopped events are left untouched (a double-tapped stop is a no-op).
+ *
+ * The close is deliberately committed BEFORE the sheet row is appended, and it
+ * writes `sheetSynced: false` as it goes. The alternative — append first, close
+ * second — loses the race the wrong way: if the close then failed, the stoppage
+ * would still be open, the operator would tap stop again, and «التوقفات» would
+ * gain a SECOND row for the same stoppage. Double-counted downtime is invisible;
+ * a row that has not landed yet is a flag the next read can act on.
+ *
+ * Returns the closed event so the caller can build the row without re-reading.
  */
 export async function stopDowntimeEvent(
   id: string,
@@ -603,10 +662,22 @@ export async function stopDowntimeEvent(
   const snap = await getDoc(ref);
   if (!snap.exists()) return { ok: false as const, reason: "not_found" };
   const d = snap.data() as DowntimeDoc;
-  if (d.endedAt != null) return { ok: true as const, minutes: d.minutes ?? 0, already: true };
+  if (d.endedAt != null) {
+    return {
+      ok: true as const,
+      minutes: d.minutes ?? 0,
+      already: true,
+      event: shapeDowntime(id, d),
+    };
+  }
   const minutes = Math.max(0, Math.round((endedAt - (d.startedAt ?? endedAt)) / 60000));
-  await updateDoc(ref, { endedAt, minutes, estimated, closedBy });
-  return { ok: true as const, minutes, already: false };
+  await updateDoc(ref, { endedAt, minutes, estimated, closedBy, sheetSynced: false });
+  return {
+    ok: true as const,
+    minutes,
+    already: false,
+    event: shapeDowntime(id, { ...d, endedAt, minutes, estimated, closedBy, sheetSynced: false }),
+  };
 }
 
 export async function deleteDowntimeEvent(id: string) {

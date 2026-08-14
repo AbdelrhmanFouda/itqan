@@ -1,9 +1,10 @@
 /**
  * The rules for joining outside data onto a sheet production run.
  *
- * Downtime is not in the workbook: «الإنتاج»!J «زمن التوقف» has never been
- * filled in 418 rows and will not be — the sheet is frozen and stoppages are
- * captured on a phone into Firestore instead. THREE places now join those
+ * Downtime is not on the production row: «الإنتاج»!J «زمن التوقف» has never
+ * been filled in 418 rows and will not be. Stoppages live in their own tab
+ * «التوقفات» (Firestore until 2026-08-14 — the store changed, these rules did
+ * NOT, which is the whole point of them living here). THREE places join those
  * minutes onto runs:
  *
  *   lib/oee-data.ts   → /performance, /api/oee, the AI review

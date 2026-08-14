@@ -99,8 +99,8 @@ export async function loadJobs(): Promise<{
     getRecords("jobs"),
     getRecords("production"),
     getRecords("master"),
-    // Downtime is not in the sheet — «الإنتاج»!J has never been filled. It is
-    // captured on a phone into Firestore and joined on below, the same way
+    // Downtime is not on the production row — «الإنتاج»!J has never been
+    // filled. It lives in «التوقفات» and is joined on below, the same way
     // /api/runs and buildOEEData do it, so a job's downtime total matches what
     // the Overview and /performance report for the same runs. Best-effort: if
     // either source is unreachable the page degrades to "no downtime measured"
@@ -141,7 +141,7 @@ export async function loadJobs(): Promise<{
     note: r.note || "",
   }));
 
-  // Phone-captured downtime, spread across each day+machine's runs — identical
+  // Downtime from «التوقفات», spread across each day+machine's runs — identical
   // key, planned-minutes fallback and stub rule to buildOEEData (see the shared
   // helpers in lib/oee-data.ts) so the totals cannot drift apart.
   const lenByKey = buildShiftLengthIndex(machinesTab.records);

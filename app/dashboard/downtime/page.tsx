@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
-import { DOWNTIME_CAPTURE_REASONS } from "@/lib/prod-meta";
+import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
 
 /**
  * PHASE 2 — downtime capture, built for a phone on the factory floor.
@@ -164,8 +164,14 @@ export default function DowntimePage() {
   // startable again; that would open a second event and double-count it.
   const openByMachine = new Set([...openList, ...staleList].map((e) => e.machine));
   const lostToday = todayList.reduce((s, e) => s + e.minutes, 0);
+  // ALL_ rather than CAPTURE_: today's finished list comes from «التوقفات» now,
+  // and the tab holds reasons that are no longer offered as buttons («عطل»,
+  // «خامة» — 3,147 minutes of migrated history). Looking only at the eight
+  // buttons would print a bare English key on an Arabic page. The BUTTONS below
+  // still come from DOWNTIME_CAPTURE_REASONS — the retired ones are readable,
+  // not choosable.
   const reasonLabel = (key: string) => {
-    const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === key);
+    const r = ALL_DOWNTIME_REASONS.find((x) => x.key === key);
     return r ? (isAr ? r.ar : r.en) : key;
   };
 

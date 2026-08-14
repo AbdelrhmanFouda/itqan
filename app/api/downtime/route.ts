@@ -1,25 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getDowntimeEventsBetween,
   getOpenDowntimeEvents,
   addDowntimeEvent,
   stopDowntimeEvent,
+  markDowntimeSynced,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
 import { factoryDay, factoryDayEnd } from "@/lib/dates";
 import { isStaleOpen } from "@/lib/downtime";
+import {
+  loadDowntimeRecords, appendDowntimeRow, flushPendingDowntime,
+} from "@/lib/downtime-data";
 import { DOWNTIME_CAPTURE_REASONS } from "@/lib/prod-meta";
 
 /**
- * PHASE 2 — downtime capture (Firestore `downtimeEvents`, NOT the sheet).
+ * Downtime capture.
  *
- *   GET    → the still-running stoppages + recent history
+ *   GET    → the still-running stoppages + today's finished ones
  *   POST   → start a stoppage  { machine, reason }
  *   PATCH  → stop one          { id }
  *
+ * ── Two stores, one job each (settled 2026-08-14) ─────────────────────────
+ * The LOG is the sheet tab «التوقفات» — it is what every total, chart and
+ * report reads. Firestore holds only the stoppage that is running right now,
+ * because a running stoppage has no minutes and «التوقفات»!D is validated
+ * greater than zero: there is no legal row for it, and writing one as 0 "to be
+ * fixed later" is exactly the failure this system keeps producing. The row is
+ * appended the moment somebody taps stop, always with measured minutes.
+ *
+ * The phone flow is untouched by any of this: machine → reason → start → stop,
+ * four taps, no typing.
+ *
  * Every verb is guarded. Unlike the other operational reads, GET is NOT left
- * open: these documents carry `createdBy` (a staff email), so the read is
- * treated like the other PII reads.
+ * open: the rows carry «سُجل بواسطة» (a staff email), so the read is treated
+ * like the other PII reads.
  *
  * The client never sends a date, a start time or a duration. The server stamps
  * the start, and `stopDowntimeEvent()` computes the minutes from the STORED
@@ -34,16 +48,18 @@ export async function GET(req: NextRequest) {
   if ("deny" in g) return g.deny;
   const today = factoryDay();
   try {
-    // Bounded: today's rows for the day list, plus the (tiny) open-event query.
-    // Never the whole collection — see getDowntimeEventsBetween.
-    const [todayRows, open] = await Promise.all([
-      getDowntimeEventsBetween(today, today),
+    // Any stop whose row did not reach the sheet gets another go first, so the
+    // list below shows it. Best-effort — a failure here must not take the read
+    // down with it.
+    await flushPendingDowntime().catch(() => null);
+    const [rows, open] = await Promise.all([
+      loadDowntimeRecords(),
       getOpenDowntimeEvents(),
     ]);
     return NextResponse.json({
       open: open.filter((e) => !isStaleOpen(e, today)),   // running now, this shift
       stale: open.filter((e) => isStaleOpen(e, today)),   // never stopped, day is over
-      today: todayRows.filter((e) => e.endedAt != null),
+      today: rows.filter((e) => e.date === today),        // from «التوقفات»
       todayDate: today,
     });
   } catch (err) {
@@ -70,6 +86,8 @@ export async function POST(req: NextRequest) {
     const already = (await getOpenDowntimeEvents()).find((e) => e.machine === machine);
     if (already) return NextResponse.json({ ok: true, event: already, already: true });
 
+    // Nothing is written to the sheet here. The stoppage has no minutes yet;
+    // the row appears on stop.
     const event = await addDowntimeEvent({
       date: factoryDay(),           // the 08:00→07:00 factory day, not the calendar day
       machine,
@@ -95,28 +113,68 @@ export async function PATCH(req: NextRequest) {
     const b = (await req.json()) as Record<string, unknown>;
     const id = String(b.id ?? "").trim();
     if (!id) return NextResponse.json({ ok: false, reason: "no_id" }, { status: 400 });
+    const actor = g.user.email || g.user.uid;
 
-    // Closing a stoppage nobody stopped. This is a REVIEW action — a person is
-    // looking at it and deciding — so the minutes may inform Availability, but
-    // the row is flagged `estimated` for good and capped at the end of its own
-    // factory day. Nothing in the system closes these on its own.
+    let res: Awaited<ReturnType<typeof stopDowntimeEvent>>;
     if (b.estimate === true) {
+      // Closing a stoppage nobody stopped. This is a REVIEW action — a person is
+      // looking at it and deciding — so the minutes may inform Availability, but
+      // the row is flagged «تقديري؟ = نعم» for good and capped at the end of its
+      // own factory day. Nothing in the system closes these on its own.
       const ev = (await getOpenDowntimeEvents()).find((e) => e.id === id);
       if (!ev) return NextResponse.json({ ok: false, reason: "not_open" }, { status: 404 });
       const endedAt = factoryDayEnd(ev.date);
       if (!endedAt || endedAt <= ev.startedAt) {
         return NextResponse.json({ ok: false, reason: "bad_day" }, { status: 400 });
       }
-      const res = await stopDowntimeEvent(id, {
-        endedAt,
-        estimated: true,
-        closedBy: g.user.email || g.user.uid,
-      });
-      return NextResponse.json({ ...res, estimated: true }, { status: res.ok ? 200 : 404 });
+      res = await stopDowntimeEvent(id, { endedAt, estimated: true, closedBy: actor });
+    } else {
+      res = await stopDowntimeEvent(id);
     }
 
-    const res = await stopDowntimeEvent(id);
-    return NextResponse.json(res, { status: res.ok ? 200 : 404 });
+    if (!res.ok) return NextResponse.json(res, { status: 404 });
+    // A double-tapped stop already has its row (or its pending retry) — writing
+    // again would give one stoppage two rows and double its minutes.
+    if (res.already) return NextResponse.json({ ...res, event: undefined });
+
+    const e = res.event;
+    // A stoppage that rounds to zero minutes is a mis-tap. !D forbids a zero and
+    // rounding it up to 1 would invent a measurement, so nothing is written and
+    // the Firestore document stays as the only record of the tap.
+    if (!e || !(e.minutes > 0)) {
+      if (e) await markDowntimeSynced(e.id).catch(() => {});
+      return NextResponse.json({ ok: true, minutes: res.minutes, already: false });
+    }
+
+    const write = await appendDowntimeRow({
+      date: e.date,
+      machine: e.machine,
+      reason: e.reason,
+      minutes: e.minutes,
+      startedAt: e.startedAt,
+      endedAt: e.endedAt,
+      createdBy: e.createdBy,
+      estimated: e.estimated,
+    });
+    if (write.ok) {
+      await markDowntimeSynced(e.id).catch(() => {});
+    } else {
+      // The stop is safe in Firestore with sheetSynced:false and will be
+      // retried on the next GET — the minutes are not lost. Loud, because
+      // "the bridge is refusing writes" is not something to discover from a
+      // total that quietly stopped growing.
+      console.error(
+        `[downtime] stop recorded but «التوقفات» row not written for ${e.date} ${e.machine}: ${write.reason}`,
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      minutes: res.minutes,
+      already: false,
+      estimated: e.estimated,
+      /** false ⇒ the row is queued for retry, not lost. */
+      written: write.ok,
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ ok: false, reason: "server_error" }, { status: 500 });

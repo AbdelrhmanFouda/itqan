@@ -5,20 +5,23 @@
 Next.js 16 (App Router) + Tailwind v4 + Framer Motion. Public marketing site plus a
 role-gated `/dashboard` for an Egyptian plastic-injection factory. **The database is a
 Google Sheet** (the crew edits it; the site reads/writes through an Apps Script bridge).
-Firebase holds auth/roles, small caches (users, usage, aiReviews) — and, as of phase 2,
-**one collection of genuine factory data: `downtimeEvents`.** Everything is bilingual
-AR/EN with RTL support.
+Firebase holds auth/roles and small caches (users, usage, aiReviews). Everything is
+bilingual AR/EN with RTL support.
 
-> **That `downtimeEvents` exception is deliberate — do not "fix" it.** The old rule here
-> read "Firebase is auth and roles only, not factory data", and everywhere else it still
-> holds. Downtime is the exception because the owner ruled that the workbook must not gain
-> tabs, columns, formulas or validation, and that `apps-script.gs` must not be edited or
-> redeployed. «الإنتاج»!J «زمن التوقف» and !K «سبب التوقف» are two of the six columns that
-> have never been filled once in 417 rows, so there was no existing place in the sheet to
-> write downtime and no permission to make one. Firestore was the only remaining store.
-> A CSV export (`/api/downtime/export`) ships with it precisely so this is reversible: if
-> the owner later wants downtime in the workbook, he exports and pastes it himself.
-> See "Downtime capture" below.
+> **Firebase is auth, roles and caches — not factory data. That rule is whole again as of
+> 2026-08-14.** Downtime was its one exception for five days: the workbook was frozen, and
+> «الإنتاج»!J «زمن التوقف» and !K «سبب التوقف» are two of the six columns never filled once
+> in 417 rows, so there was nowhere in the sheet to put a stoppage. The owner has since had
+> the tab **«التوقفات»** created (`../production/scripts/downtime-tab.gs`) and ruled it the
+> source of truth; the 37 events captured on the phone were migrated into it on 2026-08-14
+> and the monthly totals were verified identical before and after (17,253 min, 30
+> day+machine keys, 6 reasons).
+>
+> Firestore keeps **one** downtime responsibility: the stoppage running *right now*. It has
+> no minutes until somebody taps stop, and «التوقفات»!D is validated greater than zero, so
+> an open stoppage has no legal row — and "write it as 0 and fix it later" is the exact
+> failure this system keeps producing. The row is appended on stop, always measured.
+> See "Downtime" below.
 
 > Business context, live data state, open items and the sheet's history live in
 > **`../ITQAN-CONTEXT.md`**. Read that for *what is true right now*; read this file for
@@ -37,6 +40,14 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
+
+## Recently landed (2026-08-14) — downtime moved into the sheet
+
+«التوقفات» is the stoppage log now, read and written like «الإنتاج» and «الأعطال». The 37
+captured events were migrated and the totals verified identical. Firestore keeps only the
+running stoppage. Full detail in the block quote above and under "Downtime"; the bridge
+write semantics this uncovered are in "Write semantics" — they affect every tab, not
+just this one.
 
 ## Recently landed (2026-08-09)
 
@@ -123,8 +134,9 @@ sidebar and `canAccess()`.
   which prefixes every `/dashboard/*` path. So a role holding overview inherits any route
   with no NAV entry of its own. Every real page has one today, but **a new page added
   without a NAV entry is reachable by production and quality**, not owner/manager only.
-- **Downtime capture (phase 2)** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
-  + `lib/downtime-data.ts` (Firestore fetch), the same split as `oee.ts`/`oee-data.ts`.
+- **Downtime** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
+  + `lib/downtime-data.ts` (reads and writes «التوقفات»), the same split as
+  `oee.ts`/`oee-data.ts`.
   `/dashboard/downtime` is a phone-first Arabic page: pick machine → pick reason → start →
   stop, **four taps, no typing**. That constraint is evidence-driven — the six sheet columns
   that need typing are empty across 417 rows, while the tapped hourly log has 20 unbroken
@@ -148,7 +160,11 @@ sidebar and `canAccess()`.
     stored and whoever is signed in — it is used by people who do not read English. The
     language toggle is hidden there rather than left dead. The forcing is render-only, so
     an owner visiting the page does not have the rest of the site switched on him. `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
-  including the reads, because the rows carry `createdBy`.
+  including the reads, because the rows carry «سُجل بواسطة» (a staff email).
+  ⚠ **So is `/api/sheet/downtime`.** Adding the entity to `ENTITIES` made the generic sheet
+  route able to serve the tab, and that route leaves every entity open except the ones
+  named in it — `clients` and now `downtime`. A PII tab added to `ENTITIES` without a line
+  there is a silent open read.
   - The server stamps `startedAt` and computes minutes from the STORED start on stop, so a
     phone with a wrong clock cannot invent downtime that would flow into Availability.
   - `date` is the **factory day** (`factoryDay()` in `lib/dates.ts`, 08:00→07:00), not the
@@ -175,9 +191,34 @@ sidebar and `canAccess()`.
     at the end of that factory day and marks the row `estimated: true` + `closedBy`, so a
     reconstructed number can never be mistaken for a measured one. `explain`/the report
     disclose the estimated total separately.
-  - Queries are **date-bounded** (`getDowntimeEventsBetween`) because OEE recomputes on every
-    request; only the CSV export reads the whole collection. Both bounds are a range on the
-    same field, so no composite index is needed — the rule `lib/db.ts` is built around.
+  - **The two stores, and which does what.** «التوقفات» is the log — every total, chart,
+    Pareto, CSV and report reads it, through `loadDowntimeTotals()`. Firestore holds only
+    the OPEN stoppage, because it has no minutes yet. Three consequences worth knowing
+    before touching this:
+    - **Stop writes Firestore FIRST, then the sheet.** Not the other way round. If the
+      append were first and the close then failed, the stoppage would still be open, the
+      operator would tap stop again, and «التوقفات» would gain a SECOND row — double-counted
+      downtime, which is invisible. A closed event with `sheetSynced: false` is a flag the
+      next read can act on; a duplicate row is not.
+    - **`flushPendingDowntime()` retries those**, from `GET /api/downtime`, which the floor
+      page polls. It reads the tab first and skips anything already there, because the
+      bridge is **at-least-once**: see the write-semantics section below.
+    - **Pre-cutover documents carry no `sheetSynced` field at all.** Firestore equality does
+      not match a missing field, so the migrated archive stays out of the retry query
+      automatically. Do not "tidy" that by backfilling `sheetSynced: false` — it would
+      re-append a month of history.
+  - The open-event query is a single-field equality and the pending query is another, so
+    still **no composite index** — the rule `lib/db.ts` is built around.
+  - **The reason vocabulary crosses the boundary in BOTH directions now.** The sheet speaks
+    Arabic, the app speaks stable English keys. `downtimeReasonAr(key)` writes; the new
+    `downtimeReasonFromSheet(cell)` reads, and it is total over
+    `ALL_DOWNTIME_REASONS` — including the five RETIRED keys, which are live data: «عطل»
+    (2,251 min) and «خامة» (896 min) are in the migrated history. An unrecognised word is
+    returned **as itself**, never folded into "Other", so it shows up in the Pareto under
+    its own name instead of hiding. `normalizeArabic()` folds harakat, tatweel, bidi marks
+    and the alef/ya/ta-marbuta spellings before the lookup.
+    ⚠ «عطل» and «خامة» are deliberately **not** in the tab's dropdown — they are readable
+    history, not offerable choices. That is why the migration had to use `append`.
 - **Reading the paper production sheet (IN PROGRESS)** — `lib/sheet-import.ts` (pure maths,
   18 tests) + `lib/sheet-vision.ts` (Gemini vision). **Not yet wired to any route or page.**
   See "Reading the paper sheet" below for the full state, the open questions and the two
@@ -215,7 +256,7 @@ sidebar and `canAccess()`.
 | `الإنتاج` (production) | One row per machine/day: A date, B shift, C machine LABEL, D mold, E product (must match Master name EXACTLY — joins are by name), H good, I scrap, J downtime, K reason |
 | `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4; 24 hour columns 08:00→07:00 holding PIECES; AB سستم (=SUM), AC فعلي (hand count), AE متوقع, الكفاءة %, AF الهالك, AG حالة السجل, AH hidden scrap denominator |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
-| *(no tab)* `downtimeEvents` | **Firestore, not the sheet.** Phase-2 downtime capture — see the exception note at the top. Joins to «الإنتاج» on `date` + the «الماكينات»!J machine label |
+| `التوقفات` | **The stoppage log — the source of truth for downtime since 2026-08-14.** Header row 1, data row 2+. A date, B machine (dropdown ← «الماكينات»!J), C reason (Arabic dropdown), **D minutes — the only field anything computes from, validated > 0**, E/F optional clock times, G تقديري؟ نعم/لا, H سُجل بواسطة, I ملاحظات. Joins to «الإنتاج» on `date` + the machine label. Built by `../production/scripts/downtime-tab.gs` |
 | `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name. **K (status) and L (priority) are validated ARABIC lists** — K is exactly `لم يبدأ · جاري التشغيل · متوقف · مكتمل`. The app keeps English tokens internally and maps at the boundary via `jobStatusToSheet`/`FromSheet` in `lib/prod-meta.ts`. `Quoted`/`Delivered` have no Arabic counterpart, so they are no longer written — adding them is a sheet change the owner must approve |
 | `الأعطال` | Issues log (date, machine, **product**, category, description, action, status, notes). Dropdowns from machines!J / Master!C — layout applied by `setupIssuesTab()` in apps-script.gs (re-run to repair) |
 | `العملاء` (Clients), `لوحة البيانات` (Dashboard) | Manual contacts / counters |
@@ -318,6 +359,44 @@ missing for the entire life of this bug.
   the throw lands at the next flush and pending writes are discarded. Put
   `SpreadsheetApp.flush()` INSIDE the try. Apply `setNumberFormat` one column at a time on
   this workbook; multi-column calls throw "column level actions".
+### Write semantics — measured against the live workbook, 2026-08-14
+
+Learned while migrating downtime into «التوقفات». All four apply to **every** tab, not
+just that one, and three of them contradict what the code comments used to claim.
+
+1. **`append` and `updates` do NOT obey the same rules.** `append` → `sheet.appendRow()`;
+   `updates` → `range.setValue()` per cell. They differ in two ways that matter:
+
+   | | data validation | a date string |
+   |---|---|---|
+   | `append` (appendRow) | **ignored** | stays TEXT — `"2026-08-11"` reads back as `"2026-08-11"` |
+   | `updates` (setValue) | **ENFORCED — throws** | parsed, then rendered in the column's format (`"09/08/2026"`) |
+
+   Both round-trip correctly through `normalizeDate()`, so either is safe to read. Use
+   `append` when the value might be outside a dropdown (migrating retired reasons), and
+   note that «الأعطال» — the other tab the site writes — already holds ISO text, so text
+   is the house convention.
+
+2. **A rejected cell abandons the REST of the same POST.** The bridge's `updates` loop has
+   no try/catch, so one validation failure throws out of `doPost` and every cell after it
+   in the batch is silently dropped — while the cells before it are already committed.
+   Writing «عطل» (not in the tab's dropdown) into C2 left row 2 holding a date, a machine
+   and seven empty cells. ⚠ **`updateRecordsInTab()`'s comment claims the rows "land
+   together or not at all". That is only true of a bridge/network failure, not of a
+   validation failure** — and the paper import writes «تسجيل الإنتاج», whose A/B/C are
+   validated. A bad product name there can half-apply an import.
+
+3. **The bridge is AT-LEAST-ONCE.** An append that answered with an HTML error page had
+   already written its row; the retry wrote it again, and one 14-minute stoppage became two
+   rows and 28 minutes. **A failed-looking write is not evidence that nothing happened.**
+   Any retry must re-read and check first — `flushPendingDowntime()` does, and so does
+   `scripts/migrate-downtime-to-sheet.mjs`.
+
+4. **Sheets renders a time cell without a leading zero.** Write `08:00`, read back `8:00`;
+   `00:54` comes back `0:54`. Exactly the trap that dropped two hour columns from
+   «تسجيل الإنتاج» (see `normHeader`). `parseClockMinutes()` in `lib/dates.ts` handles it —
+   never compare a clock string without padding it first.
+
 - Driving the bridge from a browser console: GET is simple; **POST with a plain-string body
   and no JSON content-type header** (avoids CORS preflight). Under load `/exec` returns HTML
   error pages — retry with a text parse.
@@ -635,9 +714,11 @@ with filling the frame, that is roughly 4× the pixels per digit over anything m
   catch-all — and API routes reach Firestore through the **unauthenticated** client SDK,
   so a missing block denies the SERVER too, not just browsers. Verified the hard way on
   2026-08-09: `downtimeEvents` writes returned `PERMISSION_DENIED` until the rule shipped.
-  Symptom to recognise: downtime capture appears to work, the page shows no error, and
-  Availability quietly stays at 100% — because `loadDowntimeTotals()` catches the failure
-  and degrades to the pre-phase-2 state on purpose.
+  The collection is still needed — it holds the stoppage that is running right now — so the
+  rule must stay. Symptom to recognise **now**: start and stop appear to work but no row
+  ever reaches «التوقفات», because the event was never stored to stop. What a Firestore
+  outage no longer does is zero the minutes: `loadDowntimeTotals()` catches the open-event
+  read separately, so a Firebase problem costs the stale-stoppage banner and nothing else.
 - ⚠ **The `GEMINI_API_KEY` in the local `.env.local` is INVALID** (2026-08-10): a direct
   call returns `401 … Expected OAuth 2 access token`, on both `?key=` and the
   `x-goog-api-key` header. Production works — the report draft returns `Source: gemini` —

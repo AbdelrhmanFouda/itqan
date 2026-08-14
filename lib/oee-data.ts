@@ -49,10 +49,10 @@ export async function buildOEEData(month: string | null) {
     getRecords("master"),
     getRecords("machines"),
     loadHourlyRows().catch(() => [] as HourlyRow[]),
-    // Firestore downtime (PHASE 2), bounded to the period being computed so
-    // this never scans the whole collection. Best-effort like the hourly load:
-    // if Firestore is unreachable the OEE picture degrades to the pre-phase-2
-    // "downtime not measured" state rather than failing the whole page.
+    // Downtime from «التوقفات», narrowed to the period being computed. The tab
+    // rides the same 45s sheet cache as everything above it. Best-effort like
+    // the hourly load: if it is unreachable the OEE picture degrades to
+    // "downtime not measured" rather than failing the whole page.
     loadDowntimeTotals(month).catch(() => EMPTY_DOWNTIME),
   ]);
 
@@ -153,7 +153,7 @@ export async function buildOEEData(month: string | null) {
   });
   withScrap += scrapFromHourly;
 
-  // Downtime from the phone capture (Firestore `downtimeEvents`, PHASE 2).
+  // Downtime from «التوقفات» (phone capture writes the row on stop).
   // «الإنتاج»!J «زمن التوقف» has never been filled in 417 rows, so without this
   // every run carries downtimeMin = 0 and Availability is a flat, meaningless
   // 100%. Spread day+machine totals across that day's runs — see

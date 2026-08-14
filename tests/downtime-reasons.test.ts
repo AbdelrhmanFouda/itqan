@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS, DOWNTIME_REASONS,
   downtimeReasonAr, isPlannedDowntime, isOrganisationalDowntime,
+  downtimeReasonFromSheet, downtimeEstimatedFromSheet, normalizeArabic,
 } from "../lib/prod-meta.ts";
 
 test("the owner's seven reasons plus «أخرى», in the owner's order", () => {
@@ -105,4 +106,79 @@ test("every reason in the sheet's own vocabulary resolves", () => {
 
 test("an unknown key degrades to itself rather than throwing", () => {
   assert.equal(downtimeReasonAr("Totally unknown"), "Totally unknown");
+});
+
+/* ------------- the sheet direction: «التوقفات»!C Arabic → key -------------- */
+/**
+ * Added 2026-08-14, when «التوقفات» became the store. Until then the mapping
+ * only ran key → Arabic, which is the direction a WRITE needs; every READ needs
+ * the reverse, and a word that resolves to nothing would land in «أخرى» and
+ * move minutes from one bar of the Pareto to another without any error.
+ */
+
+test("every reason round-trips: key → Arabic → key", () => {
+  // The property that has to hold for the Pareto to be trustworthy. It covers
+  // the retired keys too, which are NOT in the sheet's dropdown but ARE in the
+  // migrated history — «عطل» is 2,251 real minutes and «خامة» is 896.
+  for (const r of ALL_DOWNTIME_REASONS) {
+    assert.equal(downtimeReasonFromSheet(downtimeReasonAr(r.key)), r.key, `${r.key} did not survive the round trip`);
+  }
+  assert.equal(downtimeReasonFromSheet("عطل"), "Breakdown");
+  assert.equal(downtimeReasonFromSheet("خامة"), "Material");
+  assert.equal(downtimeReasonFromSheet("صيانة في الماكينة"), "Maintenance");
+  assert.equal(downtimeReasonFromSheet("توقف بسبب عدم وجود عامل"), "No operator");
+});
+
+test("the mapping survives how Arabic is actually typed", () => {
+  // A cell can carry a trailing tab (the known «زراير\t» case in this workbook),
+  // harakat, tatweel, and either spelling of alef/ya/ta-marbuta. None of those
+  // is a different reason.
+  assert.equal(downtimeReasonFromSheet("تغيير الاسطمبة\t"), "Mold change");
+  assert.equal(downtimeReasonFromSheet("  تغيير   الاسطمبة  "), "Mold change");
+  assert.equal(downtimeReasonFromSheet("صيانة فى الماكينة"), "Maintenance", "ى for ي");
+  assert.equal(downtimeReasonFromSheet("أخرى"), "Other");
+  assert.equal(downtimeReasonFromSheet("اخرى"), "Other", "bare alef");
+  assert.equal(downtimeReasonFromSheet("تَجفيف خامة"), "Material drying", "harakat");
+  assert.equal(downtimeReasonFromSheet("تجفيــف خامة"), "Material drying", "tatweel");
+});
+
+test("an English key or label in the cell resolves too", () => {
+  // Someone pasting an export back in, or the assistant writing a row.
+  assert.equal(downtimeReasonFromSheet("Mold change"), "Mold change");
+  assert.equal(downtimeReasonFromSheet("mold change"), "Mold change");
+  assert.equal(downtimeReasonFromSheet("No operator"), "No operator");
+  assert.equal(downtimeReasonFromSheet("Machine maintenance"), "Maintenance", "the English LABEL");
+});
+
+test("an unknown reason keeps its own name — it never becomes «أخرى»", () => {
+  // Deliberate, and the same rule as jobStatusFromSheet. Folding an
+  // unrecognised word into Other hides it; leaving it visible in the Pareto is
+  // how anyone finds out the sheet has a word the app does not know. Unknown
+  // keys already count as unplanned, so this cannot flatter anything either.
+  assert.equal(downtimeReasonFromSheet("كهرباء"), "كهرباء");
+  assert.equal(downtimeReasonFromSheet("something new"), "something new");
+  assert.equal(isPlannedDowntime(downtimeReasonFromSheet("كهرباء")), false);
+});
+
+test("a blank «سبب التوقف» is empty, not a reason", () => {
+  // «غير متاح / N/A» reaches this as "" (clean() in lib/sheets strips it). It
+  // means NOT RECORDED. It must not become a value, and it must never be 0.
+  for (const v of ["", "   ", undefined]) {
+    assert.equal(downtimeReasonFromSheet(v as string), "");
+  }
+});
+
+test("«تقديري؟» — نعم means the minutes are a reconstruction", () => {
+  assert.equal(downtimeEstimatedFromSheet("نعم"), true);
+  assert.equal(downtimeEstimatedFromSheet(" نعم "), true);
+  assert.equal(downtimeEstimatedFromSheet("لا"), false);
+  assert.equal(downtimeEstimatedFromSheet(""), false);
+  assert.equal(downtimeEstimatedFromSheet(undefined), false);
+  // Nothing else may quietly mark a measured stoppage as a guess.
+  assert.equal(downtimeEstimatedFromSheet("ربما"), false);
+});
+
+test("normalizeArabic folds only spelling, never two different reasons together", () => {
+  const folded = ALL_DOWNTIME_REASONS.map((r) => normalizeArabic(r.ar));
+  assert.equal(new Set(folded).size, folded.length, "two reasons collapsed onto one key");
 });

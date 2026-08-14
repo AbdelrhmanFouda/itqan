@@ -10,7 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen, estimatedStopMinutes,
-  type DowntimeRun,
+  summarizeDowntime, countsTowardDowntime,
+  type DowntimeRun, type DowntimeCountable,
 } from "../lib/downtime.ts";
 import { factoryDayEnd, factoryDay } from "../lib/dates.ts";
 
@@ -133,6 +134,96 @@ test("estimatedStopMinutes never returns a negative or a bogus value", () => {
   assert.equal(estimatedStopMinutes(Date.parse("2026-08-09T00:00:00Z"), factoryDayEnd("2026-08-07")), 0);
   assert.equal(estimatedStopMinutes(1, 0), 0, "unparseable day");
   assert.equal(factoryDayEnd("not-a-date"), 0);
+});
+
+/* ---------------------- the tally, added 2026-08-14 ----------------------- */
+/**
+ * `summarizeDowntime` is the arithmetic that turns «التوقفات» rows into the
+ * three maps every consumer reads. It was extracted from the Firestore loader
+ * unchanged, precisely so the migration could prove the two stores produced
+ * identical totals — which they did: 17,253 minutes over 30 day+machine keys
+ * and 6 reasons, before and after.
+ */
+
+const ev = (
+  date: string, machine: string, reason: string, minutes: number, estimated = false,
+): DowntimeCountable => ({ date, machine, reason, minutes, estimated });
+
+test("countsTowardDowntime refuses a row that cannot inform a number", () => {
+  assert.equal(countsTowardDowntime(ev("2026-08-09", "PQ 7 — 100", "Setup", 30)), true);
+  // A zero is the failure this system keeps producing: «التوقفات»!D is
+  // validated > 0 for the same reason this is.
+  assert.equal(countsTowardDowntime(ev("2026-08-09", "PQ 7 — 100", "Setup", 0)), false);
+  // No date or no machine → it cannot be joined to a run, so counting it in the
+  // headline while it is absent from every per-machine figure would make two
+  // views of the same month disagree.
+  assert.equal(countsTowardDowntime(ev("", "PQ 7 — 100", "Setup", 30)), false);
+  assert.equal(countsTowardDowntime(ev("2026-08-09", "", "Setup", 30)), false);
+});
+
+test("summarizeDowntime totals by day+machine and by reason", () => {
+  const t = summarizeDowntime([
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 30),
+    ev("2026-08-09", "PQ 7 — 100", "Mold change", 45),
+    ev("2026-08-09", "PQ 5 — 100", "Setup", 20),
+    ev("2026-08-10", "PQ 7 — 100", "Setup", 10),
+  ]);
+  assert.equal(t.byKey.get(downtimeKey("2026-08-09", "PQ 7 — 100")), 75);
+  assert.equal(t.byKey.get(downtimeKey("2026-08-09", "PQ 5 — 100")), 20, "PQ 5 and PQ 7 are both 100 t — never merged");
+  assert.equal(t.byKey.get(downtimeKey("2026-08-10", "PQ 7 — 100")), 10);
+  assert.equal(t.byReason.get("Setup"), 60);
+  assert.equal(t.byReason.get("Mold change"), 45);
+  assert.equal(t.counted.length, 4);
+});
+
+test("the dominant reason of a day is the one with the MOST minutes", () => {
+  // A run with no reason of its own inherits this, so the Bottleneck Board can
+  // name a cause. It must be the biggest loss, not the first or last logged.
+  const t = summarizeDowntime([
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 10),
+    ev("2026-08-09", "PQ 7 — 100", "Nozzle burn", 90),
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 15),
+  ]);
+  assert.equal(t.dominantByKey.get(downtimeKey("2026-08-09", "PQ 7 — 100")), "Nozzle burn");
+  assert.equal(t.byReason.get("Setup"), 25, "the Pareto still keeps both at full fidelity");
+});
+
+test("estimated minutes are counted AND kept separable", () => {
+  // A reconstruction may inform Availability, but it must never be reported as
+  // if somebody had measured it.
+  const t = summarizeDowntime([
+    ev("2026-08-09", "PQ 7 — 100", "Other", 100, true),
+    ev("2026-08-09", "PQ 5 — 100", "Other", 40, false),
+  ]);
+  assert.equal(t.estimatedMin, 100);
+  assert.equal(t.estimatedCount, 1);
+  assert.equal([...t.byReason.values()].reduce((a, b) => a + b, 0), 140, "both still count");
+});
+
+test("uncountable rows change no total, and a blank reason groups as Other", () => {
+  const t = summarizeDowntime([
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 30),
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 0),        // mis-tap
+    ev("", "PQ 7 — 100", "Setup", 999),                 // undated
+    ev("2026-08-09", "", "Setup", 999),                 // no machine
+    ev("2026-08-09", "PQ 5 — 100", "", 12),             // «سبب التوقف» left blank
+  ]);
+  assert.equal(t.byKey.get(downtimeKey("2026-08-09", "PQ 7 — 100")), 30);
+  assert.equal(t.byReason.get("Setup"), 30);
+  assert.equal(t.byReason.get("Other"), 12, "an unrecorded reason groups, but adds nothing invented");
+  assert.equal(t.counted.length, 2);
+});
+
+test("summarizeDowntime feeds distributeDowntime without any glue", () => {
+  // The whole point of the shape: what the loader produces is what the join
+  // consumes, in all three paths (oee-data, /api/runs, jobs).
+  const t = summarizeDowntime([
+    ev("2026-08-09", "PQ 7 — 100", "Setup", 60),
+    ev("2026-08-09", "PQ 7 — 100", "Nozzle burn", 30),
+  ]);
+  const spread = distributeDowntime([run("2026-08-09", "PQ 7 — 100")], t.byKey);
+  assert.equal(spread.perRun[0], 90);
+  assert.equal(spread.unallocatedMin, 0);
 });
 
 test("CSV quotes separators and carries a BOM for Excel", () => {
