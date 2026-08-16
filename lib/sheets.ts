@@ -12,6 +12,7 @@
  */
 
 import { revalidateTag } from "next/cache";
+import { planRollback, cellRef, type WriteCell } from "@/lib/sheet-write";
 
 const BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const SHEET_ID = process.env.GOOGLE_SHEETS_ID;
@@ -566,7 +567,20 @@ export async function getPublicShowcase() {
 // are therefore written back to MASTER (located by ID). The Clients tab is plain
 // manual data that doesn't exist in Master, so it's edited in place.
 
-export type UpdateResult = { ok: boolean; reason?: string };
+export type UpdateResult = {
+  ok: boolean;
+  reason?: string;
+  /**
+   * Set only when a write FAILED after partly landing — see postUpdates().
+   * `applied` cells were written before the bridge threw; `rolledBack` of those
+   * were put back; `stranded` could not be restored honestly and are still
+   * holding the new value. A caller that reports "failed" without mentioning a
+   * non-zero `stranded` is telling the user something untrue.
+   */
+  applied?: number;
+  rolledBack?: number;
+  stranded?: string[];
+};
 
 type Cell = { row: number; col: number; value: string };
 
@@ -586,7 +600,7 @@ export async function updateRecord(entity: string, row: number, changes: Record<
     : await mapInTab(cfg, row, changes);
   if ("reason" in plan) return { ok: false, reason: plan.reason };
 
-  return postUpdates(plan.tab, plan.updates);
+  return postUpdates(plan.tab, plan.updates, plan.before);
 }
 
 /**
@@ -596,7 +610,16 @@ export async function updateRecord(entity: string, row: number, changes: Record<
  * ten-row import is one request instead of ten. That matters here for two
  * reasons: `/exec` returns HTML error pages under load (ten sequential POSTs is
  * ten chances to hit one), and a half-applied import is far worse than a failed
- * one — with a single POST the rows land together or not at all.
+ * one.
+ *
+ * ⚠️ **This used to claim the rows "land together or not at all". That was only
+ * ever true of a network failure.** A single POST is one request, not one
+ * transaction: the bridge loops `setValue`, `setValue` enforces data validation,
+ * and a rejected cell throws with everything before it already committed —
+ * measured on 2026-08-14. `postUpdates()` now snapshots the target cells, and on
+ * failure re-reads, rolls back what it can restore honestly and reports the rest
+ * as `stranded`. The nearest thing to atomicity available over a bridge that
+ * offers none.
  *
  * Master-view entities are refused outright: their writes must go through
  * `mapToMaster`'s identity check, and silently doing the wrong thing in bulk is
@@ -629,14 +652,16 @@ export async function updateRecordsInTab(
     }
   }
   if (updates.length === 0) return { ok: true, cells: 0 };
-  const res = await postUpdates(title, updates);
+  // The snapshot comes from the SAME fresh read the columns were resolved from,
+  // so a rollback compares like with like.
+  const res = await postUpdates(title, updates, readCells(values, updates));
   return { ...res, cells: updates.length };
 }
 
 // Locate the edited record's Master row by its ID, then map fields → Master columns.
 async function mapToMaster(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
-): Promise<{ tab: string; updates: Cell[] } | { reason: string }> {
+): Promise<{ tab: string; updates: Cell[]; before: string[] } | { reason: string }> {
   // 1) read the view tab → the ID of the edited row (ID/No. is its first column)
   const view = await fetchSheet(cfg.tab, true);
   if (view.values.length < 2) return { reason: "empty_view" };
@@ -705,13 +730,13 @@ async function mapToMaster(
     updates.push({ row: masterRow, col: ci + 1, value: value ?? "" });
   }
   if (updates.length === 0) return { reason: "no_master_fields" };
-  return { tab: master.title, updates };
+  return { tab: master.title, updates, before: readCells(master.values, updates) };
 }
 
 // Map fields → columns of the entity's OWN tab (for manual tabs like Clients).
 async function mapInTab(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
-): Promise<{ tab: string; updates: Cell[] } | { reason: string }> {
+): Promise<{ tab: string; updates: Cell[]; before: string[] } | { reason: string }> {
   const { values, title } = await fetchSheet(cfg.tab, true);
   if (values.length < 2) return { reason: "empty_sheet" };
   const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
@@ -724,11 +749,89 @@ async function mapInTab(
     updates.push({ row, col: ci + 1, value: value ?? "" });
   }
   if (updates.length === 0) return { reason: "no_fields" };
-  return { tab: title, updates };
+  return { tab: title, updates, before: readCells(values, updates) };
 }
 
-async function postUpdates(tab: string, updates: Cell[]): Promise<UpdateResult> {
-  return postAction({ tab, updates });
+/** The display value each target cell held in a snapshot of the tab. */
+function readCells(values: string[][], cells: Cell[]): string[] {
+  return cells.map((c) => (values[c.row - 1]?.[c.col - 1] ?? ""));
+}
+
+/**
+ * Send a cell batch, and if it fails, find out what it did anyway.
+ *
+ * The bridge's `updates` action is a bare `forEach` of `setValue`, and
+ * `setValue` ENFORCES data validation. One rejected cell throws out of
+ * `doPost`, the cells before it stay committed, the cells after it are dropped,
+ * and the caller is handed an HTML error page. Both halves of that are silent.
+ *
+ * So: `before` is a snapshot of these exact cells taken from the fresh read the
+ * caller already did. On failure this re-reads, asks `planRollback()` what
+ * actually moved, puts back everything it can restore honestly, and REPORTS
+ * whatever it cannot (see lib/sheet-write.ts for why a date cannot be restored
+ * from a display value in this workbook). The result carries `applied`,
+ * `rolledBack` and `stranded` so no caller can report a clean failure over a
+ * row that is half-written.
+ *
+ * Callers that pass no `before` get the old behaviour, which is correct for a
+ * batch that cannot half-apply — a single cell.
+ *
+ * ⚠ This is recovery, not prevention. The prevention lives in the bridge, which
+ * now wraps the same loop in a try/catch and restores the UNDERLYING values
+ * (see apps-script.gs) — but only once the owner deploys a new version. Until
+ * then this is the whole safety net, and it stays useful afterwards because it
+ * also catches the bridge's at-least-once replies.
+ */
+async function postUpdates(tab: string, updates: Cell[], before?: string[]): Promise<UpdateResult> {
+  const res = await postAction({ tab, updates });
+  if (res.ok || !before || updates.length < 2) return res;
+  // A new-enough bridge already rolled the batch back itself and told us so.
+  // Its report is authoritative — it saw the underlying values — and anything
+  // it could not restore, this cannot either: the undo failed because the sheet
+  // refuses the ORIGINAL value, which is equally true from here.
+  if (res.stranded) return res;
+
+  // Did it half-apply? Read the same cells back and compare.
+  let after: string[];
+  try {
+    const fresh = await fetchSheet(tab, true);
+    if (fresh.values.length === 0) return res; // cannot tell; leave the failure as it stands
+    after = readCells(fresh.values, updates);
+  } catch {
+    return res;
+  }
+
+  const plan = planRollback(updates as WriteCell[], before, after);
+  if (plan.applied === 0) return res; // clean failure — nothing landed
+
+  let rolledBack = 0;
+  if (plan.restore.length > 0) {
+    const undo = await postAction({ tab, updates: plan.restore });
+    if (undo.ok) rolledBack = plan.restore.length;
+    else {
+      console.error(
+        `[sheets] ROLLBACK FAILED on "${tab}" — ${plan.restore.length} cell(s) are still ` +
+          `holding a value from a write that was rejected: ${plan.restore.map(cellRef).join(", ")}`,
+      );
+    }
+  }
+  // The tab changed even though the write "failed", so a cached copy is a lie.
+  invalidateSheetCache();
+
+  const stranded = plan.stranded.map(cellRef);
+  console.error(
+    `[sheets] partial write on "${tab}": ${plan.applied} of ${updates.length} cell(s) landed ` +
+      `before the bridge rejected one (${res.reason}); ${rolledBack} rolled back` +
+      (stranded.length ? `; NOT restorable, still changed: ${stranded.join(", ")}` : ""),
+  );
+
+  return {
+    ok: false,
+    reason: res.reason,
+    applied: plan.applied,
+    rolledBack,
+    stranded,
+  };
 }
 
 // One POST helper for every write action (updates / append / deleteRow).
@@ -741,11 +844,35 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
       redirect: "follow",
     });
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean; error?: string;
+      // Only from a bridge new enough to roll a rejected batch back itself.
+      at?: string | null; message?: string; rolledBack?: number; notRolledBack?: string[];
+    };
     // A stale copy after a successful write would show the crew their own
     // edit missing for the rest of the TTL.
     if (json.ok) invalidateSheetCache();
-    return json.ok ? { ok: true } : { ok: false, reason: json.error || "script_error" };
+    if (json.ok) return { ok: true };
+
+    // A deployed-since-2026-08-14 bridge tells us which cell it refused and
+    // whether it undid the rest. Pass that through instead of flattening it to
+    // "script_error" — and if it says it did NOT fully roll back, that is
+    // stranded data and must not read as a clean failure.
+    if (json.error === "cell_rejected") {
+      const undone = (json.notRolledBack ?? []).length === 0;
+      if (!undone) {
+        console.error(
+          `[sheets] bridge could not undo its own rejected batch on "${String(payload.tab ?? "?")}": ` +
+            `${json.notRolledBack?.join(", ")}`,
+        );
+      }
+      return {
+        ok: false,
+        reason: `cell_rejected${json.at ? `@${json.at}` : ""}`,
+        ...(undone ? {} : { applied: json.notRolledBack?.length, rolledBack: json.rolledBack, stranded: json.notRolledBack }),
+      };
+    }
+    return { ok: false, reason: json.error || "script_error" };
   } catch {
     return { ok: false, reason: "request_failed" };
   }

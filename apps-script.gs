@@ -59,9 +59,64 @@ function doPost(e) {
   }
 
   // Default: in-place cell updates.
-  (body.updates || []).forEach(function (u) {
-    sheet.getRange(u.row, u.col).setValue(u.value);
-  });
+  //
+  // ⚠ THIS USED TO BE A BARE forEach, AND THAT WAS A REAL BUG. `setValue`
+  // ENFORCES a cell's data validation, so one rejected cell threw out of
+  // doPost — leaving every cell BEFORE it committed, every cell after it
+  // dropped, and the caller holding an HTML error page with no way to tell.
+  // Measured on 2026-08-14: writing «عطل» (a real downtime reason, but not one
+  // of the eight in «التوقفات»!C's dropdown) into C2 left row 2 holding a date,
+  // a machine and seven empty cells.
+  //
+  // The batch is now all-or-nothing. The undo restores the UNDERLYING values,
+  // not the display strings the web app can see, so a date goes back as the
+  // same date rather than being re-parsed by a locale that reads 09/08 as
+  // 8 September.
+  if (body.updates) {
+    const ups = body.updates;
+    // Snapshot first. Per cell rather than one bounding range: the rows in a
+    // batch are scattered (an import writes rows 212 and 640), and the box
+    // around them can be the whole tab.
+    const prev = ups.map(function (u) { return sheet.getRange(u.row, u.col).getValue(); });
+
+    let wrote = 0;
+    try {
+      for (let i = 0; i < ups.length; i++) {
+        sheet.getRange(ups[i].row, ups[i].col).setValue(ups[i].value);
+        wrote = i + 1;
+      }
+      // INSIDE the try: writes are buffered, and a throw that surfaces at the
+      // next flush would land outside a catch placed around it — the rule this
+      // file has already paid for once.
+      SpreadsheetApp.flush();
+    } catch (err) {
+      // Put back exactly what was there, and only as far as we got. Each
+      // restore is guarded on its own: a cell whose ORIGINAL value violates
+      // today's validation (legacy data, a renamed product) would otherwise
+      // throw during the undo and strand the rest of it.
+      const failed = [];
+      for (let i = 0; i < wrote; i++) {
+        try {
+          sheet.getRange(ups[i].row, ups[i].col).setValue(prev[i]);
+        } catch (undoErr) {
+          failed.push("R" + ups[i].row + "C" + ups[i].col);
+        }
+      }
+      try { SpreadsheetApp.flush(); } catch (flushErr) { /* reported below */ }
+      return _json({
+        ok: false,
+        error: "cell_rejected",
+        // Which cell the sheet refused, so the caller can say so.
+        at: wrote < ups.length ? "R" + ups[wrote].row + "C" + ups[wrote].col : null,
+        message: String(err && err.message ? err.message : err),
+        rolledBack: wrote - failed.length,
+        // Empty means the tab is exactly as it was before the request.
+        notRolledBack: failed,
+      });
+    }
+    return _json({ ok: true, cells: ups.length });
+  }
+
   return _json({ ok: true });
 }
 

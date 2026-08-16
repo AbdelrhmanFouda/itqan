@@ -408,7 +408,22 @@ export async function commitDraft(payload: CommitPayload, actor: string): Promis
   if (edits.length === 0) return { ok: false, reason: "nothing_to_write", outcomes };
 
   const res = await updateRecordsInTab("hourly", edits);
-  if (!res.ok) return { ok: false, reason: res.reason || "write_failed", outcomes };
+  if (!res.ok) {
+    // A failed write is not automatically a write that did nothing. The bridge
+    // commits every cell before the one it rejects, so `updateRecordsInTab`
+    // snapshots and rolls back — but a value it could not restore honestly (a
+    // date, a time) is still sitting in the tab. Saying "nothing was written"
+    // over that would send the owner away from a row that needs his eyes.
+    if (res.stranded?.length) {
+      console.error(
+        `[hourly-import] ${actor}'s import of ${iso} ${payload.shift} FAILED PARTWAY: ` +
+          `${res.applied} cell(s) landed, ${res.rolledBack} rolled back, ` +
+          `${res.stranded.length} could not be restored: ${res.stranded.join(", ")}`,
+      );
+      return { ok: false, reason: `partial_write:${res.stranded.join(",")}`, outcomes };
+    }
+    return { ok: false, reason: res.reason || "write_failed", outcomes };
+  }
 
   // «تسجيل الإنتاج» has no notes column, so there is nowhere in the sheet to
   // stamp provenance without corrupting a cell nobody asked to change. Same

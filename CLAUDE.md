@@ -377,14 +377,39 @@ just that one, and three of them contradict what the code comments used to claim
    note that «الأعطال» — the other tab the site writes — already holds ISO text, so text
    is the house convention.
 
-2. **A rejected cell abandons the REST of the same POST.** The bridge's `updates` loop has
-   no try/catch, so one validation failure throws out of `doPost` and every cell after it
-   in the batch is silently dropped — while the cells before it are already committed.
-   Writing «عطل» (not in the tab's dropdown) into C2 left row 2 holding a date, a machine
-   and seven empty cells. ⚠ **`updateRecordsInTab()`'s comment claims the rows "land
-   together or not at all". That is only true of a bridge/network failure, not of a
-   validation failure** — and the paper import writes «تسجيل الإنتاج», whose A/B/C are
-   validated. A bad product name there can half-apply an import.
+2. **A rejected cell abandons the REST of the same POST — FIXED, both ends.** The bridge's
+   `updates` loop had no try/catch, so one validation failure threw out of `doPost`: every
+   cell after it was dropped, every cell before it stayed committed, and the caller got an
+   HTML error page. Writing «عطل» (not in the tab's dropdown) into C2 left row 2 holding a
+   date, a machine and seven empty cells.
+
+   `updateRecordsInTab()`'s old comment — "the rows land together or not at all" — was
+   therefore false. **A single POST is one request, not one transaction.** Two layers now
+   make it nearly true:
+
+   - **`apps-script.gs` wraps the loop and rolls back** to the UNDERLYING values, which is
+     the only place a faithful undo is possible (the web app sees display strings, and
+     restoring `09/08/2026` in a workbook holding two date conventions can store
+     8 September). It replies `{ok:false, error:"cell_rejected", at:"R2C3", rolledBack, notRolledBack}`
+     instead of an error page. ⚠ **Not live until Deploy → Manage deployments → New
+     version.**
+   - **`postUpdates()` in `lib/sheets.ts` recovers without it.** It snapshots the target
+     cells from the fresh read the caller already did, and on failure re-reads, uses
+     `planRollback()` (`lib/sheet-write.ts`, pure, 10 tests) to see what actually moved,
+     restores what can be restored honestly and reports the rest as `stranded`. Verified
+     against the live tab on 2026-08-14: the «عطل» batch half-applied, the plan found both
+     landed cells, the undo left the tab byte-identical.
+
+   `UpdateResult` therefore carries `applied` / `rolledBack` / `stranded`. **A caller that
+   reports a failure without checking `stranded` is telling the user something untrue** —
+   `commitDraft()` in `lib/hourly-import.ts` is the worked example.
+
+   *Exposure, corrected:* an earlier note here claimed a bad product name could half-apply
+   a paper import. It cannot. That import writes hour columns and «الفعلي», which carry no
+   validation at all, and on a new row its date/machine/product are resolved from the very
+   sources the dropdowns point at. The reachable case is `updateRecord()` pushing an
+   arbitrary value into a validated column — a job status outside «أوامر العمل»!K's four
+   Arabic values is the live one, since `jobStatusToSheet` passes unknown values through.
 
 3. **The bridge is AT-LEAST-ONCE.** An append that answered with an HTML error page had
    already written its row; the retry wrote it again, and one 14-minute stoppage became two
