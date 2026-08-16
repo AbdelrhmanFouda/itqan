@@ -860,6 +860,17 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
     // stranded data and must not read as a clean failure.
     if (json.error === "cell_rejected") {
       const undone = (json.notRolledBack ?? []).length === 0;
+      // `at` is usually null and that is not a bug in the bridge: Apps Script
+      // BUFFERS writes, so the rejection surfaces at flush() — after the loop
+      // has run past the offending cell — not on the setValue itself. Sheets'
+      // own message names the cell, and lists the values the column will
+      // accept, which is the single most useful line in the whole failure.
+      const at = json.at || (json.message?.match(/\bcell\s+([A-Z]+\d+)\b/)?.[1] ?? "");
+      console.error(
+        `[sheets] "${String(payload.tab ?? "?")}" refused a value` +
+          `${at ? ` at ${at}` : ""}${undone ? " (batch rolled back)" : ""}` +
+          `${json.message ? `: ${json.message}` : ""}`,
+      );
       if (!undone) {
         console.error(
           `[sheets] bridge could not undo its own rejected batch on "${String(payload.tab ?? "?")}": ` +
@@ -868,7 +879,7 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
       }
       return {
         ok: false,
-        reason: `cell_rejected${json.at ? `@${json.at}` : ""}`,
+        reason: `cell_rejected${at ? `@${at}` : ""}`,
         ...(undone ? {} : { applied: json.notRolledBack?.length, rolledBack: json.rolledBack, stranded: json.notRolledBack }),
       };
     }

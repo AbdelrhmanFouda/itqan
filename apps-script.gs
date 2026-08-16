@@ -90,10 +90,19 @@ function doPost(e) {
       // file has already paid for once.
       SpreadsheetApp.flush();
     } catch (err) {
-      // Put back exactly what was there, and only as far as we got. Each
-      // restore is guarded on its own: a cell whose ORIGINAL value violates
-      // today's validation (legacy data, a renamed product) would otherwise
-      // throw during the undo and strand the rest of it.
+      // Put back exactly what was there.
+      //
+      // NOTE: `wrote` is almost always ups.length, and that is not a bug.
+      // Spreadsheet writes are BUFFERED — the validation error surfaces at
+      // flush(), after the loop has already run past the offending cell — so
+      // this restores the WHOLE batch rather than a prefix of it. Restoring a
+      // cell that never actually changed is a no-op, so over-restoring is free
+      // and under-restoring is not. (Verified live on 2026-08-14: a four-cell
+      // batch rejected at C39 reported rolledBack:4 and left the row empty.)
+      //
+      // Each restore is guarded on its own: a cell whose ORIGINAL value
+      // violates today's validation (legacy data, a renamed product) would
+      // otherwise throw during the undo and strand the rest of it.
       const failed = [];
       for (let i = 0; i < wrote; i++) {
         try {
@@ -106,8 +115,11 @@ function doPost(e) {
       return _json({
         ok: false,
         error: "cell_rejected",
-        // Which cell the sheet refused, so the caller can say so.
-        at: wrote < ups.length ? "R" + ups[wrote].row + "C" + ups[wrote].col : null,
+        // Sheets' own message names the offending cell ("...in cell C39...") and
+        // lists the values the column accepts. Pass it through verbatim — it is
+        // far more useful than anything reconstructible here, and because of the
+        // buffering above, the loop counter cannot identify the cell.
+        at: (String(err && err.message ? err.message : "").match(/\bcell\s+([A-Z]+\d+)\b/) || [])[1] || null,
         message: String(err && err.message ? err.message : err),
         rolledBack: wrote - failed.length,
         // Empty means the tab is exactly as it was before the request.
