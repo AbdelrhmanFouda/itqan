@@ -69,15 +69,27 @@ export function isStaleOpen(
 }
 
 /**
- * Minutes to record when closing a stoppage nobody stopped: elapsed time, capped
- * at the end of its own factory day. The machine cannot have been down past the
- * shift it was logged in, so the cap is what keeps a forgotten tap from
- * inventing days of downtime.
+ * ⚠ REMOVED 2026-08-17 — the rule it encoded was wrong.
+ *
+ * `estimatedStopMinutes(startedAt, factoryDayEndMs)` capped a reconstructed
+ * stoppage at 08:00 the following morning, on the reasoning that a machine
+ * "cannot have been down past the shift it was logged in".
+ *
+ * The owner's correction: **a shift ending does not restart the machine.** The
+ * captured data agrees emphatically — 21 of the 37 stoppages already run past
+ * 08:00, and they carry 14,973 of the 17,253 minutes. Capping there was
+ * deleting most of the downtime this feature exists to measure.
+ *
+ * There is no replacement helper: a reconstructed close now runs to the moment
+ * somebody closes it, which is `stopDowntimeEvent`'s own default, so no
+ * arithmetic is needed. Kept as a note because the deleted function had tests
+ * asserting the cap, and a future reader finding them in git history should
+ * know they were removed deliberately rather than lost.
+ *
+ * What bounds a forgotten tap is `isStaleOpen()` putting it in front of the
+ * owner the next morning, plus the `estimated` flag — not a cap that quietly
+ * threw minutes away.
  */
-export function estimatedStopMinutes(startedAt: number, factoryDayEndMs: number): number {
-  if (!factoryDayEndMs || factoryDayEndMs <= startedAt) return 0;
-  return Math.max(0, Math.round((factoryDayEndMs - startedAt) / 60000));
-}
 
 /* ------------------------------ the tally --------------------------------- */
 

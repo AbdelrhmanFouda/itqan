@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen, estimatedStopMinutes,
+  distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen,
   summarizeDowntime, countsTowardDowntime,
   type DowntimeRun, type DowntimeCountable,
 } from "../lib/downtime.ts";
@@ -119,20 +119,35 @@ test("a 02:00 stoppage is NOT stale — it belongs to the previous day's shift",
   assert.equal(isStaleOpen({ endedAt: null, date: "2026-08-07" }, factoryDay(next)), true);
 });
 
-test("an estimated close is capped at the end of its factory day", () => {
-  const dayEnd = factoryDayEnd("2026-08-07");         // 08:00 Cairo on the 8th
-  assert.equal(new Date(dayEnd).toISOString(), "2026-08-08T06:00:00.000Z");
-  // Started 14:00 Cairo (12:00Z) → 18 hours to the end of the shift day.
-  const started = Date.parse("2026-08-07T12:00:00Z");
-  assert.equal(estimatedStopMinutes(started, dayEnd), 18 * 60);
-  // A full 24h shift's worth is the ceiling, never "days since".
-  const early = Date.parse("2026-08-07T06:00:00Z");   // 08:00 Cairo, shift start
-  assert.equal(estimatedStopMinutes(early, dayEnd), 24 * 60);
+/**
+ * The two tests that used to live here asserted that a reconstructed close was
+ * CAPPED at 08:00 the next morning. That rule was removed on 2026-08-17: a shift
+ * ending does not restart the machine, and capping there was deleting 87% of the
+ * captured minutes (21 of 37 stoppages run past 08:00). They are replaced by the
+ * test below, which pins the opposite property.
+ */
+test("A STOPPAGE IS NOT ENDED BY THE SHIFT ENDING", () => {
+  // A press that stops at 22:00 and is still stopped at 14:00 the next day was
+  // down for sixteen hours, not the ten that remained in its shift. Both
+  // readings are computed the same way — end minus start — and the shift
+  // boundary is simply not in the arithmetic.
+  const started = Date.parse("2026-08-07T20:00:00Z"); // 22:00 Cairo
+  const closedNextAfternoon = Date.parse("2026-08-08T12:00:00Z"); // 14:00 Cairo
+  const minutes = Math.round((closedNextAfternoon - started) / 60000);
+  assert.equal(minutes, 16 * 60, "the full sixteen hours");
+
+  // What the old cap would have recorded, kept as the number NOT to produce.
+  const shiftEnd = factoryDayEnd("2026-08-07"); // 08:00 Cairo on the 8th
+  assert.equal(new Date(shiftEnd).toISOString(), "2026-08-08T06:00:00.000Z");
+  assert.equal(Math.round((shiftEnd - started) / 60000), 10 * 60);
+  assert.ok(minutes > Math.round((shiftEnd - started) / 60000),
+    "the true duration must exceed what the shift-end cap would have kept");
 });
 
-test("estimatedStopMinutes never returns a negative or a bogus value", () => {
-  assert.equal(estimatedStopMinutes(Date.parse("2026-08-09T00:00:00Z"), factoryDayEnd("2026-08-07")), 0);
-  assert.equal(estimatedStopMinutes(1, 0), 0, "unparseable day");
+test("factoryDayEnd still answers, and still refuses a bad date", () => {
+  // No longer used to cap a stoppage, but it is what defines the 08:00→08:00
+  // factory day, so the boundary itself is still worth pinning.
+  assert.equal(new Date(factoryDayEnd("2026-08-07")).toISOString(), "2026-08-08T06:00:00.000Z");
   assert.equal(factoryDayEnd("not-a-date"), 0);
 });
 

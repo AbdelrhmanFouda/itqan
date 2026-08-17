@@ -6,7 +6,7 @@ import {
   markDowntimeSynced,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
-import { factoryDay, factoryDayEnd } from "@/lib/dates";
+import { factoryDay } from "@/lib/dates";
 import { isStaleOpen } from "@/lib/downtime";
 import {
   loadDowntimeRecords, appendDowntimeRow, flushPendingDowntime,
@@ -117,17 +117,33 @@ export async function PATCH(req: NextRequest) {
 
     let res: Awaited<ReturnType<typeof stopDowntimeEvent>>;
     if (b.estimate === true) {
-      // Closing a stoppage nobody stopped. This is a REVIEW action — a person is
-      // looking at it and deciding — so the minutes may inform Availability, but
-      // the row is flagged «تقديري؟ = نعم» for good and capped at the end of its
-      // own factory day. Nothing in the system closes these on its own.
+      /**
+       * Closing a stoppage nobody stopped. A REVIEW action — a person is looking
+       * at it and deciding — so it is flagged «تقديري؟ = نعم» for good, and
+       * nothing in the system does it automatically.
+       *
+       * ── THE SHIFT DOES NOT END THE STOPPAGE (owner's rule, 2026-08-17) ────
+       * This used to cap the minutes at `factoryDayEnd(ev.date)` — 08:00 the
+       * next morning — on the reasoning that a machine "cannot have been down
+       * past the shift it was logged in". That reasoning was wrong, and the
+       * data says so: **21 of the 37 captured stoppages already run past 08:00,
+       * and they are 14,973 of the 17,253 minutes.** A press that broke at
+       * 22:00 and was still broken at 14:00 was down for sixteen hours; it did
+       * not start running again because a shift ended and nobody was there.
+       *
+       * So there is no cap. The stoppage runs to NOW, which is
+       * `stopDowntimeEvent`'s default — the same clock a tapped stop uses, and
+       * computed server-side from the STORED start either way, so a phone with
+       * a wrong clock still cannot invent downtime.
+       *
+       * What keeps a forgotten tap from inventing days is not a cap, it is
+       * `isStaleOpen()` surfacing it to the owner the morning after — and the
+       * `estimated` flag, which keeps a reconstruction out of any sentence that
+       * claims something was measured.
+       */
       const ev = (await getOpenDowntimeEvents()).find((e) => e.id === id);
       if (!ev) return NextResponse.json({ ok: false, reason: "not_open" }, { status: 404 });
-      const endedAt = factoryDayEnd(ev.date);
-      if (!endedAt || endedAt <= ev.startedAt) {
-        return NextResponse.json({ ok: false, reason: "bad_day" }, { status: 400 });
-      }
-      res = await stopDowntimeEvent(id, { endedAt, estimated: true, closedBy: actor });
+      res = await stopDowntimeEvent(id, { estimated: true, closedBy: actor });
     } else {
       res = await stopDowntimeEvent(id);
     }

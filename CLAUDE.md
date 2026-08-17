@@ -187,10 +187,29 @@ sidebar and `canAccess()`.
     number still looks healthy. `isStaleOpen()` flags any event still open after its factory
     day ended, and they are surfaced where the OWNER sees them (dashboard home banner,
     `readiness.staleOpen`, and the monthly report), not only on the floor's entry page.
-    **Nothing auto-closes.** A person reviews each one and closes it, which caps the minutes
-    at the end of that factory day and marks the row `estimated: true` + `closedBy`, so a
-    reconstructed number can never be mistaken for a measured one. `explain`/the report
-    disclose the estimated total separately.
+    **Nothing auto-closes.** A person reviews each one and closes it, which marks the row
+    `estimated: true` + `closedBy`, so a reconstructed number can never be mistaken for a
+    measured one. `explain`/the report disclose the estimated total separately.
+  - ⚠ **A SHIFT ENDING DOES NOT END THE STOPPAGE (owner's rule, 2026-08-17).** Closing a
+    stale stoppage used to cap its minutes at `factoryDayEnd()` — 08:00 the next morning —
+    reasoning that a machine "cannot have been down past the shift it was logged in". That
+    reasoning was wrong and the captured data says so loudly: **21 of the 37 stoppages run
+    past 08:00, carrying 14,973 of the 17,253 minutes, and 11 are longer than a whole
+    720-minute shift.** A press that broke at 22:00 and was still broken at 14:00 was down
+    sixteen hours; it did not resume because a shift ended with nobody there. There is now
+    no cap — a reconstructed close runs to the moment somebody closes it, the same clock a
+    tapped stop uses. `estimatedStopMinutes()` is deleted; see the note in its place in
+    `lib/downtime.ts`. What bounds a forgotten tap is `isStaleOpen()` surfacing it the next
+    morning and the `estimated` flag, not a cap that silently discarded minutes.
+  - ⚠ **Consequence, and it is NOT yet solved: a stoppage's minutes are all attributed to
+    its START day.** One row, one date. `distributeDowntime()` can only give a run
+    `plannedMin − downtimeMin` of headroom, so a stoppage longer than one day's planned time
+    cannot fully land and the remainder returns as `readiness.downtimeUnallocatedMin`.
+    Production already shows **10,012 of 17,253 minutes unallocated**, and removing the cap
+    makes long stoppages more common. The fix is to split a spanning stoppage across the
+    factory days it actually covered, one row per day — which changes what «التوقفات»
+    contains (one tap becomes several rows) and is the owner's call. Do not "solve" the
+    unallocated number by reinstating the cap.
   - **The two stores, and which does what.** «التوقفات» is the log — every total, chart,
     Pareto, CSV and report reads it, through `loadDowntimeTotals()`. Firestore holds only
     the OPEN stoppage, because it has no minutes yet. Three consequences worth knowing
