@@ -714,9 +714,31 @@ with filling the frame, that is roughly 4× the pixels per digit over anything m
 
 - i18n: `lib/i18n*.ts` — `en` and `ar` objects MUST keep the same shape. UI strings never
   hardcoded. `dir={isAr ? "rtl" : "ltr"}` on containers.
-- **Language is remembered** (`localStorage["itqan.lang"]`) and restored by an inline script
-  in `app/layout.tsx` BEFORE hydration, so there is no flash of English. It used to reset to
-  English on every mount. That script and `LANG_STORAGE_KEY` must stay in sync.
+- **Language is remembered in a COOKIE, and that is not a detail** (`itqan.lang`, see
+  `lib/lang-cookie.ts`). It was localStorage-only until 2026-08-17, and the entry here used
+  to claim that meant "no flash of English". It did not, and the owner reported the site
+  losing his choice for weeks:
+
+  > `curl https://itqan-taupe.vercel.app/` → `<html lang="en">`, **14 English words, 0
+  > Arabic**, whatever the visitor had chosen.
+
+  localStorage cannot be read while the HTML is generated, so the SERVER always sent
+  English and the browser only corrected it after the bundle downloaded and hydrated. The
+  inline script fixed `<html lang/dir>` before paint — the LAYOUT was right and the TEXT was
+  not, which is worse than either, because it looks deliberate. On a phone on factory wifi
+  that window is seconds.
+  - The cookie rides along with the request, so `app/layout.tsx` (now `async`, reading
+    `cookies()`) renders the right language in the first byte.
+  - **localStorage is kept, not replaced.** The inline script migrates a pre-cookie choice
+    into the cookie so nobody re-picks, and it is the fallback when cookies are blocked.
+  - ⚠ The cookie is written from `stored`, **never from the effective `lang`**.
+    `/dashboard/downtime` forces Arabic for everyone; writing that would silently convert an
+    English-reading manager's own preference because he opened the capture page once.
+  - **Cost: every route is dynamic now**, not a static shell. ~30ms per request against
+    sheet reads of 2.5–40s, and the shells were never the slow part — every page fetches its
+    data client-side anyway. Do not "restore" static rendering without also solving the
+    first-byte language, or this bug comes straight back.
+  - The script, `LANG_STORAGE_KEY` and `lib/lang-cookie.ts` must all stay in sync.
 - Charts are hand-built SVG in `components/dashboard/charts.tsx` — no chart libraries.
 - Mobile: base Tailwind classes are the phone layout; desktop is preserved under `md:`/`sm:`
   overrides. Tables get an `sm:hidden`/`md:hidden` card-list twin instead of shrinking.
@@ -753,7 +775,21 @@ with filling the frame, that is roughly 4× the pixels per digit over anything m
 - Vercel build runs the typecheck — a bad type fails the deploy.
 - Turbopack can serve a stale compile error after export refactors — request the route URL
   to force recompile; corrupted `.next` → delete `.next` + `tsconfig.tsbuildinfo`.
-- Zombie dev servers holding port 3000 corrupt `.next`.
+- Zombie dev servers holding port 3000 corrupt `.next` — **and they also silently serve the
+  OLD build.** A second `npm start` cannot bind the port, fails quietly, and the first
+  process keeps answering, so a fix you just built looks broken. Cost three test cycles on
+  2026-08-17. Kill the listener and confirm the port is free before believing any local
+  result: `Get-NetTCPConnection -LocalPort 3000 -State Listen | Stop-Process -Id {$_.OwningProcess} -Force`.
+- ⚠ **`cookies().get(name)` returns `{name, value}`** — a bare `"ar"`, NOT `"itqan.lang=ar"`.
+  Handing that to a `Cookie:`-header parser yields null and renders the whole site in the
+  fallback language while every unit test stays green. That is exactly how the language fix
+  shipped broken on its first attempt; `langFromValue()` and `parseLangCookie()` are now two
+  functions and `tests/lang-cookie.test.ts` pins which shape each takes.
+- **A `flex` row with `gap-` and no `flex-wrap` cannot break, however narrow the phone.**
+  The storage header held four controls (~460px) in one on a 375px screen; the OUTER div
+  wrapped, so the title dropped to its own line and the page looked deliberate while
+  scrolling sideways. Hunting these by eye is hopeless — scan for `flex` + `gap-` without
+  `flex-col`/`flex-wrap` and three or more controls.
 - Apps Script drops onEdit events fired <2s apart.
 - When checking whether something is deployed, add a `?cb=` cachebuster — a first fetch has
   returned a stale cached response and made a fresh deploy look stale.
