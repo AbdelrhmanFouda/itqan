@@ -131,7 +131,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           // 28px measured. This is the only way into the navigation on a
           // phone, so it is the one control that must never be a near-miss.
           className="md:hidden text-gray-600 hover:text-gray-900 flex items-center justify-center min-w-11 min-h-11 -ms-2.5"
-          aria-label={navOpen ? "Close menu" : "Open menu"}
+          aria-label={navOpen ? p.common.closeMenu : p.common.openMenu}
         >
           {navOpen ? <X size={20} /> : <Menu size={20} />}
         </button>

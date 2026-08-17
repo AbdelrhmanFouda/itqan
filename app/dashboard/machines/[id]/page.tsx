@@ -117,7 +117,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
       </div>
 
       <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h2 className="font-semibold text-gray-900">Notes</h2>
+        <h2 className="font-semibold text-gray-900">{tr.dashboard.notesHeading}</h2>
         <button
           onClick={() => setShowForm(!showForm)}
           className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"

@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { usePathname } from "next/navigation";
 import { Lang } from "@/lib/i18n";
 import { isArabicOnlyPath } from "@/lib/arabic-only";
+import { writeLangCookie } from "@/lib/lang-cookie";
 
 /**
  * Language, remembered.
@@ -12,9 +13,15 @@ import { isArabicOnlyPath } from "@/lib/arabic-only";
  * and came back an hour later got English again — on a page used by people who
  * do not read English. The choice is now stored and restored.
  *
- * `LANG_STORAGE_KEY` and the inline script below must agree; the script runs
- * before React hydrates so the first paint is already in the right language and
- * direction, with no flash of English.
+ * ── And storing it was still not enough (2026-08-17) ──────────────────────
+ * localStorage cannot be read while the server builds the HTML, so the server
+ * kept sending English TEXT and the browser only corrected it after hydrating.
+ * The choice survived; the first paint did not. It is now also written to a
+ * COOKIE, which the root layout reads to render the right language in the first
+ * byte — see lib/lang-cookie.ts. `initial` is that server-known value.
+ *
+ * `LANG_STORAGE_KEY`, the cookie, and the inline script in app/layout.tsx must
+ * all agree.
  */
 export const LANG_STORAGE_KEY = "itqan.lang";
 
@@ -36,11 +43,20 @@ const LangContext = createContext<{
   setLang: (l: Lang) => void;
 }>({ lang: "en", setLang: () => {} });
 
-export function LangProvider({ children }: { children: ReactNode }) {
-  // Initialised from storage during the very first client render, so the tree
-  // never renders English and then swaps. On the server this is "en", which the
-  // pre-hydration script in app/layout.tsx has already corrected in the DOM.
-  const [stored, setStored] = useState<Lang>(() => storedLang() ?? "en");
+export function LangProvider({
+  children,
+  initial,
+}: {
+  children: ReactNode;
+  /** What the SERVER already rendered, from the cookie. */
+  initial?: Lang;
+}) {
+  // On the server, `storedLang()` is null and this is the cookie's value — so
+  // the HTML is generated in the right language. On the client, localStorage
+  // wins if it holds something, which is what carries a choice made before the
+  // cookie existed. Once both agree (one navigation later) there is no
+  // mismatch between the two renders at all.
+  const [stored, setStored] = useState<Lang>(() => storedLang() ?? initial ?? "en");
   const pathname = usePathname();
   const forcedArabic = isArabicOnlyPath(pathname);
   const lang: Lang = forcedArabic ? "ar" : stored;
@@ -53,6 +69,18 @@ export function LangProvider({ children }: { children: ReactNode }) {
       /* storage unavailable — the choice still applies for this session */
     }
   };
+
+  // Mirror the CHOICE into the cookie — `stored`, never `lang`. On
+  // /dashboard/downtime `lang` is forced to Arabic for everyone, and writing
+  // that would silently convert an English-reading manager's own preference
+  // just because he opened the capture page once.
+  //
+  // Runs on every change AND on mount, which is what migrates anyone whose
+  // choice predates the cookie: their next page load is server-rendered
+  // correctly without them touching anything.
+  useEffect(() => {
+    writeLangCookie(stored);
+  }, [stored]);
 
   // Keep <html lang/dir> in step with the choice, for screen readers and for
   // any CSS or browser behaviour that keys off the document direction.

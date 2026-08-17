@@ -27,6 +27,10 @@ export const pd = {
       all: "All",
       search: "Search…",
       confirmDelete: "Delete this record? This cannot be undone.",
+      // Read aloud by a screen reader, so it has to follow the language too —
+      // it is the only way into the navigation on a phone.
+      openMenu: "Open menu",
+      closeMenu: "Close menu",
     },
     overview: {
       title: "Production Overview",
@@ -311,6 +315,8 @@ export const pd = {
       all: "الكل",
       search: "بحث…",
       confirmDelete: "حذف هذا السجل؟ لا يمكن التراجع.",
+      openMenu: "فتح القائمة",
+      closeMenu: "إغلاق القائمة",
     },
     overview: {
       title: "نظرة عامة على الإنتاج",

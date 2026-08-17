@@ -213,7 +213,16 @@ export default function StoragePage() {
     <div>
       <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
         <h1 className="text-xl font-bold text-gray-900">{s.title}</h1>
-        <div className="flex items-center gap-2">
+        {/* flex-wrap, and full width below sm.
+            This row is why the page did not fit a phone. The OUTER div wraps,
+            so the title dropped onto its own line and looked fine — but this
+            inner group did not, and it holds four controls («فتح الجدول»,
+            «تحديث القوائم», «إضافة», «تحديث») that come to roughly 460px with
+            their icons. On a 375px screen that is the whole page scrolling
+            sideways, because a flex row with no flex-wrap cannot break however
+            narrow the viewport gets. It is the only non-wrapping control row
+            left in the dashboard. */}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {canWrite && (
             <>
               <a
