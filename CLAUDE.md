@@ -312,6 +312,50 @@ Domain semantics:
 - Reports from the floor identify machines unreliably by code — resolve by PRODUCT NAME
   through the registry when validating.
 
+## Two numbers per shift instead of 24 cells — groundwork landed 2026-08-19
+
+The crew is to record سستم and فعلي per machine per shift rather than 24 hour cells.
+Read-side groundwork is in; **no write path has changed** pending confirmation that the
+sheet can take it without restructuring.
+
+- **Row SHAPES are derived from the cells** (`lib/hour-shape.ts`, zero imports, 6 tests):
+  `hourly` (readings that differ), `flat` (one constant filled across — 09/08 زراير is
+  1062 eleven times, which *looks* hourly and carries no hour-to-hour information),
+  `shiftTotal` (one cell), `empty`. **Never add a sheet column for this.** Only `hourly`
+  may appear in an hour-of-day view.
+- **`hoursLogged` is now `hourCellsFilled`.** It counts CELLS. Being named for hours is
+  what invited the inference; under the new shape it returns 1 for a twelve-hour shift.
+  Nothing may derive a duration from it.
+- **Planned time was already safe** — `resolvePlannedMin` takes it from the machines
+  registry «طول الوردية», and live readiness reports `plannedSource {column:0,
+  machines:544, default:0}`. `computeOEE()` reads no hour cell at all.
+
+### ⚠ «تسجيل الإنتاج» rows hold ONE shift OR TWO, and one cell cannot say which
+
+The single most useful thing measured here. With all 175 August rows simulated as
+shift-totals, the efficiency badge read:
+
+| basis | result |
+|---|---|
+| «المتوقع» (AD) as-is | **1024%–2628%** — AD is `3600/cycle × cavities × COUNT(D:AA)`, and COUNT is now 1 |
+| AD rescaled by the registry shift length | **83%–241%** — still exactly **2×** the 24-cell reading, every row |
+
+The 2× is the finding: the tab has **no shift column**, so both shifts share one row and
+are told apart only by which half of the 24 cells carries numbers. A row therefore covers
+12 hours or 24, and a single filled cell cannot distinguish them. **The efficiency badge is
+withheld on shift-total rows rather than guessed.** `/performance` is unaffected — it keys
+off «الإنتاج», which does carry a shift per row.
+
+**This decides the row model**: one row per shift (registry length is then right) or one
+per day (it is not). Do not implement the write path until that is settled.
+
+### ⚠ AB ≠ the sum of the displayed hour cells, on 110 of 175 rows
+
+`AB = SUM(D:AA)` computes on UNDERLYING values; the bridge returns DISPLAY values, which
+are rounded. The two differ by ±3–6 units on most rows. Anything that re-adds the visible
+hour cells and treats the result as سستم will drift. Read AB; never recompute it. (Found by
+a test harness that did exactly that and injected +49 units.)
+
 ## The sheet read path — fixed 2026-08-12, and easy to undo by accident
 
 **Symptom reported:** "the app loads for too long and it is fetching nothing."
