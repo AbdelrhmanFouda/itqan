@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { Stat, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
-import PaperImport from "@/components/dashboard/paper-import";
 
 /** Mirrors lib/hourly.ts HourShape — see there for what each shape means. */
 type HourShape = "empty" | "shiftTotal" | "flat" | "hourly";
@@ -96,7 +95,6 @@ export default function HourlyPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
         <div className="flex items-center gap-2">
-          <PaperImport onWritten={(d) => load(d, true)} />
           <select
             className={`${inputCls} w-auto`}
             value={date}

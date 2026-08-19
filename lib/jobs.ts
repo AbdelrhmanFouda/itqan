@@ -6,7 +6,7 @@ import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
   buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
 } from "@/lib/run-join";
-import { sumCavities } from "@/lib/sheet-import";
+import { sumCavities } from "@/lib/cavities";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
@@ -40,9 +40,8 @@ const firstNum = (v: unknown) => {
   const m = String(v ?? "").match(/[0-9]+(?:\.[0-9]+)?/);
   return m ? Number(m[0]) : 0;
 };
-// «4+4» → 8, «2 جراب&2 حزام» → 4, «1 طقم» → 1, «8» → 8.
-// Moved to lib/sheet-import.ts so the paper import multiplies by the SAME
-// cavity count this file divides by — see the import there.
+// Cavities («4+4» → 8) come from lib/cavities.ts, so every caller multiplies
+// by the same count this file divides by.
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 

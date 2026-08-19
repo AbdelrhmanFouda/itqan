@@ -238,16 +238,14 @@ sidebar and `canAccess()`.
     and the alef/ya/ta-marbuta spellings before the lookup.
     ⚠ «عطل» and «خامة» are deliberately **not** in the tab's dropdown — they are readable
     history, not offerable choices. That is why the migration had to use `append`.
-- **Reading the paper production sheet (IN PROGRESS)** — `lib/sheet-import.ts` (pure maths,
-  18 tests) + `lib/sheet-vision.ts` (Gemini vision). **Not yet wired to any route or page.**
-  See "Reading the paper sheet" below for the full state, the open questions and the two
-  findings that must not be forgotten.
-  - **Firebase Storage was abandoned deliberately.** An earlier version stored photos in a
-    bucket; creating it failed in the console and the owner chose *"send the image straight
-    to Gemini and never store it"* instead. All of that code was removed (`lib/photos.ts`,
-    `lib/photo-upload.ts`, `/api/hourly-photos`, `storage.rules`, the `hourlyPhotos`
-    collection and its rule). **Do not reintroduce Storage without asking** — it needs a
-    bucket, Blaze billing, and rules published by hand.
+- **The paper-photo import is GONE (2026-08-19)** — see "The paper-photo import — REMOVED"
+  below for what was deleted, what survived it, and where to recover it from.
+  - **Firebase Storage was abandoned deliberately** before that, and the reasoning still
+    stands if images ever return: an earlier version stored photos in a bucket, creating it
+    failed in the console, and the owner chose *"send the image straight to Gemini and never
+    store it"*. `lib/photos.ts`, `lib/photo-upload.ts`, `/api/hourly-photos`, `storage.rules`
+    and the `hourlyPhotos` collection were all removed. **Do not reintroduce Storage without
+    asking** — it needs a bucket, Blaze billing, and rules published by hand.
   - Naming note if images ever come back: "storage" in this repo already means the
     materials warehouse («المخزن», `lib/storage.ts`, the `storage` role).
 - **Monthly report draft (phase 3)** — `/dashboard/reports` was a blank manual form, which is
@@ -396,8 +394,9 @@ What is there now, and why each piece must stay:
 - **Writes and pre-write validation read `fresh`**, bypassing the cache
   entirely. `commitDraft()` exists to re-derive row numbers from the sheet as it
   is *right now*; a 45-second-old copy would defeat confirm-before-write.
-- **`?fresh=1` on `/api/hourly`**, which the paper import passes when reloading
-  after a write, so nobody is shown their own rows missing. Tag invalidation is
+- **`?fresh=1` on `/api/hourly`** — no caller passes it since the paper import
+  was removed, but KEEP IT: any future write into «تسجيل الإنتاج» must reload
+  with it or show the crew their own rows missing. Tag invalidation is
   the optimisation; this flag is the guarantee — `updateTag` (the
   read-your-own-writes primitive) is Server-Actions-only and unavailable in a
   Route Handler, and `revalidateTag`'s `profile: "max"` means
@@ -468,9 +467,9 @@ just that one, and three of them contradict what the code comments used to claim
    `commitDraft()` in `lib/hourly-import.ts` is the worked example.
 
    *Exposure, corrected:* an earlier note here claimed a bad product name could half-apply
-   a paper import. It cannot. That import writes hour columns and «الفعلي», which carry no
-   validation at all, and on a new row its date/machine/product are resolved from the very
-   sources the dropdowns point at. The reachable case is `updateRecord()` pushing an
+   the paper import (since removed). It could not have: that import wrote hour columns and
+   «الفعلي», which carry no validation at all, and on a new row its date/machine/product
+   came from the very sources the dropdowns point at. The reachable case is `updateRecord()` pushing an
    arbitrary value into a validated column — a job status outside «أوامر العمل»!K's four
    Arabic values is the live one, since `jobStatusToSheet` passes unknown values through.
 
@@ -528,250 +527,32 @@ just that one, and three of them contradict what the code comments used to claim
   server-side without firebase-admin (Google securetoken certs, `aud`/`iss` = itqan-5f802),
   because org policy blocks service-account keys.
 
-## Reading the paper sheet — BUILT (2026-08-10), read before touching it
+## The paper-photo import — REMOVED 2026-08-19
 
-Photograph the paper production sheet → Gemini reads it → the owner gets an **editable
-preview** → only on his confirmation does anything reach «تسجيل الإنتاج».
+Photograph the paper sheet → Gemini reads it → editable preview → write to
+«تسجيل الإنتاج». Built 2026-08-10, never wired to a page the crew used, removed at the
+owner's word: *"it wont be used in this maybe somthing else latter."*
 
-| Piece | File |
-|---|---|
-| Pure maths + every rule that fails silently | `lib/sheet-import.ts` (44 tests) |
-| The Gemini vision call | `lib/sheet-vision.ts` |
-| Read the sheet, resolve names, write | `lib/hourly-import.ts` |
-| Extract (writes nothing) | `POST /api/hourly/import` |
-| Commit (the ONLY write path) | `POST /api/hourly/import/commit` |
-| The editable grid | `components/dashboard/paper-import.tsx` |
-| Entry point | a button on `/dashboard/hourly` — **everyone who can reach the page** |
+Deleted: `lib/sheet-import.ts`, `lib/sheet-vision.ts`, `lib/hourly-import.ts`,
+`app/api/hourly/import/**`, `components/dashboard/paper-import.tsx`,
+`tests/sheet-import.test.ts`, the button on `/dashboard/hourly` and the `hourly.import`
+i18n blocks. **The full implementation is in git at `2a43c4e`** — recover it from there
+rather than rewriting, if it ever comes back for something else.
 
-**Do not re-gate this by role.** It shipped owner-only and the owner reversed it on
-2026-08-10: *"the pages should be the same for all, they should all see it."* One page that
-renders two ways is precisely what he did not want. Both routes therefore take a bare
-`requireRole(req)` — any approved role — which is also the standing convention for mutating
-routes here, and the same one that already lets a shop-floor account drive the assistant
-with writes included. The safety is the two-press confirmation and the server-side
-re-validation, not the role list, and those apply to whoever is signed in.
+Two things deliberately survived it, because they were never really part of it:
 
-⚠️ **Extract spends a vision call per request and the Gemini free tier rate-limits** — a 429
-was hit during testing on 2026-08-10. Several people photographing at shift change will get
-`vision_failed`; it degrades safely (nothing written, the UI says so). If it becomes common,
-add a per-user daily cap the way `/api/agent` does — `AI_AGENT_DAILY_LIMIT` plus the
-Firestore `usage/{uid}` counter — rather than narrowing who may use the feature.
+- **`sumCavities` → `lib/cavities.ts`** (zero imports, 4 tests). Master's H column holds
+  `8`, `4+4`, `2 وش&2 كفر`, `1 طقم`; a two-part mould fires both parts per shot and reading
+  only the first number halves the count. `lib/jobs.ts` uses it for kg→pieces.
+  ⚠ **`lib/oee-data.ts` does NOT** — it uses a plain `num(m.cavities)`, which reads `4+4` as
+  4. Those two disagree on multi-part moulds today. Not fixed here because it moves OEE
+  numbers and this pass was required to move none.
+- **`updateRecordsInTab()`** in `lib/sheets.ts` — now called by nothing; see the note on it.
 
-**The two phases deliberately do not trust each other.** `buildDraft()` resolves the photo
-against the sheet and returns a preview; `commitDraft()` throws all of that away and
-re-derives every row number, name and free row from a FRESH read before writing. The
-browser's row numbers are a claim, not an instruction — the preview may have sat open for
-minutes while the crew edited the tab. A row that fails any check aborts the WHOLE import;
-a partial write into a shared log is harder to find than no write. This is the opposite of
-the assistant's accept/reject confirm, which is safe there only because the server itself
-built the payload seconds earlier.
-
-Writes go through `updateRecordsInTab()` (new, in `lib/sheets.ts`) — every cell of every
-row in ONE bridge POST. `/exec` returns HTML error pages under load, so ten sequential
-POSTs would be ten chances to half-apply an import.
-
-### The paper
-
-One page per SHIFT covering EVERY machine — not one page per machine.
-`الأنتاج اليومي لماكينات الحقن — الوردية المسائية | 09/08/2026`, then per row:
-`# | التاريخ | الماكينة/الكود | المنتج/الاسطمبة | 8:00 … 7:00 (twelve) | سستم | الفعلي`.
-
-### Findings — verified against the live tab, not assumed
-
-1. **The paper counts SHOTS; the sheet counts PIECES, and the multiplier IS «الرئيسي» H.**
-   Confirmed on 2026-08-10 against the owner's own reading of the paper, on five products:
-
-   | Product | Paper, per hour | Master cav | × | Sheet |
-   |---|---|---|---|---|
-   | كرسي | 23 | 1 | 23 | **23** |
-   | غطاء كبير زي بلاست | 163 | 4 | 652 | **652** |
-   | حامل عجله | 118 | 8 | 944 | **945** |
-   | زراير | 151 | 7 | 1057 | **1062** |
-   | كفر شفاف العداد الكبير | 80 | 2 | 160 | **160** |
-
-   The sheet's per-row constant is `round(mean(paper hours) × cavities)`, which is why two
-   rows land a few units off a single hour's reading: `1062 ÷ 7 = 151.71`, and the owner
-   confirms that row is **151s with a 152 among them**. The mean is fractional by design.
-
-   ⚠️ **An earlier version of this file claimed the opposite** — that Master's cavity count
-   was unreliable because only four of ten rows were exactly divisible by it. That analysis
-   was wrong twice over, and both mistakes are easy to repeat:
-   - It divided the sheet value by **one observed hour** and demanded a whole number. The
-     typist multiplies the **mean**, which is usually fractional (77.5, 118.1, 151.7), so a
-     non-integer result is the expected outcome, not evidence against Master.
-   - Its زراير row rested on a paper value of **118**, which was a misread of `١٥١`. In this
-     handwriting `٥` closes into a loop that reads as `٨`. That single glyph produced a
-     phantom "×9 where Master says 7" and, from it, a wrong conclusion about the whole
-     column. **When a derived multiplier disagrees with Master, suspect the digit first.**
-
-   The multiplier still defaults from Master, is shown next to the raw paper reading, and is
-   **editable per row** — but it is now a well-supported default rather than a guess.
-2. **The sheet is NOT a transcription.** On paper the hours vary (`١١٨ ١١٨ ١١٩ ١١٩`); in
-   the sheet every row is ONE constant repeated. Re-verified across **all ten** rows of
-   09/08: every shift-half of every row holds exactly one distinct value, repeated 8–11
-   times. Not a sample of one — it is how this sheet has always been filled. So historic
-   hourly columns carry **no real hour-to-hour variation** and per-hour analysis on them
-   shows nothing. The import defaults to **faithful** (each hour's own reading) with a
-   one-click **flatten** toggle, because faithful loses no information and the toggle makes
-   the choice reversible; the owner has still not ruled on which he wants.
-3. **There is NO «الوردية» column.** Verified 2026-08-10 — the real header row 4 is
-   `A التاريخ | B الماكينة/كود | C المنتج/الاسطمبة | D..AA the 24 hours | AB سستم |
-   AC الفعلي | AD المتوقع | AE الكفاءة | AF الهالك | AG حالة السجل | AH أساس احتساب الهالك`.
-   Both shifts share ONE row and the shift is implied purely by which half carries numbers.
-   `ENTITIES.hourly` still declares a `shift` field; `colIndex` finds no header, drops it,
-   and `HourlyRow.shift` has therefore always been `""`. Harmless, but do not "fix" it by
-   adding a column — that is a sheet change the owner must approve.
-4. **The band is real and roomy.** Live counts on 2026-08-10: last occupied row **228**,
-   **770 blank rows** left in 5…998. Blank rows carry no formula output at all (AB does not
-   render a `0`), so occupancy is unambiguous — but `findFreeRows` is still computed from
-   the identity/data columns only, never from AB, because a formula that started rendering
-   `0` would otherwise report the band full at row 5 and silently disable new rows.
-
-### The write path — worked out, not yet built
-
-- **UPDATE is safe.** `updateRecord("hourly", row, changes)` → `mapInTab`, which emits only
-  the CHANGED cells; the formula columns are never touched. `row` is the 1-based sheet row,
-  exactly what `HourlyRow.row` carries. h08/h09 resolve correctly thanks to `normHeader`.
-- **NEVER `appendRecord` here.** It builds one cell per header and writes `""` for every
-  omitted field — which would blank `AB سستم`, `AD المتوقع`, `AE الكفاءة` on that row.
-- **NEVER the bridge's `append` action either.** It is `sheet.appendRow()` → `getLastRow()+1`
-  = **row 999**, because the formulas run to 998. That lands past the formula band, past the
-  `AF:AH` spill and past the validation, producing a row with no computed columns.
-- **A new row (mould changed mid-day) = find the next blank row inside 5–998 and UPDATE it.**
-  `AB`/`AD`/`AE` are per-row formulas already pre-filled to 998, and A/B/C validation too,
-  so a row written inside that band inherits everything. Data ended ~row 206; **~776 free
-  rows remain**, after which the band must be extended by hand in the sheet.
-- **Match on date + machine + PRODUCT.** On 09/08 PQ 12 — 180 has two rows — عجلة مكنسة
-  (morning) and جوان عجلة مكنسة (evening) — because the mould changed.
-- `AF/AG/AH` are ARRAYFORMULA spills anchored at row 5. Never write into them.
-
-### The shift mapping
-
-`lib/sheet-import.ts` owns it. The sheet has 24 hour columns (indices 3–26, `08:00→07:00`);
-a paper sheet has 12. **Morning fills the first twelve, evening the last twelve — so an
-evening paper's "8:00" is the sheet's `20:00`.** Getting this backwards files a night's
-output as a morning's, silently. `detectShift()` reads «مسائية»/«صباحية» from the heading
-and returns `null` when it cannot tell — **ask, never assume.**
-
-### Model choice — settled by measurement, 2026-08-10
-
-`gemini-2.5-flash`, overridable with **`AI_VISION_MODEL`** (env only, no code change). The
-bake-off is no longer inconclusive. Same photo, same prompt, same six-row gold set:
-
-| Model | Score |
-|---|---|
-| **`gemini-2.5-flash`** | **6/6** |
-| `claude-sonnet-5` | 3/6 |
-| `claude-opus-5` | returned unparseable output |
-| `gemini-2.5-pro` | untested — 429s without billing |
-
-Flash is simultaneously the cheapest option and the most accurate one here, so **do not
-reach for a bigger model to fix a bad read.** Every failure measured so far has been the
-photograph (framing, orientation, WhatsApp compression), and a stronger model does not
-correct any of them.
-
-**Quota, not capability, is the operational limit.** The free tier allows 20 requests a
-minute *per Google Cloud project* — not per key, so minting a second key changes nothing.
-Enabling billing on the existing key is what lifts the cap and is also what makes
-`gemini-2.5-pro` reachable at all. `callGemini()` retries a 429 twice regardless.
-
-If Pro is ever worth trying, it needs no deploy: set `AI_VISION_MODEL=gemini-2.5-pro` in
-Vercel and redeploy. Score it against the gold set in this section before keeping it —
-Flash is the incumbent at 6/6 and Pro is slower and dearer.
-
-### The first real photo — measured 2026-08-10, read this before tuning anything
-
-A real evening sheet (09/08/2026) was run end to end and scored against the rows that same
-page produced in «تسجيل الإنتاج». A row counts as clean when `sheetEvening ÷ paperValue`
-is a whole number 1–12 — that tests alignment AND digits without hand-transcribing.
-
-| Model | Score | Time |
-|---|---|---|
-| `gemini-2.5-flash` | **3/9** | 20 s |
-| `claude-opus-5` | **2/8** (dropped a row) | 126 s |
-| `claude-sonnet-5` | **2/9** | 57 s |
-| `gemini-2.5-pro` | — | HTTP 429, not on the free tier |
-
-**Do not respond to this by shopping for a better model.** Three models across two vendors
-score the same, disagree with each other, and disagree with *themselves* between runs at
-temperature 0. What they get right is telling: the printed columns (date, heading, all nine
-machine codes) are read perfectly every time, and both stopped machines correctly returned
-twelve nulls plus «توقف صيانة» rather than zeros.
-
-**The bottleneck is the photograph.** It arrived via WhatsApp — 1600×1200 and hard-
-compressed — hand-held at an angle with the page filling under half the frame, leaving
-**≈54 px per grid row** for handwritten Arabic-Indic digits. A flat, square-on, frame-
-filling shot sent as the original file is ≈250 px per row. Fix the photo before touching
-the prompt again.
-
-**The dangerous failure is row slip, not a misread digit.** A row keeps its correct machine
-and product and takes the numbers from the line below — زراير read 151 (EXT 55L's value)
-while still labelled زراير. The name looks right, so nothing in the preview flags it. That
-is why the prompt now anchors every row to its printed «#» and returns it, and why the
-preview shows «سطر N» — the printed number is the only way to see a slip. It is also why
-the multiplier stays visible: 1062 ÷ 118 = 9 exactly is what caught this one.
-
-The prompt was rewritten around these findings — see the comment above `PROMPT` in
-`lib/sheet-vision.ts`. The old wording said hours run *"left to right in the printed column
-order 8:00 … 7:00"*, which contradicts itself on a right-to-left page: 8:00 is the
-**rightmost** hour column. That one line is worth understanding before editing the prompt.
-
-### Second photo, same page — what actually moves the number
-
-A second shot of the SAME page (flat on a table, whole page in frame, but photographed
-sideways and again via WhatsApp) was scored against a tighter metric: five rows of 09/08
-evening where the sheet value divides cleanly, so the correct paper reading is **known**
-(كرسي 23, غطاء كبير 163, زراير 118, كفر شفاف 80, غطاء برميل احمر stopped).
-
-| Input | Gold score |
-|---|---|
-| Photo 1 (hand-held, angled, WhatsApp) | 2/6 |
-| Photo 2 **sent sideways** | catastrophic — hallucinated 20 rows, duplicated PQ 13 across the blanks |
-| Photo 2, rotation corrected | 2/6 |
-| Photo 2, rotated **+ cropped to the table** | **6/6** |
-| Photo 2, rotated + cropped + one request per row | worse — see below |
-
-Three things this settles:
-
-1. **Framing is the biggest lever, and it is free.** Cropping added no pixels — it only
-   removed the table, the chair and the other papers — and it took the score from 2/5 to
-   4/5. It is also what finally read `163` instead of `63`, an error present in *every*
-   previous run across both photos and all three models. A photo that fills the frame is
-   that crop, taken for nothing.
-2. **Orientation must be right before the model sees it.** A sideways page does not degrade
-   gracefully; it collapses.
-3. **One-request-per-row makes it WORSE.** Tested twice. The model uses neighbouring rows to
-   calibrate digit shapes and row boundaries, and isolating a row throws that away. Do not
-   build the per-row crop pipeline the earlier note suggested — this is the measurement
-   that retires that idea.
-
-4. **There is no row-slip bug.** An earlier revision of this file described a confident
-   mechanism — "rows 3–6 shift up by one, desyncing at a sparse row and resyncing at a
-   marked one". **That was an artifact of the wrong gold values above.** Once زراير is 151
-   and حامل عجله is 118, every row the model returned on the cropped image is correct, and
-   the "shift" disappears. The lesson is about method, not vision: a plausible mechanism was
-   fitted to a pattern that only existed in the yardstick. Re-derive before theorising.
-
-**Reading the paper by eye: the handwriting sits BELOW its printed row label.** Each
-product name in the right-hand column aligns with the band *under* it, not the one beside
-it. That offset is what makes hand-checking a photo error-prone — and it is how the `١٥١`
-misread survived into two documents.
-
-**The lever nobody has pulled yet is a non-WhatsApp original.** Both photos came through
-WhatsApp, which caps the long edge at 1600 px. A phone original is 3000–4000 px. Combined
-with filling the frame, that is roughly 4× the pixels per digit over anything measured here.
-
-### Still open
-
-- The two questions above are unanswered. `docs/QUESTIONS-SHEET-OWNER.md` is written out in
-  Egyptian Arabic for whoever types the sheet; the answers change only DEFAULTS, not code.
-- «الفعلي» is multiplied by the same per-row multiplier as the hours. Whether the paper's
-  «الفعلي» is shots or already pieces is question 3 in that doc — and the totals column is
-  the worst-read part of the page (زراير read 1812 where the sheet says 22,609), so treat
-  a blank there as the safe default and check it by hand.
-- **`GEMINI_API_KEY` was never invalid** — the value in `.env.local` was one 53-character
-  token pasted twice. Halved on 2026-08-10; `gemini-2.5-flash` returns HTTP 200. The old
-  gotcha entry below is kept only so the symptom stays searchable.
+`docs/QUESTIONS-SHEET-OWNER.md` is left in place. It is written in Egyptian Arabic for
+whoever types the sheet and its first question — does the paper count SHOTS and the sheet
+PIECES, ×cavities? — is still unanswered and still matters to «الرئيسي» H and the sheet's
+own «المتوقع». It is a domain question that outlived the feature.
 
 ## Conventions
 

@@ -606,6 +606,13 @@ export async function updateRecord(entity: string, row: number, changes: Record<
 /**
  * Update SEVERAL rows of one tab in a SINGLE bridge POST.
  *
+ * ⚠ NOTHING CALLS THIS TODAY. Its only caller was the paper-photo import,
+ * removed on 2026-08-19. It is kept rather than deleted because the write path
+ * for "two numbers per machine per shift" needs exactly this shape — several
+ * rows of «تسجيل الإنتاج» filled in one request — and because the semantics
+ * below were expensive to establish. If that write path is abandoned too,
+ * delete this with it rather than leaving it to rot.
+ *
  * The bridge takes `updates:[{row,col,value}]` across arbitrary rows, so a
  * ten-row import is one request instead of ten. That matters here for two
  * reasons: `/exec` returns HTML error pages under load (ten sequential POSTs is
