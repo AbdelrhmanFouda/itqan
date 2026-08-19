@@ -5,11 +5,19 @@ import { pd } from "@/lib/i18n.prod";
 import { Stat, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
 import PaperImport from "@/components/dashboard/paper-import";
 
+/** Mirrors lib/hourly.ts HourShape — see there for what each shape means. */
+type HourShape = "empty" | "shiftTotal" | "flat" | "hourly";
+
 type HourlyRow = {
   row: number; date: string; shift: string; machine: string; product: string;
-  hours: (number | null)[]; hoursLogged: number;
+  hours: (number | null)[];
+  /** cells holding a number — NOT hours the machine ran. See lib/hourly.ts. */
+  hourCellsFilled: number;
+  shape: HourShape;
+  shiftMinutes: number | null;
   systemTotal: number | null; actualTotal: number | null;
   expected: number | null; scrap: number | null;
+  expectedSource: "sheet" | "registry" | "none";
   /** counter÷expected, actual÷expected, and the preferred one (actual first). */
   effSystem: number | null; effActual: number | null; efficiency: number | null;
 };
@@ -17,6 +25,19 @@ type Payload = {
   date: string; dates: string[]; hourLabels: string[]; rows: HourlyRow[];
   totals: { system: number; actual: number; scrap: number; machines: number; withActual: number };
 };
+
+/**
+ * What to say instead of "1 hrs" for a whole shift.
+ *
+ * The count of filled cells is a fact about CELLS. Printing it next to the word
+ * "hours" turned it into a claim about TIME, and a shift-total row would have
+ * read "1 hr" for twelve hours of work. Each shape gets its own words.
+ */
+function shapeLabel(r: HourlyRow, t: { hoursLogged: string; shiftTotal: string; flatRow: string }): string {
+  if (r.shape === "shiftTotal") return t.shiftTotal;
+  if (r.shape === "flat") return `${r.hourCellsFilled} ${t.hoursLogged} · ${t.flatRow}`;
+  return `${r.hourCellsFilled} ${t.hoursLogged}`;
+}
 
 const effCls = (e: number | null) =>
   e === null ? "border-gray-200 bg-gray-50 text-gray-400"
@@ -127,19 +148,27 @@ export default function HourlyPage() {
                     </span>
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    {r.product}{r.shift ? ` · ${r.shift}` : ""} · {r.hoursLogged} {t.hoursLogged}
+                    {r.product}{r.shift ? ` · ${r.shift}` : ""} · {shapeLabel(r, t)}
                   </div>
-                  {/* hour strip: 24 slots, height ∝ pieces */}
-                  <div className="flex items-end gap-[2px] h-10 mt-2" dir="ltr">
-                    {r.hours.map((h, i) => (
-                      <div
-                        key={i}
-                        title={`${data.hourLabels[i]}: ${h ?? "—"}`}
-                        className={`flex-1 rounded-sm ${h === null ? "bg-gray-100" : h === 0 ? "bg-gray-300" : "bg-blue-500"}`}
-                        style={{ height: h ? `${Math.max(12, (h / max) * 100)}%` : "6px" }}
-                      />
-                    ))}
-                  </div>
+                  {/* Hour strip — only where the hours mean something. A
+                      shift-total row would otherwise draw one tall bar and 23
+                      gaps, which reads as "this machine ran for one hour". */}
+                  {r.shape === "shiftTotal" ? (
+                    <div className="mt-2 rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                      {t.noHourDetail}
+                    </div>
+                  ) : (
+                    <div className="flex items-end gap-[2px] h-10 mt-2" dir="ltr">
+                      {r.hours.map((h, i) => (
+                        <div
+                          key={i}
+                          title={`${data.hourLabels[i]}: ${h ?? "—"}`}
+                          className={`flex-1 rounded-sm ${h === null ? "bg-gray-100" : h === 0 ? "bg-gray-300" : "bg-blue-500"}`}
+                          style={{ height: h ? `${Math.max(12, (h / max) * 100)}%` : "6px" }}
+                        />
+                      ))}
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
                     <span className="text-gray-700 font-medium">{fmt(r.systemTotal)}</span>
                     {r.actualTotal !== null ? (
@@ -180,20 +209,34 @@ export default function HourlyPage() {
                     <tr key={r.row} className="hover:bg-gray-50/60">
                       <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{r.machine}</td>
                       <td className="px-3 py-2 text-gray-600 max-w-[10rem] truncate">{r.product}</td>
-                      {r.hours.map((h, i) => (
+                      {/* A shift-total row has no hour-of-day information. Spanning
+                          the 24 columns with one labelled cell says that plainly;
+                          printing the number under 08:00 would claim the whole
+                          shift happened in the first hour. */}
+                      {r.shape === "shiftTotal" ? (
                         <td
-                          key={i}
-                          dir="ltr"
-                          className={`px-1 py-2 text-center tabular-nums ${
-                            h === null ? "text-gray-300"
-                            : h === 0 ? "text-gray-400 bg-gray-50"
-                            : h >= max * 0.75 ? "text-blue-900 bg-blue-100 font-medium"
-                            : "text-blue-800 bg-blue-50"
-                          }`}
+                          colSpan={r.hours.length}
+                          className="px-3 py-2 text-center text-gray-500 bg-gray-50/70 italic"
+                          title={t.shiftTotalNote}
                         >
-                          {h === null ? "·" : h}
+                          {t.shiftTotal} · {t.noHourDetail}
                         </td>
-                      ))}
+                      ) : (
+                        r.hours.map((h, i) => (
+                          <td
+                            key={i}
+                            dir="ltr"
+                            className={`px-1 py-2 text-center tabular-nums ${
+                              h === null ? "text-gray-300"
+                              : h === 0 ? "text-gray-400 bg-gray-50"
+                              : h >= max * 0.75 ? "text-blue-900 bg-blue-100 font-medium"
+                              : "text-blue-800 bg-blue-50"
+                            }`}
+                          >
+                            {h === null ? "·" : h}
+                          </td>
+                        ))
+                      )}
                       <td className="px-3 py-2 font-medium text-gray-900">{fmt(r.systemTotal)}</td>
                       <td className="px-3 py-2 text-green-700">{fmt(r.actualTotal)}</td>
                       <td className="px-3 py-2 text-red-500">{r.scrap !== null && r.scrap > 0 ? fmt(r.scrap) : "—"}</td>

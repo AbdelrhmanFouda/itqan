@@ -1,5 +1,9 @@
 import { getRecords } from "@/lib/sheets";
 import { normalizeDate, latinDigits } from "@/lib/dates";
+import { hourShapeOf, hasHourDetail, type HourShape } from "@/lib/hour-shape";
+
+export { hourShapeOf, hasHourDetail };
+export type { HourShape };
 
 /**
  * «تسجيل الإنتاج» — shared loader for the hourly log (long format: one row per
@@ -27,9 +31,21 @@ export const HOUR_LABELS = [
 
 export type HourlyRow = {
   row: number; date: string; shift: string; machine: string; product: string;
-  hours: (number | null)[]; hoursLogged: number;
+  hours: (number | null)[];
+  /**
+   * How many of the 24 cells hold a number. A fact about CELLS, deliberately
+   * not named `hoursLogged` any more: it was being read as "hours this machine
+   * ran", and under the shift-total shape that inference returns 1 for a whole
+   * twelve-hour shift. Nothing may derive a duration from this.
+   */
+  hourCellsFilled: number;
+  shape: HourShape;
+  /** Planned minutes for this machine, from the machines REGISTRY. */
+  shiftMinutes: number | null;
   systemTotal: number | null; actualTotal: number | null;
   expected: number | null; scrap: number | null;
+  /** Where `expected` came from, so the UI can decline to show a bad one. */
+  expectedSource: "sheet" | "registry" | "none";
   effSystem: number | null; effActual: number | null; efficiency: number | null;
 };
 
@@ -43,33 +59,92 @@ function num(v: string | undefined): number | null {
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
-export async function loadHourlyRows(opts: { fresh?: boolean } = {}): Promise<HourlyRow[]> {
-  const { records } = await getRecords("hourly", opts);
+/**
+ * @param opts.shiftMinutesFor resolves a machine label to its planned minutes.
+ *   Supply it from the machines REGISTRY (`buildShiftLengthIndex` in
+ *   lib/run-join.ts) — the same source OEE's planned time already uses, and the
+ *   ONLY honest answer to "how long did this machine run". Omit it and a
+ *   shift-total row simply reports no efficiency, which is correct: without a
+ *   real shift length there is nothing to divide by.
+ */
+export async function loadHourlyRows(
+  opts: { fresh?: boolean; shiftMinutesFor?: (machine: string) => number | null } = {},
+): Promise<HourlyRow[]> {
+  const { records } = await getRecords("hourly", { fresh: opts.fresh });
   return records
     .map((r) => {
       const date = normalizeDate(r.date);
       const hours = HOUR_KEYS.map((k) => num(r[k]));
-      const logged = hours.filter((h) => h !== null).length;
+      const filled = hours.filter((h) => h !== null).length;
+      const shape = hourShapeOf(hours);
+      const machine = (r.machine ?? "").trim();
       const system = num(r.systemTotal) ?? hours.reduce<number>((s, h) => s + (h ?? 0), 0);
       const actual = num(r.actualTotal);
-      const expected = num(r.expected);
-      const effSystem = logged > 0 && expected !== null && expected > 0 ? system / expected : null;
+      const shiftMinutes = opts.shiftMinutesFor?.(machine) ?? null;
+
+      /**
+       * «المتوقع» (AD) is `3600 / cycle * cavities * COUNT(D:AA)` — it scales
+       * with HOW MANY CELLS ARE FILLED. That is fine while a shift is twelve
+       * cells and wrong the moment it is one: a shift-total row makes AD one
+       * hour's expectation while AB holds twelve hours of output, so the
+       * sheet's own efficiency reads about twelve times too high.
+       *
+       * So for a shift-total row AD is rescaled from per-cell to the whole
+       * shift using the REGISTRY's shift length. Every other shape keeps the
+       * sheet's own number untouched, which is what keeps historical rows
+       * rendering exactly as they do today.
+       */
+      const sheetExpected = num(r.expected);
+      let expected = sheetExpected;
+      let expectedSource: HourlyRow["expectedSource"] = sheetExpected === null ? "none" : "sheet";
+      if (shape === "shiftTotal") {
+        /**
+         * NO EFFICIENCY FOR A SHIFT-TOTAL ROW, and this is a deliberate refusal
+         * rather than a gap.
+         *
+         * Measured on 2026-08-09 with the month simulated in the new shape:
+         *  - trusting AD as-is gives 1024%–2628%, because AD scales with
+         *    COUNT(D:AA) and that count is now 1;
+         *  - rescaling AD by the registry's «طول الوردية» gives 83%–241% —
+         *    still exactly TWICE the 24-cell reading on every row.
+         *
+         * The 2× is the real lesson. «تسجيل الإنتاج» has no shift column: BOTH
+         * shifts share one row and are told apart only by which half of the 24
+         * cells carries numbers (see CLAUDE.md, paper-sheet finding 3). So a row
+         * covers one shift or two, and with a single filled cell there is
+         * nothing left to tell which. The registry knows the length of ONE
+         * shift, not how many this row holds.
+         *
+         * Any number here would be a guess between 12 and 24 hours. Availability
+         * and Performance on /performance are unaffected and remain correct —
+         * they key off «الإنتاج», which DOES carry a shift per row.
+         */
+        expected = null;
+        expectedSource = "none";
+      }
+
+      const effSystem = filled > 0 && expected !== null && expected > 0 ? system / expected : null;
       const effActual = actual !== null && expected !== null && expected > 0 ? actual / expected : null;
       return {
         row: r.row,
         date,
         shift: (r.shift ?? "").trim(),
-        machine: (r.machine ?? "").trim(),
+        machine,
         product: (r.product ?? "").trim(),
         hours,
-        hoursLogged: logged,
-        systemTotal: logged > 0 ? system : null,
+        hourCellsFilled: filled,
+        shape,
+        shiftMinutes,
+        systemTotal: filled > 0 ? system : null,
         actualTotal: actual,
         expected,
+        expectedSource,
         effSystem,
         effActual,
         efficiency: effActual ?? effSystem,
-        scrap: logged > 0 && actual !== null ? Math.max(0, system - actual) : null,
+        // The PAIR that Quality depends on. One filled cell is enough — this is
+        // exactly what must survive the move to two numbers per shift.
+        scrap: filled > 0 && actual !== null ? Math.max(0, system - actual) : null,
       };
     })
     .filter((r) => Boolean(r.date) && Boolean(r.machine));
