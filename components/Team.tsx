@@ -20,7 +20,7 @@ export default function Team() {
   if (!tr.team.members.length) return null;
 
   return (
-    <section id="team" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
+    <section id="team" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6">
@@ -29,9 +29,9 @@ export default function Team() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-16"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "مهندسونا" : "Our Engineers"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.team.title}</h2>
@@ -50,7 +50,7 @@ export default function Team() {
               key={i}
               variants={fadeInUp}
               whileHover={{ y: -6, transition: { duration: 0.25 } }}
-              className="group bg-gray-900 rounded-2xl p-6 border border-white/5 hover:border-blue-500/30 transition-colors"
+              className="group bg-white/5 rounded-2xl p-6 border border-white/10 hover:border-blue-500/40 transition-colors"
             >
               {/* Avatar */}
               <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${avatarColors[i]} p-0.5 mb-4`}>
@@ -63,20 +63,20 @@ export default function Team() {
               <p className="text-xs text-blue-400 font-medium mt-0.5 mb-3">{member.role}</p>
               <p className="text-sm text-gray-500 leading-relaxed mb-4">{member.bio}</p>
 
-              <div className="space-y-2 border-t border-white/5 pt-4">
+              <div className="space-y-1 border-t border-white/5 pt-3">
                 <a
                   href={`mailto:${member.email}`}
-                  className="flex items-center gap-2 text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                  className="flex items-center gap-2 py-1.5 text-xs text-gray-500 hover:text-blue-400 transition-colors min-w-0"
                 >
                   <Mail size={12} className="shrink-0" />
-                  <span className="truncate">{member.email}</span>
+                  <span className="truncate min-w-0" dir="ltr">{member.email}</span>
                 </a>
                 <a
                   href={`tel:${member.phone.replace(/\s/g, "")}`}
-                  className="flex items-center gap-2 text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                  className="flex items-center gap-2 py-1.5 text-xs text-gray-500 hover:text-blue-400 transition-colors"
                 >
                   <Phone size={12} className="shrink-0" />
-                  <span>{member.phone}</span>
+                  <span dir="ltr">{member.phone}</span>
                 </a>
               </div>
             </motion.div>

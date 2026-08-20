@@ -19,7 +19,7 @@ export default function Services() {
   const isAr = lang === "ar";
 
   return (
-    <section id="services" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
+    <section id="services" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-950 relative overflow-hidden">
       {/* Subtle divider glow */}
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
 
@@ -29,9 +29,9 @@ export default function Services() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-16"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "ما نقدمه" : "What We Do"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.services.title}</h2>
@@ -52,7 +52,7 @@ export default function Services() {
                 key={i}
                 variants={fadeInUp}
                 whileHover={{ y: -8, transition: { duration: 0.25 } }}
-                className="group relative bg-gray-900 rounded-2xl p-6 border border-white/5 hover:border-blue-500/30 transition-colors cursor-default overflow-hidden"
+                className="group relative bg-white/5 rounded-2xl p-6 border border-white/10 hover:border-blue-500/40 transition-colors cursor-default overflow-hidden"
               >
                 {/* Card glow on hover */}
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-600/0 to-blue-600/0 group-hover:from-blue-600/5 group-hover:to-transparent transition-all duration-500 rounded-2xl" />

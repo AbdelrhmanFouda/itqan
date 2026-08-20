@@ -242,13 +242,19 @@ export default function JobDetailPage() {
 
   if (notFound) {
     return (
-      <div className="max-w-3xl">
-        <Link href="/dashboard/jobs" className="text-sm text-blue-600 hover:underline">{p.common.back}</Link>
+      <div className="max-w-3xl" dir={isAr ? "rtl" : "ltr"}>
+        <Link href="/dashboard/jobs" className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">{p.common.back}</Link>
         <EmptyState text={p.jobs.empty} />
       </div>
     );
   }
-  if (!job || runs === null) return <Spinner text={p.common.loading} />;
+  if (!job || runs === null) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={p.common.loading} />
+      </div>
+    );
+  }
 
   const good = job.produced;
   const scrap = job.scrapped;
@@ -261,21 +267,21 @@ export default function JobDetailPage() {
 
   return (
     <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
-      <Link href="/dashboard/jobs" className="text-sm text-blue-600 hover:underline">{p.common.back}</Link>
+      <Link href="/dashboard/jobs" className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">{p.common.back}</Link>
 
       {/* Header. `flex-wrap` + `w-full sm:w-auto` on the controls: title, status
           select and two icon buttons cannot share one 375px line, so on a phone
           the controls drop to their own full-width row (the select stretches,
           the buttons keep their size) instead of pushing the page sideways. */}
-      <div className={`flex flex-wrap items-start justify-between gap-3 mt-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <div className={`min-w-0 ${isAr ? "text-right" : ""}`}>
-          <div className={`flex flex-wrap items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3 mt-3 mb-1">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold text-gray-900 break-all">{job.code}</h1>
             <Pill text={localize(job.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(job.priority)} />
           </div>
           <p className="text-sm text-gray-500 mt-1">{[job.client, job.product].filter(Boolean).join(" · ")}</p>
         </div>
-        <div className={`flex items-center gap-1.5 w-full sm:w-auto ${isAr ? "flex-row-reverse" : ""}`}>
+        <div className="flex items-center gap-2.5 sm:gap-1.5 w-full sm:w-auto">
           <select
             value={job.status}
             onChange={(e) => handleStatus(e.target.value)}
@@ -285,34 +291,44 @@ export default function JobDetailPage() {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          <button onClick={openEdit} className="shrink-0 text-gray-400 hover:text-blue-600 transition-colors p-2" title={p.jobs.edit}>
+          <button
+            onClick={openEdit}
+            className="shrink-0 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded-lg p-2 text-gray-400 hover:text-blue-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            title={p.jobs.edit}
+            aria-label={p.jobs.edit}
+          >
             <Pencil size={16} />
           </button>
-          <button onClick={handleDeleteJob} className="shrink-0 text-gray-300 hover:text-red-500 transition-colors p-2" title={p.common.delete}>
+          <button
+            onClick={handleDeleteJob}
+            className="shrink-0 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded-lg p-2 text-gray-300 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+            title={p.common.delete}
+            aria-label={p.common.delete}
+          >
             <Trash2 size={16} />
           </button>
         </div>
       </div>
 
       {/* Work order — أمر الشغل (matches the paper form; Master fills the standards) */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4 mb-6">
-        <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
-          <h2 className="font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
+      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mt-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
           {/* flex-wrap: the Arabic edit-standard label is long, and together
-              with Print the pair cannot share one phone line. min-h-9 keeps
-              both tappable with a thumb. */}
-          <div className={`flex flex-wrap items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+              with Print the pair cannot share one phone line. min-h-11 on the
+              phone keeps both tappable with a thumb. */}
+          <div className="flex flex-wrap items-center gap-2">
             {standard && (
               <button
                 onClick={openStd}
-                className="min-h-9 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
+                className="min-h-11 sm:min-h-9 inline-flex items-center text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 transition-colors print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
                 {p.jobs.editStandard}
               </button>
             )}
             <button
               onClick={() => window.print()}
-              className="min-h-9 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
+              className="min-h-11 sm:min-h-9 inline-flex items-center text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 transition-colors print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               {isAr ? "طباعة" : "Print"}
             </button>
@@ -375,11 +391,11 @@ export default function JobDetailPage() {
       </div>
 
       {/* Progress */}
-      <div className={`flex items-center gap-3 mb-6 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className="flex items-center gap-3 mb-6">
         <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden" dir="ltr">
           <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
         </div>
-        <span className="text-xs text-gray-500 whitespace-nowrap" dir="ltr">
+        <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums" dir="ltr">
           {qty > 0
             ? `${fmt(good)} / ${fmt(qty)} ${p.jobs.pcs} (${pct.toFixed(0)}%)`
             : `${fmt(good)} ${p.jobs.pcs}`}
@@ -387,16 +403,16 @@ export default function JobDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <Stat label={p.runs.totalGood} value={fmt(good)} tone="green" />
         <Stat label={p.runs.totalScrap} value={fmt(scrap)} tone={scrap > 0 ? "red" : undefined} />
         <Stat label={p.runs.scrapRate} value={`${scrapRate}%`} tone={Number(scrapRate) > 3 ? "amber" : undefined} />
-        <Stat label={p.runs.totalDowntime} value={`${fmt(downtime)} ${p.overview.minutes}`} />
+        <Stat label={p.runs.totalDowntime} value={fmt(downtime)} sub={p.overview.minutes} />
       </div>
 
       {/* Runs credited to this job */}
-      <div className={`flex flex-wrap items-center justify-between gap-2 mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h2 className="font-semibold text-gray-900">{p.jobs.runsForJob}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h2 className="text-sm font-semibold text-gray-900">{p.jobs.runsForJob}</h2>
         <Btn onClick={openLog}><Plus size={15} /> {p.runs.add}</Btn>
       </div>
 
@@ -407,23 +423,23 @@ export default function JobDetailPage() {
         {/* Phone: one card per run. Seven columns including a delete button;
             on a 375px screen the delete sat off the right edge, which is both
             unreachable and — once found by scrolling — easy to hit by accident. */}
-        <div className="sm:hidden bg-white border border-gray-200 rounded-xl divide-y divide-gray-50">
+        <div className="sm:hidden bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
           {runs.map((r) => (
             <div key={r.id} className="px-4 py-3 space-y-1.5">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium text-gray-900">{r.date}</div>
+                  <div className="font-medium text-gray-900 tabular-nums">{r.date}</div>
                   <div className="text-xs text-gray-500 truncate">{r.machine || "—"}</div>
                 </div>
                 <button
                   onClick={() => handleDeleteRun(r.id)}
                   aria-label={p.common.delete}
-                  className="shrink-0 p-2 -m-1 text-gray-300 hover:text-red-500 transition-colors"
+                  className="shrink-0 p-2.5 -m-1.5 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                 >
                   <Trash2 size={16} />
                 </button>
               </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums">
                 <span className="text-green-600 font-medium">{p.runs.good}: {fmt(r.goodUnits)}</span>
                 {r.scrapUnits ? <span className="text-red-500">{p.runs.scrap}: {fmt(r.scrapUnits)}</span> : null}
                 {r.downtimeMin ? (
@@ -440,42 +456,48 @@ export default function JobDetailPage() {
           ))}
         </div>
 
-        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-          <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
-            <thead>
-              <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-                <th className="text-start font-medium px-4 py-3">{p.runs.date}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.machine}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.good}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.scrap}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.downtime}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.operator}</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {runs.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50/60">
-                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.date}</td>
-                  <td className="px-4 py-3 text-gray-500">{r.machine || "—"}</td>
-                  <td className="px-4 py-3 text-green-600 font-medium">{fmt(r.goodUnits)}</td>
-                  <td className="px-4 py-3 text-red-500">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {r.downtimeMin ? `${fmt(r.downtimeMin)} ${p.overview.minutes}` : "—"}
-                    {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"
-                      ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
-                      : ""}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">{r.operator || "—"}</td>
-                  <td className="px-4 py-3 text-end">
-                    <button onClick={() => handleDeleteRun(r.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                      <Trash2 size={15} />
-                    </button>
-                  </td>
+        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50/50">
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.date}</th>
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.machine}</th>
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.good}</th>
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.scrap}</th>
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.downtime}</th>
+                  <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.operator}</th>
+                  <th className="px-4 py-2.5" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {runs.map((r) => (
+                  <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap tabular-nums">{r.date}</td>
+                    <td className="px-4 py-3 text-gray-500">{r.machine || "—"}</td>
+                    <td className="px-4 py-3 text-green-600 font-medium tabular-nums">{fmt(r.goodUnits)}</td>
+                    <td className="px-4 py-3 text-red-500 tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">
+                      {r.downtimeMin ? `${fmt(r.downtimeMin)} ${p.overview.minutes}` : "—"}
+                      {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"
+                        ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                        : ""}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{r.operator || "—"}</td>
+                    <td className="px-4 py-3 text-end">
+                      <button
+                        onClick={() => handleDeleteRun(r.id)}
+                        aria-label={p.common.delete}
+                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         </>
       )}
@@ -525,7 +547,7 @@ export default function JobDetailPage() {
           <Field label={p.runs.note}>
             <textarea className={`${inputCls} resize-none`} rows={2} value={form.note} onChange={(e) => set("note", e.target.value)} />
           </Field>
-          <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
             <Btn type="submit" disabled={saving}>{p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
           </div>
@@ -605,7 +627,7 @@ export default function JobDetailPage() {
             <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.notes ?? ""} onChange={(e) => setEdit("notes", e.target.value)} />
           </Field>
           {editErr && <p className="text-xs text-red-600 mt-1">{p.jobs.saveFailed}</p>}
-          <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
             <Btn type="submit" disabled={editSaving}>{p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setEditOpen(false)}>{p.common.cancel}</Btn>
           </div>
@@ -643,7 +665,7 @@ export default function JobDetailPage() {
                 {stdErr === "identity" ? p.jobs.masterIdentity : p.jobs.saveFailed}
               </p>
             )}
-            <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+            <div className="flex flex-wrap items-center gap-3 mt-2">
               <Btn type="submit" disabled={stdSaving}>{p.common.save}</Btn>
               <Btn type="button" variant="outline" onClick={() => setStdOpen(false)}>{p.common.cancel}</Btn>
             </div>
@@ -658,7 +680,7 @@ function Detail({ label, value, danger }: { label: string; value: string; danger
   return (
     <div>
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-      <p className={`font-medium ${danger ? "text-red-600" : "text-gray-900"}`}>{value}</p>
+      <p className={`font-medium tabular-nums ${danger ? "text-red-600" : "text-gray-900"}`}>{value}</p>
     </div>
   );
 }

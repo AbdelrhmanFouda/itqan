@@ -28,7 +28,7 @@ export default function Contact() {
   }
 
   return (
-    <section id="contact" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-900 relative overflow-hidden">
+    <section id="contact" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-900 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
       {/* Glow */}
       <div className="absolute inset-0 pointer-events-none">
@@ -41,9 +41,9 @@ export default function Contact() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-12"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "ابدأ المشروع" : "Start a Project"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
@@ -74,14 +74,14 @@ export default function Contact() {
                 <input
                   name="name"
                   required
-                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none transition-colors"
+                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.company}</label>
                 <input
                   name="company"
-                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none transition-colors"
+                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
             </motion.div>
@@ -91,7 +91,7 @@ export default function Contact() {
                 <input
                   name="phone"
                   type="tel"
-                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none transition-colors"
+                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
               <div>
@@ -99,7 +99,7 @@ export default function Contact() {
                 <input
                   name="email"
                   type="email"
-                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none transition-colors"
+                  className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
             </motion.div>
@@ -107,7 +107,7 @@ export default function Contact() {
               <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.type}</label>
               <select
                 name="inquiry_type"
-                className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm focus:outline-none transition-colors"
+                className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm focus:outline-none transition-colors"
               >
                 {tr.contact.types.map((type) => (
                   <option key={type} value={type} className="bg-gray-950">{type}</option>
@@ -120,14 +120,14 @@ export default function Contact() {
                 name="message"
                 rows={4}
                 required
-                className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none transition-colors resize-none"
+                className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors resize-y"
               />
             </motion.div>
             <motion.div variants={fadeInUp}>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-medium transition-all hover:shadow-lg hover:shadow-blue-500/25"
+                className="w-full group flex items-center justify-center gap-2 min-h-12 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-medium transition-colors hover:shadow-lg hover:shadow-blue-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

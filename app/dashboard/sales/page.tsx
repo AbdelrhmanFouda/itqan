@@ -47,7 +47,7 @@ export default function SalesPage() {
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
   const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? "ar-EG" : "en-US") : "—");
 
-  if (inquiries === null) return <Spinner text={a.sales.title} />;
+  if (inquiries === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
   const openJobs = jobs.filter((j) => !DONE.includes(j.status));
   const byClient: Record<string, Job[]> = {};
@@ -59,24 +59,26 @@ export default function SalesPage() {
 
   return (
     <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.sales.title}</h1>
-      <p className="text-sm text-gray-500 mb-8">{a.sales.subtitle}</p>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.sales.title}</h1>
+        <p className="text-sm text-gray-500">{a.sales.subtitle}</p>
+      </div>
 
       {/* Incoming inquiries */}
-      <h2 className="font-semibold text-gray-900 mb-3">{a.sales.inquiries}</h2>
+      <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.sales.inquiries}</h2>
       {inquiries.length === 0 ? (
         <EmptyState text={a.sales.noInquiries} />
       ) : (
-        <div className="grid sm:grid-cols-2 gap-4 mb-10">
+        <div className="grid sm:grid-cols-2 gap-4 mb-8 sm:mb-10">
           {inquiries.map((q) => (
-            <div key={q.id} className="bg-white border border-gray-200 rounded-xl p-5">
-              <div className={`flex items-start justify-between gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                <div className={isAr ? "text-right" : ""}>
+            <div key={q.id} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3 min-w-0">
+                <div className="min-w-0">
                   <p className="font-semibold text-gray-900">{q.company || q.name || "—"}</p>
-                  <p className="text-xs text-gray-500">{q.name}{q.email ? ` · ${q.email}` : ""}{q.phone ? ` · ${q.phone}` : ""}</p>
+                  <p className="text-xs text-gray-500 break-words [overflow-wrap:anywhere]">{q.name}{q.email ? ` · ${q.email}` : ""}{q.phone ? ` · ${q.phone}` : ""}</p>
                 </div>
                 {q.inquiryType ? (
-                  <span className="text-xs px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 whitespace-nowrap shrink-0">
+                  <span className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 whitespace-nowrap shrink-0">
                     {q.inquiryType}
                   </span>
                 ) : null}
@@ -89,69 +91,71 @@ export default function SalesPage() {
       )}
 
       {/* Open orders by customer */}
-      <h2 className="font-semibold text-gray-900 mb-3">{a.sales.demand}</h2>
+      <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.sales.demand}</h2>
       {clients.length === 0 ? (
         <EmptyState text={a.sales.noOrders} />
       ) : (
         <div className="space-y-5">
           {clients.map((client) => (
             <div key={client} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              <div className={`px-5 py-3 border-b border-gray-100 font-semibold text-gray-900 ${isAr ? "text-right" : ""}`}>
+              <div className="px-4 sm:px-5 py-3 border-b border-gray-100 font-semibold text-gray-900">
                 {client}
               </div>
               {/* Phone: one card per order. Seven columns cannot be read at
                   375px, and the two numbers that matter (remaining, due) are
                   the ones furthest right — i.e. the first to scroll away. */}
-              <div className="sm:hidden divide-y divide-gray-50">
+              <div className="sm:hidden divide-y divide-gray-100">
                 {byClient[client].map((j) => {
                   const made = produced[j.id] ?? 0;
                   const remaining = Math.max(0, (Number(j.qtyOrdered) || 0) - made);
                   return (
                     <div key={j.id} className="px-4 py-3 space-y-1.5">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-3 min-w-0">
                         <div className="min-w-0">
-                          <div className="font-medium text-gray-900">{j.code}</div>
+                          <div className="font-medium text-gray-900 truncate">{j.code}</div>
                           <div className="text-xs text-gray-500 truncate">{j.product}</div>
                         </div>
-                        <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
+                        <span className="shrink-0">
+                          <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
+                        </span>
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                        <span className="text-gray-700">{a.sales.ordered}: {fmt(Number(j.qtyOrdered) || 0)}</span>
-                        <span className="text-green-600">{a.sales.produced}: {fmt(made)}</span>
-                        <span className="text-gray-900 font-medium">{a.sales.remaining}: {fmt(remaining)}</span>
+                        <span className="text-gray-700 tabular-nums">{a.sales.ordered}: {fmt(Number(j.qtyOrdered) || 0)}</span>
+                        <span className="text-green-600 tabular-nums">{a.sales.produced}: {fmt(made)}</span>
+                        <span className="text-gray-900 font-medium tabular-nums">{a.sales.remaining}: {fmt(remaining)}</span>
                       </div>
-                      <div className="text-xs text-gray-500">{a.sales.due}: {j.dueDate || "—"}</div>
+                      <div className="text-xs text-gray-500 tabular-nums">{a.sales.due}: {j.dueDate || "—"}</div>
                     </div>
                   );
                 })}
               </div>
 
               <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
+                <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-                      <th className="text-start font-medium px-5 py-2.5">{p.jobs.code}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{p.jobs.part}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{a.sales.ordered}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{a.sales.produced}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{a.sales.remaining}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{a.sales.due}</th>
-                      <th className="text-start font-medium px-5 py-2.5">{a.sales.status}</th>
+                    <tr className="border-b border-gray-200 bg-gray-50/50">
+                      <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.jobs.code}</th>
+                      <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.jobs.part}</th>
+                      <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.sales.ordered}</th>
+                      <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.sales.produced}</th>
+                      <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.sales.remaining}</th>
+                      <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.sales.due}</th>
+                      <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.sales.status}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50">
+                  <tbody className="divide-y divide-gray-100">
                     {byClient[client].map((j) => {
                       const made = produced[j.id] ?? 0;
                       const remaining = Math.max(0, (Number(j.qtyOrdered) || 0) - made);
                       return (
-                        <tr key={j.id} className="hover:bg-gray-50/60">
-                          <td className="px-5 py-2.5 font-medium text-gray-900">{j.code}</td>
-                          <td className="px-5 py-2.5 text-gray-600">{j.product}</td>
-                          <td className="px-5 py-2.5 text-gray-700">{fmt(Number(j.qtyOrdered) || 0)}</td>
-                          <td className="px-5 py-2.5 text-green-600">{fmt(made)}</td>
-                          <td className="px-5 py-2.5 text-gray-700">{fmt(remaining)}</td>
-                          <td className="px-5 py-2.5 text-gray-500 whitespace-nowrap">{j.dueDate || "—"}</td>
-                          <td className="px-5 py-2.5">
+                        <tr key={j.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-4 py-3 font-medium text-gray-900">{j.code}</td>
+                          <td className="px-4 py-3 text-gray-600">{j.product}</td>
+                          <td className="px-4 py-3 text-gray-700 text-end tabular-nums">{fmt(Number(j.qtyOrdered) || 0)}</td>
+                          <td className="px-4 py-3 text-green-600 text-end tabular-nums">{fmt(made)}</td>
+                          <td className="px-4 py-3 text-gray-700 text-end tabular-nums">{fmt(remaining)}</td>
+                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums">{j.dueDate || "—"}</td>
+                          <td className="px-4 py-3">
                             <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
                           </td>
                         </tr>

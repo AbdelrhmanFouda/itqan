@@ -46,25 +46,33 @@ export default function ApprovalsPage() {
   const statusLabel = (s: string) =>
     s === "approved" ? a.approvals.statusApproved : s === "rejected" ? a.approvals.statusRejected : a.approvals.statusPending;
 
-  if (users === null) return <Spinner text={a.approvals.title} />;
+  if (users === null) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+      </div>
+    );
+  }
   const pending = users.filter((u) => u.status === "pending");
 
   return (
     <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.approvals.title}</h1>
-      <p className="text-sm text-gray-500 mb-8">{a.approvals.subtitle}</p>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.approvals.title}</h1>
+        <p className="text-sm text-gray-500">{a.approvals.subtitle}</p>
+      </div>
 
       {/* Pending queue */}
-      <h2 className="font-semibold text-gray-900 mb-3">{a.approvals.pendingQueue}</h2>
+      <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.approvals.pendingQueue}</h2>
       {pending.length === 0 ? (
         <EmptyState text={a.approvals.noPending} />
       ) : (
         <div className="space-y-3 mb-10">
           {pending.map((u) => (
-            <div key={u.uid} className="bg-white border border-gray-200 rounded-xl px-5 py-4">
-              <div className={`flex flex-wrap items-center justify-between gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                <div className={isAr ? "text-right" : ""}>
-                  <p className="font-medium text-gray-900">{u.displayName || u.email}</p>
+            <div key={u.uid} className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{u.displayName || u.email}</p>
                   <p className="text-xs text-gray-500">
                     {u.email}
                     {u.requestedRole && u.requestedRole !== "owner"
@@ -72,7 +80,7 @@ export default function ApprovalsPage() {
                       : ""}
                   </p>
                 </div>
-                <div className={`flex items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-gray-400">{a.approvals.asRole}</span>
                   <select
                     className={`${inputCls} w-auto`}
@@ -93,17 +101,17 @@ export default function ApprovalsPage() {
       )}
 
       {/* All users */}
-      <h2 className="font-semibold text-gray-900 mb-3">{a.approvals.allUsers}</h2>
+      <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.approvals.allUsers}</h2>
       {/* Phone: one card per user. The table below carries four columns
           including a select and a button, which on a 375px screen means
           sideways scrolling to reach the control you came for. */}
-      <div className="sm:hidden space-y-2">
+      <div className="sm:hidden space-y-3">
         {users.map((u) => {
           const isSelf = u.uid === user?.uid;
           const isOwner = u.role === "owner";
           return (
             <div key={u.uid} className="bg-white border border-gray-200 rounded-xl px-4 py-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium text-gray-900 truncate">
                     {u.displayName || u.email}
@@ -136,22 +144,23 @@ export default function ApprovalsPage() {
         })}
       </div>
 
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
+      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
           <thead>
-            <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-              <th className="text-start font-medium px-4 py-3">{a.auth.email}</th>
-              <th className="text-start font-medium px-4 py-3">{a.approvals.role}</th>
-              <th className="text-start font-medium px-4 py-3">{a.approvals.status}</th>
-              <th className="px-4 py-3" />
+            <tr className="border-b border-gray-200 bg-gray-50/50">
+              <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.auth.email}</th>
+              <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.approvals.role}</th>
+              <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.approvals.status}</th>
+              <th className="px-4 py-2.5" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-gray-100">
             {users.map((u) => {
               const isSelf = u.uid === user?.uid;
               const isOwner = u.role === "owner";
               return (
-                <tr key={u.uid} className="hover:bg-gray-50/60">
+                <tr key={u.uid} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-4 py-3">
                     <span className="font-medium text-gray-900">{u.displayName || u.email}</span>
                     {isSelf ? <span className="text-xs text-gray-400"> ({a.approvals.you})</span> : null}
@@ -185,6 +194,7 @@ export default function ApprovalsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

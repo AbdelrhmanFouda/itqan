@@ -60,7 +60,7 @@ export default function Navbar() {
               className="text-sm text-gray-400 hover:text-white transition-colors relative group"
             >
               {link.label}
-              <span className="absolute -bottom-0.5 left-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
+              <span className="absolute -bottom-0.5 start-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
             </a>
           ))}
           <Link
@@ -68,25 +68,30 @@ export default function Navbar() {
             className="text-sm text-gray-400 hover:text-white transition-colors relative group"
           >
             {tr.nav.dashboard}
-            <span className="absolute -bottom-0.5 left-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
+            <span className="absolute -bottom-0.5 start-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
           </Link>
           <button
             onClick={() => setLang(isAr ? "en" : "ar")}
-            className="text-sm px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 text-gray-300 hover:text-white hover:bg-blue-500/10 transition-all font-medium"
+            className="text-sm px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 text-gray-300 hover:text-white hover:bg-blue-500/10 transition-all font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             {isAr ? "EN" : "عربي"}
           </button>
         </div>
 
         {/* Mobile */}
-        <div className="flex md:hidden items-center gap-3">
+        <div className="flex md:hidden items-center gap-2">
           <button
             onClick={() => setLang(isAr ? "en" : "ar")}
-            className="text-sm px-2.5 py-1 rounded border border-white/10 text-gray-300 font-medium"
+            className="text-sm px-3 py-2 min-h-11 rounded border border-white/10 text-gray-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             {isAr ? "EN" : "عربي"}
           </button>
-          <button onClick={() => setOpen(!open)} className="text-white">
+          <button
+            onClick={() => setOpen(!open)}
+            aria-label={open ? (isAr ? "إغلاق القائمة" : "Close menu") : (isAr ? "القائمة" : "Menu")}
+            aria-expanded={open}
+            className="text-white p-2.5 -me-2.5 min-h-11 min-w-11 inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-lg"
+          >
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
@@ -102,13 +107,13 @@ export default function Navbar() {
             transition={{ duration: 0.25 }}
             className="md:hidden bg-gray-950/95 backdrop-blur-xl border-t border-white/5 overflow-hidden"
           >
-            <div className="px-6 py-5 flex flex-col gap-4">
+            <div className="px-6 py-4 flex flex-col gap-1">
               {navLinks.map((link) => (
                 <a
                   key={link.href}
                   href={link.href}
                   onClick={() => setOpen(false)}
-                  className="text-sm text-gray-300 hover:text-white transition-colors"
+                  className="text-sm text-gray-300 hover:text-white transition-colors py-2.5 min-h-11 flex items-center"
                 >
                   {link.label}
                 </a>
@@ -116,7 +121,7 @@ export default function Navbar() {
               <Link
                 href="/dashboard"
                 onClick={() => setOpen(false)}
-                className="text-sm text-gray-300 hover:text-white transition-colors"
+                className="text-sm text-gray-300 hover:text-white transition-colors py-2.5 min-h-11 flex items-center"
               >
                 {tr.nav.dashboard}
               </Link>

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
@@ -100,7 +101,7 @@ export default function SheetSection({
     }
   }
 
-  if (data === null) return <Spinner text={m.loading} />;
+  if (data === null) return <div className="flex justify-center py-16"><Spinner text={m.loading} /></div>;
 
   const t = isAr ? title.ar : title.en;
   const sub = isAr ? subtitle.ar : subtitle.en;
@@ -124,10 +125,15 @@ export default function SheetSection({
 
   return (
     <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
-      <div className={`flex items-center gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className="flex items-center gap-3 mb-1">
         <h1 className="text-2xl font-bold text-gray-900">{t}</h1>
-        <span className="text-sm text-gray-400">{filtered.length}</span>
-        <button onClick={() => load()} className={`text-xs text-blue-600 hover:underline ${isAr ? "mr-auto" : "ml-auto"}`}>{m.refresh}</button>
+        <span className="text-sm text-gray-400 tabular-nums">{filtered.length}</span>
+        <button
+          onClick={() => load()}
+          className="ms-auto inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+        >
+          {m.refresh}
+        </button>
       </div>
       <p className="text-sm text-gray-500 mb-6">{sub}</p>
 
@@ -140,49 +146,64 @@ export default function SheetSection({
       ) : (
         <>
         {/* Phone: stacked cards (tap a card to open details) */}
-        <div className="sm:hidden space-y-2" dir={isAr ? "rtl" : "ltr"}>
+        <div className="sm:hidden space-y-3">
           {filtered.map((rec) => (
             <button
               key={rec.row}
               onClick={() => openEdit(rec)}
-              className="w-full text-start bg-white border border-gray-200 rounded-xl px-4 py-3 active:bg-gray-50 transition-colors"
+              className="w-full text-start bg-white border border-gray-200 rounded-xl p-4 active:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
             >
-              <div className="font-medium text-gray-900 leading-snug">{rec[cols[0]] || "—"}</div>
-              {cols.slice(1).map((f) =>
-                rec[f] ? (
-                  <div key={f} className="flex items-baseline justify-between gap-3 text-xs mt-1">
-                    <span className="text-gray-400 shrink-0">{label(f)}</span>
-                    <span className="text-gray-600 truncate">{rec[f]}</span>
-                  </div>
-                ) : null
+              <div className="flex items-center justify-between gap-3 min-w-0">
+                <span className="font-medium text-gray-900 leading-snug min-w-0 truncate">{rec[cols[0]] || "—"}</span>
+                {isAr ? (
+                  <ChevronLeft size={14} className="text-gray-300 shrink-0" />
+                ) : (
+                  <ChevronRight size={14} className="text-gray-300 shrink-0" />
+                )}
+              </div>
+              {cols.slice(1).some((f) => rec[f]) && (
+                <div className="mt-2 space-y-1 text-sm">
+                  {cols.slice(1).map((f) =>
+                    rec[f] ? (
+                      <div key={f} className="flex items-baseline justify-between gap-3">
+                        <span className="text-gray-400 truncate max-w-[45%]">{label(f)}</span>
+                        <span className="text-gray-600 min-w-0 text-end truncate">{rec[f]}</span>
+                      </div>
+                    ) : null
+                  )}
+                </div>
               )}
             </button>
           ))}
         </div>
-        {/* Tablet/desktop: the table, unchanged */}
-        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-          <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
-            <thead>
-              <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-                {cols.map((f) => (<th key={f} className="text-start font-medium px-4 py-3">{label(f)}</th>))}
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map((rec) => (
-                <tr key={rec.row} className="hover:bg-gray-50/60">
-                  {cols.map((f, i) => (
-                    <td key={f} className={`px-4 py-3 ${i === 0 ? "font-medium text-gray-900" : "text-gray-600"}`}>
-                      {rec[f] || "—"}
-                    </td>
+        {/* Tablet/desktop: the table */}
+        <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50/50">
+                  {cols.map((f) => (
+                    <th key={f} className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{label(f)}</th>
                   ))}
-                  <td className="px-4 py-3 text-end">
-                    <Btn variant="outline" onClick={() => openEdit(rec)}>{m.details}</Btn>
-                  </td>
+                  <th className="px-4 py-2.5" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map((rec) => (
+                  <tr key={rec.row} className="hover:bg-gray-50/50 transition-colors">
+                    {cols.map((f, i) => (
+                      <td key={f} className={`px-4 py-3 ${i === 0 ? "font-medium text-gray-900" : "text-gray-700"}`}>
+                        {rec[f] || "—"}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 text-end">
+                      <Btn variant="outline" onClick={() => openEdit(rec)}>{m.details}</Btn>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         </>
       )}
@@ -216,7 +237,7 @@ export default function SheetSection({
               </Field>
             ))}
             {saveMsg && <p className="text-sm text-red-600 mb-2">{saveMsg}</p>}
-            <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+            <div className="flex flex-wrap items-center gap-3 mt-2">
               <Btn type="submit" disabled={saving || !data.writable}>{saving ? m.saving : m.save}</Btn>
               <Btn type="button" variant="outline" onClick={() => setEditing(null)}>{m.cancel}</Btn>
             </div>

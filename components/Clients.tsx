@@ -24,7 +24,7 @@ export default function Clients() {
   const isAr = lang === "ar";
 
   return (
-    <section id="clients" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
+    <section id="clients" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6">
@@ -33,9 +33,9 @@ export default function Clients() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-16"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "شركاؤنا" : "Our Clients"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.clients.title}</h2>
@@ -56,7 +56,7 @@ export default function Clients() {
                 key={c.en}
                 variants={fadeInUp}
                 whileHover={{ y: -6, transition: { duration: 0.25 } }}
-                className="group bg-gray-900 rounded-2xl border border-white/5 hover:border-blue-500/20 p-5 flex flex-col items-center justify-center text-center gap-3 transition-colors"
+                className="group bg-white/5 rounded-2xl border border-white/10 hover:border-blue-500/40 p-5 flex flex-col items-center justify-center text-center gap-3 transition-colors"
               >
                 <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-white/10 flex items-center justify-center text-xl font-bold text-blue-300 group-hover:scale-110 transition-transform">
                   {name.charAt(0)}

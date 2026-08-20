@@ -123,7 +123,7 @@ export default function IssuesPage() {
       // pill stays small so the list still scans, but an invisible ::after
       // grows the hit area to ~46px rather than making the badge look like a
       // button. Same trick suits any small pill that is actually tappable.
-      className={`relative shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap transition-colors after:content-[''] after:absolute after:-inset-2.5 sm:after:hidden ${statusCls(issue.status)}`}
+      className={`relative shrink-0 inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full border whitespace-nowrap transition-colors after:content-[''] after:absolute after:-inset-2.5 sm:after:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${statusCls(issue.status)}`}
     >
       {t.statusLabels[issue.status] || issue.status}
     </button>
@@ -131,22 +131,24 @@ export default function IssuesPage() {
 
   return (
     <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1`}>
-        <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
-        <Btn onClick={() => { setForm(blank()); setSaveError(null); setOpen(true); }}>
-          <Plus size={15} /> {t.add}
-        </Btn>
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{t.title}</h1>
+          <Btn onClick={() => { setForm(blank()); setSaveError(null); setOpen(true); }}>
+            <Plus size={15} /> {t.add}
+          </Btn>
+        </div>
+        <p className="text-sm text-gray-500">{t.subtitle}</p>
       </div>
-      <p className="text-sm text-gray-500 mb-5">{t.subtitle}</p>
 
-      <div className="grid grid-cols-2 gap-4 mb-5 max-w-sm">
-        <Stat label={t.open} value={openCount} tone={openCount > 0 ? "amber" : "green"} />
-        <Stat label={t.all} value={(issues ?? []).length} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-5 max-w-sm">
+        <Stat label={t.open} value={openCount.toLocaleString(isAr ? "ar-EG" : "en-US")} tone={openCount > 0 ? "amber" : "green"} />
+        <Stat label={t.all} value={(issues ?? []).length.toLocaleString(isAr ? "ar-EG" : "en-US")} />
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
           {["", ...STATUSES].map((s) => (
             <button
               key={s || "all"}
@@ -154,8 +156,8 @@ export default function IssuesPage() {
               // Segmented filter, 28px measured. Unlike the status pill this
               // one can simply grow — it is already a button visually, so a
               // taller phone version costs nothing.
-              className={`text-xs px-3 py-1.5 min-h-10 sm:min-h-0 rounded-md font-medium transition-colors ${
-                statusFilter === s ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-900"
+              className={`px-3 py-1.5 min-h-11 sm:min-h-0 inline-flex items-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                statusFilter === s ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
               }`}
             >
               {s ? (t.statusLabels[s] || s) : t.all}
@@ -171,22 +173,24 @@ export default function IssuesPage() {
       </div>
 
       {issues === null ? (
-        <Spinner text={p.common.loading} />
+        <div className="flex justify-center py-16">
+          <Spinner text={p.common.loading} />
+        </div>
       ) : filtered.length === 0 ? (
         <EmptyState text={t.empty} />
       ) : (
         <>
           {/* Phone: stacked cards */}
-          <div className="md:hidden space-y-2">
+          <div className="md:hidden space-y-3">
             {filtered.map((i) => (
               <div key={i.row} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-gray-900 leading-snug">
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <span className="font-medium text-gray-900 leading-snug min-w-0">
                     {i.machine || i.product || "—"}
                   </span>
                   <StatusPill issue={i} />
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
+                <div className="text-xs text-gray-500 mt-0.5 tabular-nums">
                   {i.date}{i.category ? ` · ${t.catLabels[i.category] || i.category}` : ""}
                   {i.machine && i.product ? ` · ${i.product}` : ""}
                 </div>
@@ -198,33 +202,35 @@ export default function IssuesPage() {
           </div>
 
           {/* Desktop: table */}
-          <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
-              <thead>
-                <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-                  <th className="text-start font-medium px-4 py-3">{t.date}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.machine}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.product}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.category}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.description}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.action}</th>
-                  <th className="text-start font-medium px-4 py-3">{t.status}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((i) => (
-                  <tr key={i.row} className="hover:bg-gray-50/60 align-top">
-                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{i.date}</td>
-                    <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{i.machine || "—"}</td>
-                    <td className="px-4 py-3 text-gray-600">{i.product || "—"}</td>
-                    <td className="px-4 py-3 text-gray-500">{i.category ? (t.catLabels[i.category] || i.category) : "—"}</td>
-                    <td className="px-4 py-3 text-gray-700 max-w-md">{i.description}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs">{i.action || "—"}</td>
-                    <td className="px-4 py-3"><StatusPill issue={i} /></td>
+          <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50/50">
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.date}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.machine}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.product}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.category}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.description}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.action}</th>
+                    <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{t.status}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filtered.map((i) => (
+                    <tr key={i.row} className="hover:bg-gray-50/50 transition-colors align-top">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums">{i.date}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{i.machine || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600">{i.product || "—"}</td>
+                      <td className="px-4 py-3 text-gray-500">{i.category ? (t.catLabels[i.category] || i.category) : "—"}</td>
+                      <td className="px-4 py-3 text-gray-700 max-w-md">{i.description}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs">{i.action || "—"}</td>
+                      <td className="px-4 py-3"><StatusPill issue={i} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
@@ -266,9 +272,9 @@ export default function IssuesPage() {
             <input className={inputCls} value={form.note} onChange={(e) => set("note", e.target.value)} />
           </Field>
           {saveError && <p className="text-sm text-red-600 mb-2">{saveError}</p>}
-          <div className={`flex gap-3 mt-2`}>
-            <Btn type="submit" disabled={saving}>{saving ? "…" : t.add}</Btn>
-            <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel ?? "✕"}</Btn>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <Btn type="submit" disabled={saving}>{saving ? (isAr ? "جارٍ الحفظ…" : "Saving…") : t.add}</Btn>
+            <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
           </div>
         </form>
       </Modal>

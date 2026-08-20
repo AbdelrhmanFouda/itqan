@@ -253,17 +253,29 @@ export default function PerformancePage() {
         ? t.act.performance(b.machine)
         : t.act.quality(b.machine);
 
-  if (loading && !data) return <Spinner text={p.common.loading} />;
+  if (loading && !data)
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={p.common.loading} />
+      </div>
+    );
   if ((error && !data) || (data && !data.configured)) {
     return (
-      <div className="max-w-5xl">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">{t.title}</h1>
-        <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
+      <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{t.title}</h1>
+          <p className="text-sm text-gray-500">{t.subtitle}</p>
+        </div>
         <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{t.unreachable}</div>
       </div>
     );
   }
-  if (!data) return <Spinner text={p.common.loading} />;
+  if (!data)
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={p.common.loading} />
+      </div>
+    );
 
   const o = data.overall;
   const r = data.readiness;
@@ -293,24 +305,26 @@ export default function PerformancePage() {
     .sort((a, b) => b.down + b.perf + b.qual - (a.down + a.perf + a.qual));
 
   return (
-    <div className="max-w-5xl">
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
-        <div className={`inline-flex rounded-lg border border-gray-200 bg-white p-0.5 ${isAr ? "flex-row-reverse" : ""}`}>
-          {(["month", "all"] as const).map((key) => (
-            <button
-              key={key}
-              onClick={() => setPeriod(key)}
-              className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors ${
-                period === key ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-900"
-              }`}
-            >
-              {key === "month" ? t.thisMonth : t.allTime}
-            </button>
-          ))}
+    <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+            {(["month", "all"] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => setPeriod(key)}
+                className={`px-3 py-1.5 min-h-11 sm:min-h-0 inline-flex items-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                  period === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
+                }`}
+              >
+                {key === "month" ? t.thisMonth : t.allTime}
+              </button>
+            ))}
+          </div>
         </div>
+        <p className="text-sm text-gray-500">{t.subtitle}</p>
       </div>
-      <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
 
       {data.runCount === 0 || !o ? (
         <div>
@@ -324,8 +338,8 @@ export default function PerformancePage() {
       ) : (
         <>
           {/* Headline: OEE gauge + A / P / Q */}
-          <div className={`grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 mb-3 ${isAr ? "sm:grid-cols-[1fr_auto]" : ""}`}>
-            <div className={`bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-center ${isAr ? "sm:order-2" : ""}`}>
+          <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 mb-3">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-center">
               <DonutGauge
                 value={o.oee}
                 known={o.performanceKnown}
@@ -334,7 +348,7 @@ export default function PerformancePage() {
                 isAr={isAr}
               />
             </div>
-            <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 ${isAr ? "sm:order-1" : ""}`}>
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
               <Stat
                 label={t.availability}
                 value={pf(o.availability)}
@@ -362,8 +376,8 @@ export default function PerformancePage() {
           {/* How is this number calculated — full audit trail of the headline */}
           {data.explain && (
             <div className="mb-6 bg-white border border-gray-200 rounded-xl p-4">
-              <h2 className={`text-sm font-semibold text-gray-900 mb-1 ${isAr ? "text-right" : ""}`}>{t.explainTitle}</h2>
-              <p className={`text-xs text-gray-500 mb-3 ${isAr ? "text-right" : ""}`}>{t.explainIntro}</p>
+              <h2 className="text-sm font-semibold text-gray-900 mb-1">{t.explainTitle}</h2>
+              <p className="text-xs text-gray-500 mb-3">{t.explainIntro}</p>
               <div className="space-y-2">
                 {([
                   [t.exA, `${fmtNum(data.explain.runtimeMin, isAr)} ÷ ${fmtNum(data.explain.plannedMin, isAr)} ${t.minutes}`,
@@ -373,7 +387,7 @@ export default function PerformancePage() {
                   [t.exQ, `${fmtNum(data.explain.goodUnits, isAr)} ÷ ${fmtNum(data.explain.goodUnits + data.explain.scrapUnits, isAr)} ${t.units}`,
                     pf(o.quality), data.explain.qualityMeasured, true],
                 ] as const).map(([label, calc, result, measured, known], i) => (
-                  <div key={i} className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                     <span className="text-gray-600 flex-1 min-w-[220px]">{label}</span>
                     <span className="text-gray-400 whitespace-nowrap" dir="ltr">{calc}</span>
                     <span className={`font-semibold whitespace-nowrap ${known ? "text-gray-900" : "text-gray-300"}`} dir="ltr">= {result}</span>
@@ -382,7 +396,7 @@ export default function PerformancePage() {
                     }`}>{measured ? t.measured : t.assumedChip}</span>
                   </div>
                 ))}
-                <div className={`pt-2 border-t border-gray-100 text-xs font-semibold text-gray-900 ${isAr ? "text-right" : ""}`}>
+                <div className="pt-2 border-t border-gray-100 text-xs font-semibold text-gray-900">
                   <span dir="ltr">
                     {t.oee} = {pf(o.availability)} × {o.performanceKnown ? pf(o.performance) : "—"} × {pf(o.quality)} ={" "}
                     <span className={o.performanceKnown ? oeeText(o.oee) : "text-gray-300"}>{o.performanceKnown ? pf(o.oee) : "—"}</span>
@@ -390,14 +404,14 @@ export default function PerformancePage() {
                 </div>
               </div>
               {data.explain.overspeedMin > 1 && (
-                <p className={`mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 ${isAr ? "text-right" : ""}`}>
+                <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   {t.overspeedNote(Math.round(data.explain.overspeedMin))}
                 </p>
               )}
               {data.suspects.length > 0 && (
                 <div className="mt-3">
-                  <h3 className={`text-xs font-semibold text-red-700 mb-1 ${isAr ? "text-right" : ""}`}>{t.suspectsTitle}</h3>
-                  <p className={`text-xs text-gray-500 mb-2 ${isAr ? "text-right" : ""}`}>{t.suspectsIntro}</p>
+                  <h3 className="text-xs font-semibold text-red-700 mb-1">{t.suspectsTitle}</h3>
+                  <p className="text-xs text-gray-500 mb-2">{t.suspectsIntro}</p>
                   {/* Phone: one card per suspect standard. Five numeric
                       columns at text-xs is unreadable at 375px, and this panel
                       exists to make a wrong Master cycle obvious. */}
@@ -416,14 +430,14 @@ export default function PerformancePage() {
                   </div>
 
                   <div className="hidden sm:block overflow-x-auto">
-                    <table className="w-full text-xs" dir={isAr ? "rtl" : "ltr"}>
+                    <table className="w-full text-xs">
                       <thead>
                         <tr className="text-gray-400">
-                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sProduct}</th>
-                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sMasterCyc}</th>
-                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sImplied}</th>
-                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sRatio}</th>
-                          <th className={`py-1 font-medium ${isAr ? "text-right" : "text-left"}`}>{t.sUnits}</th>
+                          <th className="py-1 font-medium text-start">{t.sProduct}</th>
+                          <th className="py-1 font-medium text-start">{t.sMasterCyc}</th>
+                          <th className="py-1 font-medium text-start">{t.sImplied}</th>
+                          <th className="py-1 font-medium text-start">{t.sRatio}</th>
+                          <th className="py-1 font-medium text-start">{t.sUnits}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -446,7 +460,7 @@ export default function PerformancePage() {
 
           {/* AI Review — daily narrative, grounded in the same dataset */}
           <div className="mb-10 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-            <div className={`flex flex-wrap items-center gap-2 mb-2 ${isAr ? "flex-row-reverse" : ""}`}>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <h2 className="text-sm font-semibold text-indigo-900">{t.aiTitle}</h2>
               <span className="text-xs text-indigo-400">· {t.aiDaily}</span>
               {review?.generatedAt && (
@@ -458,24 +472,24 @@ export default function PerformancePage() {
               <button
                 onClick={() => loadReview(true)}
                 disabled={reviewBusy}
-                className="text-xs px-2.5 py-1 rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                className="text-xs px-2.5 py-1 min-h-11 sm:min-h-0 inline-flex items-center rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
                 {reviewBusy ? t.aiRegenerating : t.aiRegen}
               </button>
             </div>
             {!review || (reviewBusy && !review.review) ? (
-              <p className={`text-xs text-gray-400 ${isAr ? "text-right" : ""}`}>…</p>
+              <p className="text-xs text-gray-400">…</p>
             ) : !review.configured || !review.review ? (
-              <p className={`text-xs text-gray-500 ${isAr ? "text-right" : ""}`}>{t.aiUnavailable}</p>
+              <p className="text-xs text-gray-500">{t.aiUnavailable}</p>
             ) : (
               <>
-                <p className={`text-sm text-gray-800 mb-3 leading-relaxed ${isAr ? "text-right" : ""}`}>
+                <p className="text-sm text-gray-800 mb-3 leading-relaxed">
                   {isAr ? review.review.summary.ar || review.review.summary.en : review.review.summary.en || review.review.summary.ar}
                 </p>
                 {review.review.findings.length > 0 && (
                   <ul className="space-y-1.5 mb-3">
                     {review.review.findings.map((f, i) => (
-                      <li key={i} className={`flex items-start gap-2 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                      <li key={i} className="flex items-start gap-2 text-xs">
                         <span className={`mt-0.5 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${
                           f.severity === "critical" ? "border-red-200 bg-red-100 text-red-700"
                           : f.severity === "warn" ? "border-amber-200 bg-amber-100 text-amber-700"
@@ -488,16 +502,16 @@ export default function PerformancePage() {
                   </ul>
                 )}
                 {review.review.actions.length > 0 && (
-                  <div className={isAr ? "text-right" : ""}>
+                  <div>
                     <h3 className="text-xs font-semibold text-indigo-900 mb-1">{t.aiActions}</h3>
-                    <ol className={`space-y-1 ${isAr ? "pr-4" : "pl-4"} list-decimal text-xs text-gray-700`} dir={isAr ? "rtl" : "ltr"}>
+                    <ol className="space-y-1 ps-4 list-decimal text-xs text-gray-700">
                       {review.review.actions.map((a, i) => (
                         <li key={i}>{isAr ? a.ar || a.en : a.en || a.ar}</li>
                       ))}
                     </ol>
                   </div>
                 )}
-                <p className={`mt-3 text-[10px] text-gray-400 ${isAr ? "text-right" : ""}`}>
+                <p className="mt-3 text-[10px] text-gray-400">
                   {review.provider === "rules" ? t.aiRules : review.model ? `${review.provider} · ${review.model}` : ""}
                 </p>
               </>
@@ -507,20 +521,20 @@ export default function PerformancePage() {
           {/* Data readiness — the honesty panel */}
           {readinessItems.length > 0 && (
             <div className="mb-10 bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <h2 className={`text-sm font-semibold text-amber-800 mb-1 ${isAr ? "text-right" : ""}`}>{t.readiness}</h2>
-              <p className={`text-xs text-amber-700 mb-2 ${isAr ? "text-right" : ""}`}>{t.readinessIntro}</p>
+              <h2 className="text-sm font-semibold text-amber-800 mb-1">{t.readiness}</h2>
+              <p className="text-xs text-amber-700 mb-2">{t.readinessIntro}</p>
               <ul className="space-y-1.5">
                 {readinessItems.map((it, i) => (
-                  <li key={i} className={`flex items-start gap-2 text-xs ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                  <li key={i} className="flex items-start gap-2 text-xs">
                     <span className={`mt-0.5 shrink-0 ${it.ok ? "text-green-600" : "text-amber-600"}`}>{it.ok ? "✓" : "●"}</span>
                     <span className="text-gray-700">{it.text}</span>
                   </li>
                 ))}
               </ul>
               {data.standardsGap.length > 0 && (
-                <div className={`mt-3 ${isAr ? "text-right" : ""}`}>
+                <div className="mt-3">
                   <span className="text-xs font-medium text-amber-800">{t.fillMaster}</span>
-                  <div className={`flex flex-wrap gap-1.5 mt-1.5 ${isAr ? "flex-row-reverse" : ""}`}>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {data.standardsGap.map((g) => (
                       <span key={g.mold} className="text-xs bg-white border border-amber-200 text-gray-700 rounded-full px-2.5 py-0.5">
                         {g.mold} · {fmtNum(g.units, isAr)} {t.units}
@@ -535,27 +549,27 @@ export default function PerformancePage() {
           {/* Bottleneck Board — fix this first */}
           {data.bottlenecks.length > 0 && (
             <div className="mb-10">
-              <div className={`flex items-baseline gap-2 mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
+              <div className="flex items-baseline gap-2 mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">{t.bottleneck}</h2>
                 <span className="text-xs text-gray-400">· {t.fixFirst}</span>
               </div>
               <div className="space-y-3">
                 {data.bottlenecks.map((b, i) => (
                   <div key={b.machine} className={`rounded-xl p-4 border ${i === 0 ? "border-red-300 bg-red-50/50" : "border-gray-200 bg-white"}`}>
-                    <div className={`flex items-start justify-between gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                      <div className={`flex items-center gap-2.5 ${isAr ? "flex-row-reverse" : ""}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3 sm:flex-nowrap">
+                      <div className="flex flex-wrap items-center gap-2.5 min-w-0">
                         <span className={`w-6 h-6 shrink-0 rounded-full text-xs font-bold flex items-center justify-center ${i === 0 ? "bg-red-600 text-white" : "bg-gray-200 text-gray-600"}`}>{i + 1}</span>
                         <span className="font-medium text-gray-900">{b.machine}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${i === 0 ? "border-red-200 bg-red-100 text-red-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>{t.factorName[b.factor]}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${i === 0 ? "border-red-200 bg-red-100 text-red-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>{t.factorName[b.factor]}</span>
                       </div>
-                      <div className={`shrink-0 ${isAr ? "text-start" : "text-end"}`}>
-                        <div className="text-sm font-semibold text-red-600 whitespace-nowrap">{fmtNum(b.factorMin, isAr)} {t.min} {t.lostCap}</div>
+                      <div className="shrink-0 text-end">
+                        <div className="text-sm font-semibold text-red-600 whitespace-nowrap tabular-nums">{fmtNum(b.factorMin, isAr)} {t.min} {t.lostCap}</div>
                         {b.recoverablePct != null && (
                           <div className="text-xs text-gray-400 whitespace-nowrap">{t.recover} ≈ {pf0(b.recoverablePct)} {t.ofOutput}</div>
                         )}
                       </div>
                     </div>
-                    <p className={`text-xs text-gray-600 mt-2 ${isAr ? "text-right" : ""}`}>{action(b)}</p>
+                    <p className="text-xs text-gray-600 mt-2">{action(b)}</p>
                   </div>
                 ))}
               </div>
@@ -585,16 +599,16 @@ export default function PerformancePage() {
           )}
 
           {/* OEE by machine — constraint first */}
-          <div className={`flex items-baseline gap-2 mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex items-baseline gap-2 mb-3">
             <h2 className="text-sm font-semibold text-gray-900">{t.byMachine}</h2>
             <span className="text-xs text-gray-400">· {t.worstFirst}</span>
           </div>
           <div className="space-y-3 mb-10">
             {data.machines.map((m) => (
               <div key={m.machine} className="bg-white border border-gray-200 rounded-xl p-4">
-                <div className={`flex items-center justify-between mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                  <span className="font-medium text-gray-900">{m.machine}</span>
-                  <span className={`text-lg font-bold ${m.performanceKnown ? oeeText(m.oee) : "text-gray-300"}`}>
+                <div className="flex items-center justify-between gap-3 mb-3 min-w-0">
+                  <span className="font-medium text-gray-900 min-w-0 truncate">{m.machine}</span>
+                  <span className={`text-lg font-bold shrink-0 tabular-nums ${m.performanceKnown ? oeeText(m.oee) : "text-gray-300"}`}>
                     {m.performanceKnown ? pf(m.oee) : t.noStd}
                   </span>
                 </div>
@@ -605,9 +619,9 @@ export default function PerformancePage() {
                     ["quality", m.quality, true],
                   ] as const).map(([k, val, known]) => (
                     <div key={k}>
-                      <div className={`flex items-center justify-between text-xs mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+                      <div className="flex items-center justify-between text-xs mb-1">
                         <span className="text-gray-500">{t.factor[k]}</span>
-                        <span className={`font-medium ${m.weakest === k ? "text-red-600" : "text-gray-700"}`}>
+                        <span className={`font-medium tabular-nums ${m.weakest === k ? "text-red-600" : "text-gray-700"}`}>
                           {known ? pf(val) : "—"}
                         </span>
                       </div>

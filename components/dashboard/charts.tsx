@@ -8,7 +8,7 @@
 import { ReactNode } from "react";
 
 export const oeeColor = (x: number) => (x >= 0.85 ? "#16a34a" : x >= 0.6 ? "#d97706" : "#dc2626");
-const AXIS = "#9ca3af", GRID = "#f3f4f6";
+const AXIS = "#6b7280", GRID = "#f3f4f6";
 
 const fmtLocale = (isAr: boolean) => (isAr ? "ar-EG" : "en-US");
 export const fmtNum = (x: number, isAr: boolean) => x.toLocaleString(fmtLocale(isAr));
@@ -78,16 +78,17 @@ export function TrendChart({
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img">
+      <div className="overflow-x-auto" dir="ltr">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[520px] sm:min-w-0" role="img">
         {ticks.map((t) => (
           <g key={t}>
             <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} stroke={GRID} />
-            <text x={PL - 6} y={y(t) + 3.5} fontSize="10" fill={AXIS} textAnchor="end">{fy(t)}</text>
+            <text x={PL - 6} y={y(t) + 3.5} fontSize="12" fill={AXIS} textAnchor="end">{fy(t)}</text>
           </g>
         ))}
         {labels.map((l, i) =>
           i % every === 0 ? (
-            <text key={i} x={x(i)} y={H - 8} fontSize="10" fill={AXIS} textAnchor="middle">{l}</text>
+            <text key={i} x={x(i)} y={H - 8} fontSize="12" fill={AXIS} textAnchor="middle">{l}</text>
           ) : null,
         )}
         {series.map((s) =>
@@ -109,9 +110,10 @@ export function TrendChart({
           )),
         )}
       </svg>
-      <div className={`flex flex-wrap gap-x-4 gap-y-1 mt-1 ${isAr ? "flex-row-reverse" : ""}`}>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
         {series.map((s) => (
-          <span key={s.name} className={`inline-flex items-center gap-1.5 text-xs text-gray-500 ${isAr ? "flex-row-reverse" : ""}`}>
+          <span key={s.name} className="inline-flex items-center gap-1.5 text-xs text-gray-500">
             <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: s.color }} />
             {s.name}
           </span>
@@ -138,7 +140,7 @@ export function Pareto({
         const share = cum / total;
         return (
           <div key={it.label}>
-            <div className={`flex items-center justify-between text-xs mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+            <div className="flex items-center justify-between text-xs mb-1">
               <span className="text-gray-600">{it.label}</span>
               <span className="text-gray-400 whitespace-nowrap">
                 {fmtNum(it.value, isAr)} {unit} · Σ {fmtPct(share, isAr)}
@@ -174,22 +176,28 @@ export function LossBars({
           const total = r.down + r.perf + r.qual;
           return (
             <div key={r.label}>
-              <div className={`flex items-center justify-between text-xs mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+              <div className="flex items-center justify-between text-xs mb-1">
                 <span className="text-gray-700 font-medium">{r.label}</span>
-                <span className="text-gray-400 whitespace-nowrap">{fmtNum(Math.round(total), isAr)} {unit}</span>
+                <span className="text-gray-400 whitespace-nowrap tabular-nums">{fmtNum(Math.round(total), isAr)} {unit}</span>
               </div>
               <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex" dir="ltr">
-                {r.down > 0 && <div style={{ width: seg(r.down), background: COLORS.down }} title={names.down} />}
-                {r.perf > 0 && <div style={{ width: seg(r.perf), background: COLORS.perf }} />}
-                {r.qual > 0 && <div style={{ width: seg(r.qual), background: COLORS.qual }} />}
+                {r.down > 0 && (
+                  <div style={{ width: seg(r.down), background: COLORS.down }} title={`${names.down} — ${fmtNum(Math.round(r.down), isAr)} ${unit}`} />
+                )}
+                {r.perf > 0 && (
+                  <div style={{ width: seg(r.perf), background: COLORS.perf }} title={`${names.perf} — ${fmtNum(Math.round(r.perf), isAr)} ${unit}`} />
+                )}
+                {r.qual > 0 && (
+                  <div style={{ width: seg(r.qual), background: COLORS.qual }} title={`${names.qual} — ${fmtNum(Math.round(r.qual), isAr)} ${unit}`} />
+                )}
               </div>
             </div>
           );
         })}
       </div>
-      <div className={`flex flex-wrap gap-x-4 gap-y-1 mt-3 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
         {(["down", "perf", "qual"] as const).map((k) => (
-          <span key={k} className={`inline-flex items-center gap-1.5 text-xs text-gray-500 ${isAr ? "flex-row-reverse" : ""}`}>
+          <span key={k} className="inline-flex items-center gap-1.5 text-xs text-gray-500">
             <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: COLORS[k] }} />
             {names[k]}
           </span>
@@ -206,7 +214,7 @@ export function ChartCard({ title, hint, isAr, children }: {
 }) {
   return (
     <div className="mb-10">
-      <div className={`flex items-baseline gap-2 mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className="flex items-baseline gap-2 mb-3">
         <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
         {hint && <span className="text-xs text-gray-400">· {hint}</span>}
       </div>

@@ -41,7 +41,7 @@ export default function Hero() {
       <div className="max-w-7xl mx-auto px-6 py-32 w-full relative z-10">
         <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
           {/* Text */}
-          <div className={isAr ? "text-right" : ""}>
+          <div>
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -80,18 +80,18 @@ export default function Hero() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 0.3 }}
-              className={`flex gap-4 flex-wrap ${isAr ? "flex-row-reverse" : ""}`}
+              className="flex flex-wrap gap-3 sm:gap-4"
             >
               <a
                 href="#contact"
-                className="group inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-medium transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:-translate-y-0.5"
+                className="group inline-flex items-center justify-center gap-2 min-h-12 px-6 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors hover:shadow-lg hover:shadow-blue-500/25"
               >
                 {tr.hero.cta}
                 <ArrowRight size={16} className={`group-hover:translate-x-1 transition-transform ${isAr ? "rotate-180" : ""}`} />
               </a>
               <a
                 href="#services"
-                className="inline-flex items-center gap-2 border border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl font-medium transition-all hover:-translate-y-0.5"
+                className="inline-flex items-center justify-center gap-2 min-h-12 px-6 rounded-lg border border-white/25 text-white hover:bg-white/10 font-medium transition-colors"
               >
                 {tr.hero.services}
               </a>
@@ -102,7 +102,7 @@ export default function Hero() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1, delay: 0.6 }}
-                className={`flex gap-8 mt-12 pt-8 border-t border-white/5 ${isAr ? "flex-row-reverse" : ""}`}
+                className="flex flex-wrap gap-6 sm:gap-8 mt-12 pt-8 border-t border-white/5"
               >
                 {[
                   { v: stats.molds, l: isAr ? "اسطمبة" : "Molds" },
@@ -110,7 +110,7 @@ export default function Hero() {
                   { v: stats.clients, l: isAr ? "عميل" : "Clients" },
                 ].map((s) => (
                   <div key={s.l}>
-                    <div className="text-2xl font-bold text-white">{s.v.toLocaleString(isAr ? "ar-EG" : "en-US")}</div>
+                    <div className="text-2xl font-bold text-white tabular-nums">{s.v.toLocaleString(isAr ? "ar-EG" : "en-US")}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{s.l}</div>
                   </div>
                 ))}
@@ -191,7 +191,7 @@ export default function Hero() {
         transition={{ delay: 1.2 }}
         className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1"
       >
-        <span className="text-xs text-gray-600 uppercase tracking-widest">Scroll</span>
+        <span className="text-xs text-gray-600 uppercase tracking-widest">{isAr ? "مرر للأسفل" : "Scroll"}</span>
         <motion.div
           animate={{ y: [0, 6, 0] }}
           transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}

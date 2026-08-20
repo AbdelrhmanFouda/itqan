@@ -192,13 +192,19 @@ export default function StoragePage() {
   /* ------------------------------ render ------------------------------ */
 
   if (!data) {
-    return <Spinner text={s.title} />;
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+      </div>
+    );
   }
   if (!data.configured) {
     return (
-      <div>
-        <h1 className="text-xl font-bold text-gray-900 mb-1">{s.title}</h1>
-        <p className="text-sm text-gray-500 mb-6">{s.subtitle}</p>
+      <div dir={isAr ? "rtl" : "ltr"}>
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{s.title}</h1>
+          <p className="text-sm text-gray-500">{s.subtitle}</p>
+        </div>
         <EmptyState text={s.notConnected} />
       </div>
     );
@@ -210,24 +216,18 @@ export default function StoragePage() {
   ];
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
-        <h1 className="text-xl font-bold text-gray-900">{s.title}</h1>
-        {/* flex-wrap, and full width below sm.
-            This row is why the page did not fit a phone. The OUTER div wraps,
-            so the title dropped onto its own line and looked fine — but this
-            inner group did not, and it holds four controls («فتح الجدول»,
-            «تحديث القوائم», «إضافة», «تحديث») that come to roughly 460px with
-            their icons. On a 375px screen that is the whole page scrolling
-            sideways, because a flex row with no flex-wrap cannot break however
-            narrow the viewport gets. It is the only non-wrapping control row
-            left in the dashboard. */}
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+    <div dir={isAr ? "rtl" : "ltr"}>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">{s.title}</h1>
+        <p className="text-sm text-gray-500">{s.subtitle}</p>
+        {/* Actions row — always flex-wrap: this row once held four controls
+            (~460px) in a single unbreakable line on a 375px screen. */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           {canWrite && (
             <>
               <a
                 href={SHEET_URL} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
                 <ExternalLink size={14} /> {s.openSheet}
               </a>
@@ -240,7 +240,6 @@ export default function StoragePage() {
           <Btn variant="ghost" onClick={load}><RefreshCw size={14} /> {s.refresh}</Btn>
         </div>
       </div>
-      <p className="text-sm text-gray-500 mb-4">{s.subtitle}</p>
 
       {notice && (
         <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4 inline-block">
@@ -251,19 +250,19 @@ export default function StoragePage() {
       {!canWrite && <p className="text-xs text-gray-400 mb-3">{s.readOnly}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
-        <Stat label={s.stats.items} value={data.balance.length} />
-        <Stat label={s.stats.movements} value={data.inLog.length + data.outLog.length} />
-        <Stat label={s.stats.negative} value={negatives} tone={negatives > 0 ? "red" : "green"} />
+        <Stat label={s.stats.items} value={data.balance.length.toLocaleString(isAr ? "ar-EG" : "en-US")} />
+        <Stat label={s.stats.movements} value={(data.inLog.length + data.outLog.length).toLocaleString(isAr ? "ar-EG" : "en-US")} />
+        <Stat label={s.stats.negative} value={negatives.toLocaleString(isAr ? "ar-EG" : "en-US")} tone={negatives > 0 ? "red" : "green"} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="flex rounded-lg border border-gray-200 bg-white p-0.5">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-3.5 py-1.5 rounded-md text-sm transition-colors ${
-                tab === t.key ? "bg-blue-600 text-white font-medium" : "text-gray-600 hover:bg-gray-50"
+              className={`px-3 py-1.5 min-h-11 sm:min-h-0 inline-flex items-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                tab === t.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
               }`}
             >
               {t.label}
@@ -281,7 +280,7 @@ export default function StoragePage() {
       {tab === "balance" ? (
         <BalanceView rows={balance} s={s} />
       ) : (
-        <MovementsView rows={shownMovements} s={s} canWrite={canWrite} onEdit={openEdit} onDelete={handleDelete} />
+        <MovementsView rows={shownMovements} s={s} isAr={isAr} canWrite={canWrite} onEdit={openEdit} onDelete={handleDelete} />
       )}
 
       <Modal open={open} title={editing ? `${s.form.editTitle} — ${editing.num}` : s.form.addTitle} onClose={() => setOpen(false)} isAr={isAr}>
@@ -377,7 +376,7 @@ export default function StoragePage() {
 
         {formErr && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">{formErr}</p>}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <Btn variant="outline" onClick={() => setOpen(false)}>{s.form.cancel}</Btn>
           <Btn onClick={handleSave} disabled={saving}>{saving ? s.form.saving : s.form.save}</Btn>
         </div>
@@ -392,53 +391,60 @@ function BalanceView({ rows, s }: { rows: StorageBalance[]; s: (typeof sd)["en"]
   if (rows.length === 0) return <EmptyState text={s.empty} />;
   const availCls = (v: string) =>
     num(v) < 0 ? "text-red-600" : num(v) === 0 ? "text-gray-400" : "text-emerald-700";
+  const heads: { h: string; end?: boolean }[] = [
+    { h: s.cols.itemType }, { h: s.cols.item }, { h: s.cols.client }, { h: s.cols.loc },
+    { h: s.cols.avail, end: true }, { h: s.cols.inQty, end: true }, { h: s.cols.inLast },
+    { h: s.cols.outQty, end: true }, { h: s.cols.outLast }, { h: s.cols.loss, end: true },
+  ];
   return (
     <>
       {/* phones: cards */}
-      <div className="sm:hidden space-y-2">
+      <div className="sm:hidden space-y-3">
         {rows.map((b, i) => (
           <div key={i} className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <p className="font-medium text-gray-900">{b.item}</p>
-              <span className="text-xs text-gray-400 whitespace-nowrap">{b.itemType}</span>
+            <div className="flex items-center justify-between gap-3 min-w-0 mb-1">
+              <p className="font-medium text-gray-900 min-w-0 truncate">{b.item}</p>
+              <span className="shrink-0 text-xs text-gray-400 whitespace-nowrap">{b.itemType}</span>
             </div>
-            <p className={`text-lg font-bold ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
+            <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
             {(b.client || b.loc) && (
               <p className="text-xs text-gray-500 mt-1">{[b.client, b.loc].filter(Boolean).join(" · ")}</p>
             )}
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-gray-400 mt-1 tabular-nums">
               {s.cols.inQty}: {b.inQty || "0"} — {s.cols.outQty}: {b.outQty || "0"} — {s.cols.loss}: {b.loss || "0"}
             </p>
           </div>
         ))}
       </div>
       {/* sm+: table */}
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-start text-xs text-gray-500 border-b border-gray-100">
-              {[s.cols.itemType, s.cols.item, s.cols.client, s.cols.loc, s.cols.avail, s.cols.inQty, s.cols.inLast, s.cols.outQty, s.cols.outLast, s.cols.loss].map((h) => (
-                <th key={h} className="text-start font-medium px-4 py-3 whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((b, i) => (
-              <tr key={i} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60">
-                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{b.itemType}</td>
-                <td className="px-4 py-2.5 font-medium text-gray-900">{b.item}</td>
-                <td className="px-4 py-2.5 text-gray-600">{b.client || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600">{b.loc || "—"}</td>
-                <td className={`px-4 py-2.5 font-bold whitespace-nowrap ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{b.inQty || "0"}</td>
-                <td className="px-4 py-2.5 text-gray-400 whitespace-nowrap">{b.inLast || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{b.outQty || "0"}</td>
-                <td className="px-4 py-2.5 text-gray-400 whitespace-nowrap">{b.outLast || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{b.loss || "0"}</td>
+      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/50">
+                {heads.map((c) => (
+                  <th key={c.h} className={`${c.end ? "text-end" : "text-start"} px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap`}>{c.h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map((b, i) => (
+                <tr key={i} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{b.itemType}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{b.item}</td>
+                  <td className="px-4 py-3 text-gray-600">{b.client || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{b.loc || "—"}</td>
+                  <td className={`px-4 py-3 text-end tabular-nums font-bold whitespace-nowrap ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.inQty || "0"}</td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{b.inLast || "—"}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.outQty || "0"}</td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{b.outLast || "—"}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.loss || "0"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
@@ -447,79 +453,110 @@ function BalanceView({ rows, s }: { rows: StorageBalance[]; s: (typeof sd)["en"]
 /* ----------------------------- movements view ----------------------------- */
 
 function MovementsView({
-  rows, s, canWrite, onEdit, onDelete,
+  rows, s, isAr, canWrite, onEdit, onDelete,
 }: {
   rows: StorageMovement[];
   s: (typeof sd)["en"] | (typeof sd)["ar"];
+  isAr: boolean;
   canWrite: boolean;
   onEdit: (m: StorageMovement) => void;
   onDelete: (m: StorageMovement) => void;
 }) {
   if (rows.length === 0) return <EmptyState text={s.empty} />;
+  const editLabel = isAr ? "تعديل" : "Edit";
+  const deleteLabel = isAr ? "حذف" : "Delete";
+  const heads: { h: string; end?: boolean }[] = [
+    { h: s.cols.num }, { h: s.cols.itemType }, { h: s.cols.item }, { h: s.cols.client },
+    { h: s.cols.loc }, { h: s.cols.date }, { h: s.cols.qtyCount, end: true },
+    { h: s.cols.qtyKg, end: true }, { h: s.cols.loss, end: true }, { h: s.cols.net, end: true },
+    { h: s.cols.notes },
+  ];
   return (
     <>
       {/* phones: cards */}
-      <div className="sm:hidden space-y-2">
+      <div className="sm:hidden space-y-3">
         {rows.map((m) => (
           <div key={`${m.log}-${m.num}`} className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <p className="font-mono text-xs text-gray-500">{m.num}</p>
-              <span className="text-xs text-gray-400">{m.date}</span>
+            <div className="flex items-center justify-between gap-3 min-w-0 mb-1">
+              <p className="font-mono text-xs text-gray-500 min-w-0 truncate" dir="ltr">{m.num}</p>
+              <span className="shrink-0 text-xs text-gray-400">{m.date}</span>
             </div>
             <p className="font-medium text-gray-900">{m.item}</p>
-            <p className="text-sm text-gray-700 mt-0.5">{s.cols.net}: <b>{m.net || "0"} {m.unit}</b></p>
+            <p className="text-sm text-gray-700 mt-0.5">{s.cols.net}: <b className="tabular-nums">{m.net || "0"} {m.unit}</b></p>
             {(m.client || m.loc) && (
               <p className="text-xs text-gray-500 mt-1">{[m.client, m.loc].filter(Boolean).join(" · ")}</p>
             )}
             {m.notes && <p className="text-xs text-gray-400 mt-1">{m.notes}</p>}
             {canWrite && (
               <div className="flex gap-2 mt-2">
-                <Btn variant="ghost" onClick={() => onEdit(m)}><Pencil size={13} /></Btn>
-                <Btn variant="danger" onClick={() => onDelete(m)}><Trash2 size={13} /></Btn>
+                <button
+                  onClick={() => onEdit(m)}
+                  aria-label={editLabel}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  onClick={() => onDelete(m)}
+                  aria-label={deleteLabel}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                >
+                  <Trash2 size={15} />
+                </button>
               </div>
             )}
           </div>
         ))}
       </div>
       {/* sm+: table */}
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-xs text-gray-500 border-b border-gray-100">
-              {[s.cols.num, s.cols.itemType, s.cols.item, s.cols.client, s.cols.loc, s.cols.date, s.cols.qtyCount, s.cols.qtyKg, s.cols.loss, s.cols.net, s.cols.notes].map((h) => (
-                <th key={h} className="text-start font-medium px-4 py-3 whitespace-nowrap">{h}</th>
-              ))}
-              {canWrite && <th className="px-2 py-3" />}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={`${m.log}-${m.num}`} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60">
-                <td className="px-4 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{m.num}</td>
-                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{m.itemType}</td>
-                <td className="px-4 py-2.5 font-medium text-gray-900">{m.item}</td>
-                <td className="px-4 py-2.5 text-gray-600">{m.client || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600">{m.loc || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{m.date}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{m.qtyCount || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{m.qtyKg || "—"}</td>
-                <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{m.loss || "0"}</td>
-                <td className="px-4 py-2.5 font-semibold text-gray-900 whitespace-nowrap">{m.net || "0"} {m.unit}</td>
-                <td className="px-4 py-2.5 text-gray-400 max-w-[16rem] truncate">{m.notes}</td>
-                {canWrite && (
-                  <td className="px-2 py-2.5 whitespace-nowrap">
-                    <button onClick={() => onEdit(m)} className="text-gray-400 hover:text-blue-600 p-1.5" aria-label="edit">
-                      <Pencil size={14} />
-                    </button>
-                    <button onClick={() => onDelete(m)} className="text-gray-400 hover:text-red-600 p-1.5" aria-label="delete">
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                )}
+      <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/50">
+                {heads.map((c) => (
+                  <th key={c.h} className={`${c.end ? "text-end" : "text-start"} px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap`}>{c.h}</th>
+                ))}
+                {canWrite && <th className="px-2 py-2.5" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map((m) => (
+                <tr key={`${m.log}-${m.num}`} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap" dir="ltr">{m.num}</td>
+                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{m.itemType}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{m.item}</td>
+                  <td className="px-4 py-3 text-gray-600">{m.client || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{m.loc || "—"}</td>
+                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{m.date}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.qtyCount || "—"}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.qtyKg || "—"}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.loss || "0"}</td>
+                  <td className="px-4 py-3 text-end tabular-nums font-semibold text-gray-900 whitespace-nowrap">{m.net || "0"} {m.unit}</td>
+                  <td className="px-4 py-3 text-gray-400 max-w-[16rem] truncate">{m.notes}</td>
+                  {canWrite && (
+                    <td className="px-2 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => onEdit(m)}
+                        aria-label={editLabel}
+                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => onDelete(m)}
+                        aria-label={deleteLabel}
+                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );

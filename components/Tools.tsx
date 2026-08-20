@@ -21,7 +21,7 @@ export default function Tools() {
   if (!tr.tools.categories.length) return null;
 
   return (
-    <section id="tools" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-950 relative overflow-hidden">
+    <section id="tools" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-950 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
 
       {/* Background glow */}
@@ -35,9 +35,9 @@ export default function Tools() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-16"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "أصولنا" : "Our Assets"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.tools.title}</h2>
@@ -56,7 +56,7 @@ export default function Tools() {
               key={i}
               variants={fadeInUp}
               whileHover={{ y: -4, transition: { duration: 0.2 } }}
-              className={`bg-gray-900 rounded-2xl border border-white/5 hover:${catColors[i].split(" ")[0]} p-6 transition-colors group`}
+              className="bg-white/5 rounded-2xl border border-white/10 hover:border-blue-500/40 p-6 transition-colors group"
             >
               <h3 className={`font-semibold text-sm uppercase tracking-wide mb-4 pb-3 border-b border-white/5 ${catColors[i].split(" ")[1]}`}>
                 {cat.name}

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, FileText, Trash2, Sparkles } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { EmptyState, inputCls } from "@/components/dashboard/ui";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
 type DraftMeta = {
@@ -94,14 +95,14 @@ export default function ReportsPage() {
   const months = isAr ? monthNamesAr : monthNames;
 
   return (
-    <div className="max-w-3xl">
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-8 ${isAr ? "flex-row-reverse" : ""}`}>
+    <div className="max-w-3xl" dir={isAr ? "rtl" : "ltr"}>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 sm:mb-8">
         <h1 className="text-2xl font-bold text-gray-900">{tr.dashboard.reports}</h1>
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={generateDraft}
             disabled={drafting}
-            className="flex items-center gap-1.5 border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-50 text-sm px-4 py-2 rounded-lg font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 border border-blue-600 text-blue-700 hover:bg-blue-50 active:bg-blue-100 disabled:opacity-50 text-sm px-4 py-2 min-h-11 sm:min-h-0 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             <Sparkles size={15} />
             {drafting
@@ -110,7 +111,7 @@ export default function ReportsPage() {
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm text-sm px-4 py-2 min-h-11 sm:min-h-0 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             <Plus size={15} />
             {tr.dashboard.newReport}
@@ -162,15 +163,15 @@ export default function ReportsPage() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="bg-white border border-gray-200 rounded-xl p-6 mb-6 space-y-4"
+          className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 mb-6 space-y-4"
         >
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportMonth}</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportMonth}</label>
               <select
                 value={form.month}
                 onChange={(e) => setForm({ ...form, month: e.target.value })}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                className={inputCls}
               >
                 {months.map((m, i) => (
                   <option key={m} value={i + 1}>{m}</option>
@@ -178,69 +179,69 @@ export default function ReportsPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportYear}</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportYear}</label>
               <input
                 type="number"
                 value={form.year}
                 onChange={(e) => setForm({ ...form, year: e.target.value })}
                 min="2020"
                 max="2100"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                className={inputCls}
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportJobs}</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportJobs}</label>
             <input
               type="number"
               value={form.jobs_completed}
               onChange={(e) => setForm({ ...form, jobs_completed: e.target.value })}
               min="0"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              className={inputCls}
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportNotes}</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportNotes}</label>
             <textarea
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
               rows={12}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-y leading-relaxed"
+              className={`${inputCls} resize-y leading-relaxed`}
               dir={isAr ? "rtl" : "ltr"}
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportIssues}</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportIssues}</label>
             <textarea
               value={form.issues}
               onChange={(e) => setForm({ ...form, issues: e.target.value })}
               rows={8}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-y leading-relaxed"
+              className={`${inputCls} resize-y leading-relaxed`}
               dir={isAr ? "rtl" : "ltr"}
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.reportRecommendations}</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">{tr.dashboard.reportRecommendations}</label>
             <textarea
               value={form.recommendations}
               onChange={(e) => setForm({ ...form, recommendations: e.target.value })}
               rows={8}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-y leading-relaxed"
+              className={`${inputCls} resize-y leading-relaxed`}
               dir={isAr ? "rtl" : "ltr"}
             />
           </div>
-          <div className={`flex gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"
               disabled={saving}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-sm px-5 py-2 rounded-lg font-medium transition-colors"
+              className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-60 text-white shadow-sm text-sm px-5 py-2 min-h-11 sm:min-h-0 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               {tr.dashboard.save}
             </button>
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="text-sm px-5 py-2 rounded-lg border border-gray-200 hover:bg-gray-50"
+              className="inline-flex items-center justify-center text-sm text-gray-700 px-5 py-2 min-h-11 sm:min-h-0 rounded-lg border border-gray-300 hover:bg-gray-50 active:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               {tr.dashboard.cancel}
             </button>
@@ -249,38 +250,39 @@ export default function ReportsPage() {
       )}
 
       {reports.length === 0 ? (
-        <p className="text-sm text-gray-400">{tr.dashboard.noReports}</p>
+        <EmptyState text={tr.dashboard.noReports} />
       ) : (
         <div className="space-y-3">
           {reports.map((r) => (
             <div
               key={r.id}
-              className="bg-white border border-gray-100 hover:border-blue-300 rounded-xl px-5 py-4 flex items-center justify-between group transition-colors"
+              className="bg-white border border-gray-200 hover:border-blue-300 rounded-xl px-4 sm:px-5 py-4 flex items-center justify-between gap-3 group transition-colors"
             >
               <Link
                 href={`/dashboard/reports/${r.id}`}
-                className={`flex items-center gap-3 flex-1 ${isAr ? "flex-row-reverse" : ""}`}
+                className="flex items-center gap-3 flex-1 min-w-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
-                <FileText size={16} className="text-gray-300" />
-                <div dir={isAr ? "rtl" : "ltr"}>
-                  <p className="font-medium text-gray-900">
+                <FileText size={16} className="text-gray-300 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">
                     {months[r.month - 1]} {r.year}
                   </p>
                   {r.jobs_completed != null && (
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {r.jobs_completed} {tr.dashboard.reportJobs.toLowerCase()}
+                    <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
+                      {r.jobs_completed.toLocaleString(isAr ? "ar-EG" : "en-US")} {tr.dashboard.reportJobs.toLowerCase()}
                     </p>
                   )}
                 </div>
               </Link>
-              <div className={`flex items-center gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
-                <Link href={`/dashboard/reports/${r.id}`} className="inline-flex items-center min-h-11 sm:min-h-0 text-xs text-blue-600 hover:underline">
+              <div className="flex items-center gap-2 shrink-0">
+                <Link href={`/dashboard/reports/${r.id}`} className="inline-flex items-center min-h-11 sm:min-h-0 px-2 rounded-lg text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1">
                   {tr.dashboard.viewReport}
                 </Link>
                 <button
                   onClick={() => handleDelete(r.id)}
                   title={isAr ? "حذف" : "Delete"}
-                  className="text-gray-300 hover:text-red-500 transition-colors"
+                  aria-label={isAr ? "حذف" : "Delete"}
+                  className="p-3 -m-2 min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                 >
                   <Trash2 size={14} />
                 </button>

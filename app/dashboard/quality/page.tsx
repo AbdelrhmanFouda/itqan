@@ -102,7 +102,7 @@ export default function QualityPage() {
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
 
-  if (runs === null) return <Spinner text={a.quality.title} />;
+  if (runs === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
   const dayRuns = runs.filter((r) => r.date === date);
   const good = dayRuns.reduce((s, r) => s + (r.goodUnits || 0), 0);
@@ -111,23 +111,24 @@ export default function QualityPage() {
   const scrapRate = good + scrap ? ((scrap / (good + scrap)) * 100).toFixed(1) : "0.0";
 
   return (
-    <div className="max-w-5xl">
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h1 className="text-2xl font-bold text-gray-900">{a.quality.title}</h1>
-        <Btn onClick={openLog}><Plus size={15} /> {a.quality.add}</Btn>
+    <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.quality.title}</h1>
+        <p className="text-sm text-gray-500">{a.quality.subtitle}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Btn onClick={openLog}><Plus size={15} /> {a.quality.add}</Btn>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm text-gray-600">{a.quality.date}</label>
+            <input type="date" className={`${inputCls} w-auto`} value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+        </div>
       </div>
-      <p className="text-sm text-gray-500 mb-6">{a.quality.subtitle}</p>
 
-      <div className={`flex items-center gap-2 mb-6 ${isAr ? "flex-row-reverse" : ""}`}>
-        <label className="text-sm text-gray-600">{a.quality.date}</label>
-        <input type="date" className={`${inputCls} w-auto`} value={date} onChange={(e) => setDate(e.target.value)} />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <Stat label={a.quality.dayGood} value={fmt(good)} tone="green" />
         <Stat label={a.quality.dayScrap} value={fmt(scrap)} tone={scrap > 0 ? "red" : undefined} />
         <Stat label={a.quality.dayScrapRate} value={`${scrapRate}%`} tone={Number(scrapRate) > 3 ? "amber" : undefined} />
-        <Stat label={a.quality.dayDowntime} value={`${fmt(downtime)} ${a.quality.min}`} />
+        <Stat label={a.quality.dayDowntime} value={fmt(downtime)} sub={a.quality.min} />
       </div>
 
       {dayRuns.length === 0 ? (
@@ -135,15 +136,15 @@ export default function QualityPage() {
       ) : (
         <>
         {/* Phone: stacked entry cards */}
-        <div className="md:hidden space-y-2" dir={isAr ? "rtl" : "ltr"}>
+        <div className="md:hidden space-y-3">
           {dayRuns.map((r) => {
             const tot = (r.goodUnits || 0) + (r.scrapUnits || 0);
             const rate = tot ? ((r.scrapUnits / tot) * 100).toFixed(1) : "0.0";
             return (
               <div key={r.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-gray-900 leading-snug">{r.machineCode || r.machine || "—"}</span>
-                  <span className={`text-xs font-medium shrink-0 ${Number(rate) > 3 ? "text-amber-600" : "text-gray-400"}`}>
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <span className="font-medium text-gray-900 leading-snug min-w-0 truncate" dir="ltr">{r.machineCode || r.machine || "—"}</span>
+                  <span className={`text-xs font-medium shrink-0 tabular-nums ${Number(rate) > 3 ? "text-amber-600" : "text-gray-400"}`}>
                     {rate}%
                   </span>
                 </div>
@@ -167,34 +168,35 @@ export default function QualityPage() {
             );
           })}
         </div>
-        {/* Desktop: the table, unchanged */}
-        <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
-          <table className="w-full text-sm" dir={isAr ? "rtl" : "ltr"}>
+        {/* Desktop: the table */}
+        <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm">
             <thead>
-              <tr className="text-gray-500 border-b border-gray-100 text-xs uppercase tracking-wide">
-                <th className="text-start font-medium px-4 py-3">{a.quality.machine}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.mold}</th>
-                <th className="text-start font-medium px-4 py-3">{p.runs.shift}</th>
-                <th className="text-start font-medium px-4 py-3">{a.quality.good}</th>
-                <th className="text-start font-medium px-4 py-3">{a.quality.scrap}</th>
-                <th className="text-start font-medium px-4 py-3">{a.quality.scrapRate}</th>
-                <th className="text-start font-medium px-4 py-3">{a.quality.downtime}</th>
-                <th className="text-start font-medium px-4 py-3">{a.quality.operator}</th>
+              <tr className="border-b border-gray-200 bg-gray-50/50">
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.machine}</th>
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.mold}</th>
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.shift}</th>
+                <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.good}</th>
+                <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.scrap}</th>
+                <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.scrapRate}</th>
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.downtime}</th>
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{a.quality.operator}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-gray-100">
               {dayRuns.map((r) => {
                 const tot = (r.goodUnits || 0) + (r.scrapUnits || 0);
                 const rate = tot ? ((r.scrapUnits / tot) * 100).toFixed(1) : "0.0";
                 return (
-                  <tr key={r.id} className="hover:bg-gray-50/60">
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.machineCode || r.machine || "—"}</td>
+                  <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap" dir="ltr">{r.machineCode || r.machine || "—"}</td>
                     <td className="px-4 py-3 text-gray-500">{moldLabel(r.mold)}</td>
                     <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
-                    <td className="px-4 py-3 text-green-600 font-medium">{fmt(r.goodUnits)}</td>
-                    <td className="px-4 py-3 text-red-500">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
-                    <td className={`px-4 py-3 ${Number(rate) > 3 ? "text-amber-600" : "text-gray-500"}`}>{rate}%</td>
-                    <td className="px-4 py-3 text-gray-500">
+                    <td className="px-4 py-3 text-green-600 font-medium text-end tabular-nums">{fmt(r.goodUnits)}</td>
+                    <td className="px-4 py-3 text-red-500 text-end tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
+                    <td className={`px-4 py-3 text-end tabular-nums ${Number(rate) > 3 ? "text-amber-600" : "text-gray-500"}`}>{rate}%</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">
                       {r.downtimeMin ? `${fmt(r.downtimeMin)} ${a.quality.min}` : "—"}
                       {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"
                         ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
@@ -206,6 +208,7 @@ export default function QualityPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
         </>
       )}
@@ -265,7 +268,7 @@ export default function QualityPage() {
             </Field>
           </div>
           {saveError && <p className="text-xs text-red-600 mt-1">{saveError}</p>}
-          <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
             <Btn type="submit" disabled={saving}>{p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
           </div>

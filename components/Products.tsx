@@ -32,7 +32,7 @@ export default function Products() {
   if (items.length === 0) return null;
 
   return (
-    <section id="products" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-900 relative overflow-hidden">
+    <section id="products" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-900 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
 
       <div className="max-w-7xl mx-auto px-6">
@@ -41,9 +41,9 @@ export default function Products() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
           variants={fadeInUp}
-          className="text-center mb-16"
+          className="max-w-2xl mx-auto text-center mb-10 sm:mb-14"
         >
-          <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+          <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
             {isAr ? "ما صنعناه" : "Our Work"}
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.products.title}</h2>
@@ -62,7 +62,7 @@ export default function Products() {
               key={`${item.name}-${i}`}
               variants={fadeInUp}
               whileHover={{ y: -6, transition: { duration: 0.25 } }}
-              className="group bg-gray-950 rounded-2xl border border-white/5 hover:border-blue-500/20 overflow-hidden transition-colors"
+              className="group bg-white/5 rounded-2xl border border-white/10 hover:border-blue-500/40 overflow-hidden transition-colors"
             >
               <div className={`h-40 bg-gradient-to-br ${bgPatterns[i % bgPatterns.length]} relative overflow-hidden`}>
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -73,8 +73,8 @@ export default function Products() {
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/3 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
               </div>
               <div className="p-5">
-                <div className={`flex items-start justify-between gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-                  <h3 className="font-semibold text-white leading-snug text-[15px]">{item.name}</h3>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold text-white leading-snug text-[15px] min-w-0">{item.name}</h3>
                   {item.material && (
                     <span className="text-xs px-2.5 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400 whitespace-nowrap shrink-0">
                       {item.material}

@@ -11,7 +11,7 @@ export default function About() {
   const isAr = lang === "ar";
 
   return (
-    <section id="about" dir={isAr ? "rtl" : "ltr"} className="py-20 sm:py-28 bg-gray-900 relative overflow-hidden">
+    <section id="about" dir={isAr ? "rtl" : "ltr"} className="py-16 sm:py-24 bg-gray-900 relative overflow-hidden">
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
       <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
 
@@ -124,7 +124,7 @@ export default function About() {
             viewport={{ once: true, margin: "-80px" }}
             variants={isAr ? fadeInLeft : fadeInRight}
           >
-            <p className="text-blue-400 text-xs font-semibold uppercase tracking-widest mb-3">
+            <p className="text-blue-500 text-sm font-medium tracking-wide mb-3">
               {isAr ? "من نحن" : "About Us"}
             </p>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-6">{tr.about.title}</h2>

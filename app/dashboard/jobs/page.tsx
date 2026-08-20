@@ -97,7 +97,7 @@ export default function JobsPage() {
 
   if (error) {
     return (
-      <div className="max-w-5xl">
+      <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{p.jobs.title}</h1>
         <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
           {isAr ? "تعذّر الوصول إلى البيانات." : "Couldn't reach the data."}
@@ -105,22 +105,34 @@ export default function JobsPage() {
       </div>
     );
   }
-  if (!data) return <Spinner text={p.common.loading} />;
+  if (!data) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={p.common.loading} />
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-5xl">
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h1 className="text-2xl font-bold text-gray-900">{p.jobs.title}</h1>
-        {data.writable && data.configured && (
-          <Btn onClick={() => { setSaveErr(false); setOpen(true); }}><Plus size={15} /> {p.jobs.add}</Btn>
-        )}
+    <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{p.jobs.title}</h1>
+          {data.writable && data.configured && (
+            <Btn onClick={() => { setSaveErr(false); setOpen(true); }}><Plus size={15} /> {p.jobs.add}</Btn>
+          )}
+        </div>
+        <p className="text-sm text-gray-500">{p.jobs.subtitle}</p>
       </div>
-      <p className="text-sm text-gray-500 mb-6">{p.jobs.subtitle}</p>
 
       {!data.configured ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5" dir={isAr ? "rtl" : "ltr"}>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 sm:p-5">
           <p className="text-sm font-medium text-amber-900 mb-2">{jobsTabMissing}</p>
-          <p className="text-xs text-amber-800 leading-relaxed" dir="rtl">{headers}</p>
+          <p className="text-xs text-amber-800 leading-relaxed" dir="rtl">
+            {headers.split(" · ").map((h) => (
+              <span key={h} className="inline-block bg-amber-100/60 rounded px-1.5 py-0.5 me-1 mb-1">{h}</span>
+            ))}
+          </p>
         </div>
       ) : data.jobs.length === 0 ? (
         <EmptyState text={p.jobs.empty} />
@@ -133,10 +145,10 @@ export default function JobsPage() {
               <Link
                 key={j.id}
                 href={`/dashboard/jobs/${j.id}`}
-                className="block bg-white border border-gray-200 hover:border-blue-300 rounded-xl px-5 py-4 transition-colors"
+                className="block bg-white border border-gray-200 rounded-xl p-4 sm:p-5 transition-colors hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
               >
-                <div className={`flex items-start justify-between gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
-                  <div dir={isAr ? "rtl" : "ltr"} className="min-w-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
                     {/* flex-wrap: code + two pills don't fit one phone line;
                         wrapping beats squeezing the pills off the card. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -148,7 +160,7 @@ export default function JobsPage() {
                       {[j.client, j.product, j.machine].filter(Boolean).join(" · ") || "—"}
                     </p>
                     {/* Shows the kg→pieces working, so the number is never a black box. */}
-                    <p className="text-[11px] text-gray-400 mt-0.5 truncate" dir={isAr ? "rtl" : "ltr"}>
+                    <p className="text-[11px] text-gray-400 mt-0.5 truncate tabular-nums">
                       {!j.linked
                         ? p.jobs.notInMaster
                         : j.qtyOrdered > 0
@@ -163,7 +175,7 @@ export default function JobsPage() {
                       </p>
                     )}
                   </div>
-                  <div className={`hidden sm:block text-xs shrink-0 ${isAr ? "text-left" : "text-right"}`}>
+                  <div className="hidden sm:block text-xs shrink-0 text-end">
                     {j.dueDate && (
                       <p className={overdue ? "text-red-600 font-medium" : "text-gray-400"}>
                         {p.jobs.due}: {j.dueDate}{overdue ? ` · ${p.jobs.overdue}` : ""}
@@ -171,11 +183,11 @@ export default function JobsPage() {
                     )}
                   </div>
                 </div>
-                <div className={`flex items-center gap-3 mt-3 ${isAr ? "flex-row-reverse" : ""}`}>
+                <div className="flex items-center gap-3 mt-3">
                   <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden" dir="ltr">
                     <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-xs text-gray-500 whitespace-nowrap" dir="ltr">
+                  <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums" dir="ltr">
                     {j.qtyOrdered > 0
                       ? `${fmt(j.produced)} / ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
                       : `${fmt(j.produced)} ${p.jobs.pcs}`}
@@ -255,7 +267,7 @@ export default function JobsPage() {
             <textarea className={`${inputCls} resize-none`} rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
           </Field>
           {saveErr && <p className="text-xs text-red-600 mt-1">{isAr ? "فشل الحفظ." : "Saving failed."}</p>}
-          <div className={`flex gap-3 mt-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
             <Btn type="submit" disabled={saving}>{p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
           </div>

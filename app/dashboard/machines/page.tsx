@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { Plus, Circle } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
 
 /**
  * Machine registry — read from the sheet's `machines` tab (one row per
@@ -94,86 +95,79 @@ export default function MachinesPage() {
     load();
   }
 
-  const inputCls = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400";
-
   return (
-    <div className="max-w-3xl">
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h1 className="text-2xl font-bold text-gray-900">{tr.dashboard.machines}</h1>
+    <div dir={isAr ? "rtl" : "ltr"} className="max-w-3xl">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">{tr.dashboard.machines}</h1>
+        <p className="text-sm text-gray-500">{l.subtitle}</p>
         {data?.writable && (
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors"
-          >
-            <Plus size={15} />
-            {l.addRow}
-          </button>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Btn onClick={() => setShowForm(!showForm)}>
+              <Plus size={15} />
+              {l.addRow}
+            </Btn>
+          </div>
         )}
       </div>
-      <p className={`text-sm text-gray-500 mb-6 ${isAr ? "text-right" : ""}`}>{l.subtitle}</p>
 
       {showForm && (
-        <form onSubmit={handleAdd} className="bg-white border border-gray-200 rounded-xl p-6 mb-6 space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.code}</label>
+        <form onSubmit={handleAdd} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6 space-y-4">
+          <div className="grid sm:grid-cols-2 gap-x-4">
+            <Field label={l.code}>
               <input value={form.code} onChange={(e) => set("code", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.machine}</label>
+            </Field>
+            <Field label={l.machine}>
               <input value={form.name} onChange={(e) => set("name", e.target.value)} required className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.manufacturer}</label>
+            </Field>
+            <Field label={l.manufacturer}>
               <input value={form.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.status}</label>
+            </Field>
+            <Field label={l.status}>
               <select value={form.status} onChange={(e) => set("status", e.target.value)} className={inputCls}>
                 {l.statuses.map((s) => <option key={s} value={s}>{l.statusLabel[s]}</option>)}
               </select>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.shiftLength}</label>
+            </Field>
+            <Field label={l.shiftLength}>
               <input type="number" min="0" step="30" value={form.shiftLength} onChange={(e) => set("shiftLength", e.target.value)} required className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">{l.product}</label>
+            </Field>
+            <Field label={l.product}>
               <input value={form.product} onChange={(e) => set("product", e.target.value)} className={inputCls} />
-            </div>
+            </Field>
           </div>
           {saveErr && <p className="text-xs text-red-600">{l.saveFailed}</p>}
-          <div className={`flex gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-            <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-sm px-5 py-2 rounded-lg font-medium transition-colors">
-              {tr.dashboard.save}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm px-5 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-              {tr.dashboard.cancel}
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Btn type="submit" disabled={saving}>{tr.dashboard.save}</Btn>
+            <Btn variant="outline" onClick={() => setShowForm(false)}>{tr.dashboard.cancel}</Btn>
           </div>
         </form>
       )}
 
       {error || (data && !data.configured && data.machines.length === 0) ? (
         <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{l.unreachable}</div>
-      ) : !data ? null : data.machines.length === 0 ? (
-        <p className="text-gray-400 text-sm">{l.empty}</p>
+      ) : !data ? (
+        <div className="flex justify-center py-16">
+          <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+        </div>
+      ) : data.machines.length === 0 ? (
+        <EmptyState text={l.empty} />
       ) : (
         <div className="space-y-3">
           {data.machines.map((m) => (
-            <div key={m.row} className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center justify-between">
-              <div className={`flex items-center gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
-                <Circle size={8} className={`fill-current ${statusColor(m.status)}`} />
-                <div dir={isAr ? "rtl" : "ltr"}>
-                  <p className="font-medium text-gray-900">{m.label}</p>
+            <div key={m.row} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-4 min-w-0">
+                <Circle size={8} className={`shrink-0 fill-current ${statusColor(m.status)}`} />
+                <div className="min-w-0">
+                  <p dir="ltr" className="font-medium text-gray-900 truncate text-start">{m.label}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {m.manufacturer && <>{m.manufacturer} · </>}
-                    {m.shiftLength > 0 && <>{m.shiftLength} {l.min} · </>}
-                    {m.product ? m.product : !m.code ? l.noCode : ""}
+                    {[
+                      m.manufacturer,
+                      m.shiftLength > 0 ? `${m.shiftLength.toLocaleString(isAr ? "ar-EG" : "en-US")} ${l.min}` : "",
+                      m.product || (!m.code ? l.noCode : ""),
+                    ].filter(Boolean).join(" · ")}
                   </p>
                 </div>
               </div>
-              <span className={`text-xs ${statusColor(m.status)}`}>{l.statusLabel[m.status] ?? m.status}</span>
+              <span className={`shrink-0 text-xs ${statusColor(m.status)}`}>{l.statusLabel[m.status] ?? m.status}</span>
             </div>
           ))}
         </div>

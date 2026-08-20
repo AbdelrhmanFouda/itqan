@@ -33,7 +33,8 @@ type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string }
 /** Big enough to hit with a work glove on. */
 const TAP =
   "min-h-[64px] rounded-2xl border-2 px-4 py-3 text-lg font-semibold transition " +
-  "active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100";
+  "active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
 
 /**
  * Live duration of a running stoppage. Day-aware since 2026-08-20 (owner's
@@ -168,7 +169,7 @@ export default function DowntimePage() {
   // render, say why, and let the operator start a stoppage — the action that
   // matters must not be held hostage by a list that failed to load.
   if (machines === null || (data === null && loadErr === null)) {
-    return <Spinner text={p.common.loading} />;
+    return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
   }
 
   // A stoppage started on a previous day is still RUNNING — it keeps recording
@@ -202,15 +203,15 @@ export default function DowntimePage() {
         {/* Not a plain <a>: the export route is guarded by a Bearer token, which
             a browser navigation cannot attach — it would 401. Fetch it
             authenticated, then hand the blob to a throwaway link. */}
-        <button onClick={exportCsv} className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">
+        <button onClick={exportCsv} className="inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded-lg text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1">
           {t.export}
         </button>
       </div>
-      <p className="text-sm text-gray-500 mb-5">{t.subtitle}</p>
+      <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
 
-      <div className="grid grid-cols-2 gap-4 mb-6 max-w-sm">
-        <Stat label={t.todayMinutes} value={lostToday} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
-        <Stat label={t.todayEvents} value={todayList.length} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 max-w-sm">
+        <Stat label={t.todayMinutes} value={lostToday.toLocaleString("ar-EG")} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
+        <Stat label={t.todayEvents} value={todayList.length.toLocaleString("ar-EG")} />
       </div>
 
       {failed && (
@@ -230,7 +231,7 @@ export default function DowntimePage() {
           {loadErr !== "role" && (
             <button
               onClick={load}
-              className="mt-2 rounded-lg border-2 border-amber-600 px-4 py-2 font-semibold text-amber-900"
+              className="mt-2 rounded-lg border-2 border-amber-600 px-4 py-2 min-h-11 font-semibold text-amber-900 active:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               {t.retry}
             </button>
@@ -341,7 +342,7 @@ export default function DowntimePage() {
         {todayList.length === 0 ? (
           <EmptyState text={t.empty} />
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {todayList.map((e) => (
               <div
                 key={e.id}
@@ -359,8 +360,8 @@ export default function DowntimePage() {
                     )}
                   </div>
                 </div>
-                <div className="text-lg font-bold text-gray-900 shrink-0">
-                  {e.minutes} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
+                <div className="text-lg font-bold text-gray-900 shrink-0 tabular-nums">
+                  {e.minutes.toLocaleString("ar-EG")} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
                 </div>
               </div>
             ))}

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { Spinner } from "@/components/dashboard/ui";
 
 type Report = {
   id: string;
@@ -48,18 +49,27 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
     router.push("/dashboard/reports");
   }
 
-  if (!report) return <div className="text-sm text-gray-400">Loading...</div>;
+  if (!report) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+      </div>
+    );
+  }
 
   const months = isAr ? monthNamesAr : monthNames;
 
   return (
-    <div className="max-w-2xl">
-      <Link href="/dashboard/reports" className="text-sm text-blue-600 hover:underline mb-6 inline-block">
+    <div className="max-w-2xl" dir={isAr ? "rtl" : "ltr"}>
+      <Link
+        href="/dashboard/reports"
+        className="inline-flex items-center min-h-11 sm:min-h-0 mb-4 sm:mb-6 rounded-lg text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
+      >
         {isAr ? "→ التقارير" : "← Reports"}
       </Link>
 
-      <div className={`flex items-start justify-between gap-3 mb-6 ${isAr ? "flex-row-reverse" : ""}`}>
-        <div dir={isAr ? "rtl" : "ltr"}>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-gray-900">
             {tr.dashboard.reportFor} {months[report.month - 1]} {report.year}
           </h1>
@@ -74,7 +84,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         <button
           onClick={handleDelete}
           title={isAr ? "حذف" : "Delete"}
-          className="flex items-center gap-1.5 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2.5 py-1.5 rounded-lg transition-colors"
+          className="inline-flex items-center gap-1.5 shrink-0 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 focus-visible:ring-offset-1"
         >
           <Trash2 size={13} />
           {isAr ? "حذف" : "Delete"}
@@ -83,8 +93,10 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
 
       <div className="space-y-5">
         {report.jobs_completed != null && (
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 text-center">
-            <p className="text-4xl font-bold text-blue-700">{report.jobs_completed}</p>
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 sm:p-5 text-center">
+            <p className="text-3xl sm:text-4xl font-bold text-blue-700 tabular-nums">
+              {report.jobs_completed.toLocaleString(isAr ? "ar-EG" : "en-US")}
+            </p>
             <p className="text-sm text-blue-500 mt-1">{tr.dashboard.reportJobs}</p>
           </div>
         )}
@@ -96,7 +108,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         ]
           .filter((s) => s.value?.trim())
           .map((s) => (
-            <div key={s.label} dir={isAr ? "rtl" : "ltr"} className="bg-white border border-gray-100 rounded-xl p-5">
+            <div key={s.label} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{s.label}</p>
               <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{s.value}</p>
             </div>

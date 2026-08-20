@@ -130,7 +130,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           onClick={() => setNavOpen((v) => !v)}
           // 28px measured. This is the only way into the navigation on a
           // phone, so it is the one control that must never be a near-miss.
-          className="md:hidden text-gray-600 hover:text-gray-900 flex items-center justify-center min-w-11 min-h-11 -ms-2.5"
+          className="md:hidden text-gray-600 hover:text-gray-900 flex items-center justify-center min-w-11 min-h-11 -ms-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           aria-label={navOpen ? p.common.closeMenu : p.common.openMenu}
         >
           {navOpen ? <X size={20} /> : <Menu size={20} />}
@@ -140,7 +140,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </Link>
         <span className="text-gray-300 text-xs hidden sm:inline">|</span>
         <span className="text-sm text-gray-500 hidden sm:inline">{a.auth.system}</span>
-        <div className={`flex items-center gap-3 ${isAr ? "mr-auto" : "ml-auto"}`}>
+        <div className="flex items-center gap-3 ms-auto">
           <span className="text-xs text-gray-400 hidden md:inline">
             {profile.email} · <span className="text-blue-600 font-medium">{a.roles[profile.role]}</span>
           </span>
@@ -150,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {!isArabicOnlyPath(pathname) && (
             <button
               onClick={() => setLang(isAr ? "en" : "ar")}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors"
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               <Globe size={12} />
               {isAr ? "EN" : "عربي"}
@@ -158,7 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
           <button
             onClick={handleSignOut}
-            className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors"
+            className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             {a.auth.signOut}
           </button>
@@ -174,7 +174,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           />
         )}
         <aside
-          className={`bg-white border-gray-200 p-4 flex flex-col gap-1 ${isAr ? "border-l" : "border-r"}
+          className={`bg-white border-gray-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-4 flex flex-col gap-1 ${isAr ? "border-l" : "border-r"}
           fixed top-14 bottom-0 z-30 w-60 overflow-y-auto transition-transform duration-200
           ${isAr ? "right-0" : "left-0"}
           ${navOpen ? "translate-x-0 shadow-xl" : isAr ? "translate-x-full" : "-translate-x-full"}
@@ -188,7 +188,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 key={href}
                 href={href}
                 onClick={() => setNavOpen(false)}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2.5 px-3 py-2 min-h-11 md:min-h-0 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   active ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                 }`}
               >
@@ -226,7 +227,7 @@ function StatusScreen(props: {
         </Link>
         <button
           onClick={props.onLang}
-          className={`flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors ${props.isAr ? "mr-auto" : "ml-auto"}`}
+          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-11 sm:min-h-0 transition-colors ms-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
         >
           <Globe size={12} />
           {props.langBtn}
@@ -247,11 +248,11 @@ function StatusScreen(props: {
           <p className="text-xs text-gray-400 mb-5">{props.signedInAs}: {props.email}</p>
           <button
             onClick={props.onSignOut}
-            className="w-full border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm px-4 py-2 rounded-lg font-medium transition-colors"
+            className="w-full border border-gray-300 hover:bg-gray-50 active:bg-gray-100 text-gray-700 text-sm px-4 py-2 min-h-11 sm:min-h-0 inline-flex items-center justify-center rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             {props.signOutLabel}
           </button>
-          <Link href="/" className="block text-xs text-gray-400 hover:text-gray-600 mt-3">{props.backLabel}</Link>
+          <Link href="/" className="block text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5">{props.backLabel}</Link>
         </div>
       </div>
     </div>

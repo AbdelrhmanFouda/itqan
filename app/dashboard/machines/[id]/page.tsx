@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
 
 type Machine = { id: string; name: string; type: string; status: string };
 type Note = { id: string; note: string; note_date: string };
@@ -73,24 +74,30 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
     router.push("/dashboard/machines");
   }
 
-  if (!machine) return <div className="text-gray-400 text-sm">Loading...</div>;
+  if (!machine) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-2xl">
+    <div dir={isAr ? "rtl" : "ltr"} className="max-w-2xl">
       <Link
         href="/dashboard/machines"
-        className="text-sm text-blue-600 hover:underline mb-6 inline-block"
+        className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline mb-4 sm:mb-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1 rounded"
       >
         {tr.dashboard.backToMachines}
       </Link>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
-        <div className={`flex items-start justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
-          <h1 className="text-xl font-bold text-gray-900">{machine.name}</h1>
+      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <h1 className="text-2xl font-bold text-gray-900 min-w-0 break-words">{machine.name}</h1>
           <button
             onClick={handleDelete}
             title={isAr ? "حذف" : "Delete"}
-            className="flex items-center gap-1.5 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2.5 py-1.5 rounded-lg transition-colors"
+            className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-11 sm:min-h-0 text-xs text-red-600 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-2.5 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 focus-visible:ring-offset-1"
           >
             <Trash2 size={13} />
             {isAr ? "حذف" : "Delete"}
@@ -99,14 +106,14 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
         <div className="grid sm:grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-gray-500">{tr.dashboard.machineType}: </span>
-            <span className="font-medium">{machine.type}</span>
+            <span className="font-medium text-gray-900">{machine.type}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-gray-500">{tr.dashboard.machineStatus}: </span>
+            <span className="text-gray-500 shrink-0">{tr.dashboard.machineStatus}: </span>
             <select
               value={newStatus}
               onChange={(e) => handleStatusChange(e.target.value)}
-              className="border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+              className={inputCls}
             >
               {tr.dashboard.machineStatuses.map((ms) => (
                 <option key={ms}>{ms}</option>
@@ -116,64 +123,47 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
-        <h2 className="font-semibold text-gray-900">{tr.dashboard.notesHeading}</h2>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
-        >
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 className="text-sm font-semibold text-gray-900">{tr.dashboard.notesHeading}</h2>
+        <Btn onClick={() => setShowForm(!showForm)}>
           <Plus size={13} />
           {tr.dashboard.addNote}
-        </button>
+        </Btn>
       </div>
 
       {showForm && (
-        <form onSubmit={handleAddNote} className="bg-white border border-gray-200 rounded-xl p-5 mb-4 space-y-3">
-          <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.noteDate}</label>
+        <form onSubmit={handleAddNote} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-4">
+          <Field label={tr.dashboard.noteDate}>
             <input
               type="date"
               value={noteDate}
               onChange={(e) => setNoteDate(e.target.value)}
               required
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              className={inputCls}
             />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 mb-1">{tr.dashboard.noteText}</label>
+          </Field>
+          <Field label={tr.dashboard.noteText}>
             <textarea
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
               required
               rows={3}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none"
+              className={`${inputCls} resize-y leading-relaxed`}
             />
-          </div>
-          <div className={`flex gap-3 ${isAr ? "flex-row-reverse" : ""}`}>
-            <button
-              type="submit"
-              disabled={saving}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors"
-            >
-              {tr.dashboard.save}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="text-sm px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50"
-            >
-              {tr.dashboard.cancel}
-            </button>
+          </Field>
+          <div className="flex flex-wrap items-center gap-3">
+            <Btn type="submit" disabled={saving}>{tr.dashboard.save}</Btn>
+            <Btn variant="outline" onClick={() => setShowForm(false)}>{tr.dashboard.cancel}</Btn>
           </div>
         </form>
       )}
 
       {notes.length === 0 ? (
-        <p className="text-sm text-gray-400">{tr.dashboard.noNotes}</p>
+        <EmptyState text={tr.dashboard.noNotes} />
       ) : (
         <div className="space-y-3">
           {notes.map((n) => (
-            <div key={n.id} className="bg-white border border-gray-100 rounded-xl px-5 py-4">
+            <div key={n.id} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
               <p className="text-xs text-gray-400 mb-1">
                 {new Date(n.note_date).toLocaleDateString(isAr ? "ar-EG" : "en-GB", {
                   year: "numeric", month: "long", day: "numeric",

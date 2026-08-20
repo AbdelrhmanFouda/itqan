@@ -104,7 +104,7 @@ export default function LoginPage() {
         </Link>
         <button
           onClick={() => setLang(isAr ? "en" : "ar")}
-          className={`flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors ${isAr ? "mr-auto" : "ml-auto"}`}
+          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-11 sm:min-h-0 transition-colors ms-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
         >
           <Globe size={12} />
           {isAr ? "EN" : "عربي"}
@@ -164,11 +164,11 @@ export default function LoginPage() {
 
           <button
             onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(""); }}
-            className="block w-full text-center text-sm text-blue-600 hover:underline mt-5"
+            className="block w-full text-center text-sm text-blue-600 hover:underline mt-5 py-2.5 min-h-11 sm:min-h-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             {mode === "in" ? a.auth.needAccount : a.auth.haveAccount}
           </button>
-          <Link href="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 mt-3">
+          <Link href="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5">
             {a.auth.backToSite}
           </Link>
         </div>

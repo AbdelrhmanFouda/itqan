@@ -1,31 +1,35 @@
 @import "tailwindcss";
 
-* {
-  box-sizing: border-box;
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
-html {
-  scroll-behavior: smooth;
+/* Dark ground belongs to the marketing pages only — the dashboard/login are
+   light. The marketing wrapper element carries this class. */
+.marketing-dark {
   background-color: #030712;
 }
 
-body {
-  background-color: #030712;
-}
-
-/* Custom scrollbar */
+/* Custom scrollbar — theme-neutral so it works on both the dark marketing
+   pages and the light dashboard. */
 ::-webkit-scrollbar {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #111827;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1d4ed8;
+  background: #cbd5e1;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2563eb;
+  background: #94a3b8;
 }
 
 /* Smooth image loading */

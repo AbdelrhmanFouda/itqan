@@ -105,13 +105,13 @@ export default function HourlyPage() {
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
-          <button onClick={() => load(date)} className="inline-flex items-center min-h-11 sm:min-h-0 text-xs text-blue-600 hover:underline">{t.refresh}</button>
+          <button onClick={() => load(date)} className="inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded-lg text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1">{t.refresh}</button>
         </div>
       </div>
-      <p className="text-sm text-gray-500 mb-5">{t.subtitle}</p>
+      <p className="text-sm text-gray-500 mb-6 sm:mb-8">{t.subtitle}</p>
 
       {data && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
           <Stat label={t.system} value={fmt(data.totals.system)} />
           <Stat label={t.actual} value={data.totals.withActual > 0 ? fmt(data.totals.actual) : "—"} />
           <Stat
@@ -119,28 +119,28 @@ export default function HourlyPage() {
             value={data.totals.withActual > 0 ? fmt(data.totals.scrap) : "—"}
             tone={data.totals.withActual > 0 && data.totals.scrap > 0 ? "red" : undefined}
           />
-          <Stat label={t.machines} value={data.totals.machines} />
+          <Stat label={t.machines} value={fmt(data.totals.machines)} />
         </div>
       )}
 
 
       {loading && data === null ? (
-        <Spinner text={p.common.loading} />
+        <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>
       ) : !data || data.rows.length === 0 ? (
         <EmptyState text={t.empty} />
       ) : (
         <>
           {/* Phone: one card per machine with an hour bar-strip */}
-          <div className="lg:hidden space-y-2">
+          <div className="lg:hidden space-y-3">
             {data.rows.map((r) => {
               const max = Math.max(1, ...r.hours.map((h) => h ?? 0));
               return (
                 <div key={r.row} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-gray-900 leading-snug">{r.machine}</span>
+                  <div className="flex items-center justify-between gap-3 min-w-0">
+                    <span className="font-medium text-gray-900 leading-snug min-w-0 truncate">{r.machine}</span>
                     <span
                       title={r.effActual !== null ? `${t.actual} ÷ ${t.expected}` : `${t.system} ÷ ${t.expected}`}
-                      className={`shrink-0 text-xs px-2.5 py-1 rounded-full border whitespace-nowrap ${effCls(r.efficiency)}`}
+                      className={`shrink-0 inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full border whitespace-nowrap tabular-nums ${effCls(r.efficiency)}`}
                     >
                       {effText(r)}
                     </span>
@@ -167,12 +167,12 @@ export default function HourlyPage() {
                       ))}
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2 tabular-nums">
                     <span className="text-gray-700 font-medium">{fmt(r.systemTotal)}</span>
                     {r.actualTotal !== null ? (
                       <>
                         <span className="text-green-600">{t.actual}: {fmt(r.actualTotal)}</span>
-                        {r.scrap !== null && r.scrap > 0 && <span className="text-red-500">{fmt(r.scrap)} ✗</span>}
+                        {r.scrap !== null && r.scrap > 0 && <span className="text-red-500">{t.scrap}: {fmt(r.scrap)}</span>}
                       </>
                     ) : (
                       <span className="text-gray-400 text-xs">{t.noActual}</span>
@@ -185,10 +185,11 @@ export default function HourlyPage() {
           </div>
 
           {/* Desktop: the full 24-hour grid */}
-          <div className="hidden lg:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
+          <div className="hidden lg:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-xs" dir={isAr ? "rtl" : "ltr"}>
               <thead>
-                <tr className="text-gray-500 border-b border-gray-100 uppercase tracking-wide">
+                <tr className="border-b border-gray-200 bg-gray-50/50 text-gray-500 uppercase tracking-wide">
                   <th className="text-start font-medium px-3 py-2.5 whitespace-nowrap">{t.machine}</th>
                   <th className="text-start font-medium px-3 py-2.5">{t.product}</th>
                   {data.hourLabels.map((h) => (
@@ -196,15 +197,15 @@ export default function HourlyPage() {
                   ))}
                   <th className="text-start font-medium px-3 py-2.5 whitespace-nowrap">{t.system}</th>
                   <th className="text-start font-medium px-3 py-2.5 whitespace-nowrap">{t.actual}</th>
-                  <th className="text-start font-medium px-3 py-2.5">✗</th>
+                  <th title={t.scrap} className="text-start font-medium px-3 py-2.5">✗<span className="sr-only">{t.scrap}</span></th>
                   <th className="text-start font-medium px-3 py-2.5 whitespace-nowrap">{t.efficiency}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="divide-y divide-gray-100">
                 {data.rows.map((r) => {
                   const max = Math.max(1, ...r.hours.map((h) => h ?? 0));
                   return (
-                    <tr key={r.row} className="hover:bg-gray-50/60">
+                    <tr key={r.row} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{r.machine}</td>
                       <td className="px-3 py-2 text-gray-600 max-w-[10rem] truncate">{r.product}</td>
                       {/* A shift-total row has no hour-of-day information. Spanning
@@ -235,13 +236,13 @@ export default function HourlyPage() {
                           </td>
                         ))
                       )}
-                      <td className="px-3 py-2 font-medium text-gray-900">{fmt(r.systemTotal)}</td>
-                      <td className="px-3 py-2 text-green-700">{fmt(r.actualTotal)}</td>
-                      <td className="px-3 py-2 text-red-500">{r.scrap !== null && r.scrap > 0 ? fmt(r.scrap) : "—"}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 tabular-nums">{fmt(r.systemTotal)}</td>
+                      <td className="px-3 py-2 text-green-700 tabular-nums">{fmt(r.actualTotal)}</td>
+                      <td className="px-3 py-2 text-red-500 tabular-nums">{r.scrap !== null && r.scrap > 0 ? fmt(r.scrap) : "—"}</td>
                       <td className="px-3 py-2">
                         <span
                           title={r.effActual !== null ? `${t.actual} ÷ ${t.expected}` : `${t.system} ÷ ${t.expected}`}
-                          className={`inline-block text-xs px-2 py-0.5 rounded-full border ${effCls(r.efficiency)}`}
+                          className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border tabular-nums ${effCls(r.efficiency)}`}
                         >
                           {effText(r)}
                         </span>
@@ -251,6 +252,7 @@ export default function HourlyPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

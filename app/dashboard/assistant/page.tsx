@@ -147,14 +147,14 @@ export default function AssistantPage() {
     limit === null ? a.unlimited : typeof remaining === "number" ? a.remaining(remaining) : "";
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="max-w-3xl mx-auto flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-9rem)]">
+    <div dir={isAr ? "rtl" : "ltr"} className="max-w-3xl mx-auto flex flex-col h-[calc(100dvh-8rem)] md:h-[calc(100dvh-9rem)]">
       {/* header */}
       <div className="flex items-start gap-3 mb-3">
         <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
           <Sparkles size={18} className="text-blue-600" />
         </div>
         <div className="min-w-0">
-          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <h1 className="text-lg sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
             {a.title}
             {remainingLabel && (
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{remainingLabel}</span>
@@ -181,7 +181,6 @@ export default function AssistantPage() {
                   {m.preview && (
                     <PreviewCard
                       a={a}
-                      isAr={isAr}
                       preview={m.preview}
                       state={m.state}
                       busy={busy}
@@ -219,7 +218,8 @@ export default function AssistantPage() {
             />
             <Btn type="submit" disabled={busy || !input.trim() || remaining === 0} className="h-11 shrink-0">
               <Send size={15} />
-              <span className="hidden sm:inline">{a.send}</span>
+              {/* Phones get an icon-only button — keep the label for screen readers. */}
+              <span className="sr-only sm:not-sr-only">{a.send}</span>
             </Btn>
           </form>
         </>
@@ -240,7 +240,7 @@ function Intro({ a, onPick }: { a: (typeof ag)["en"]; onPick: (t: string) => voi
           <button
             key={i}
             onClick={() => onPick(ex)}
-            className="text-start text-xs border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-700 rounded-lg px-3 py-2 transition-colors"
+            className="text-start text-xs border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-700 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 inline-flex items-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             {ex}
           </button>
@@ -289,10 +289,9 @@ function Notice({ tone, children }: { tone: "warn"; children: React.ReactNode })
 /* ------------------------------ preview card ------------------------------ */
 
 function PreviewCard({
-  a, isAr, preview, state, busy, onConfirm, onCancel,
+  a, preview, state, busy, onConfirm, onCancel,
 }: {
   a: (typeof ag)["en"];
-  isAr: boolean;
   preview: Preview;
   state?: "pending" | "confirmed" | "cancelled";
   busy: boolean;
@@ -329,7 +328,7 @@ function PreviewCard({
             {state === "confirmed" ? `✓ ${a.confirm}` : a.cancelled}
           </p>
         ) : (
-          <div className={`flex gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          <div className="flex flex-wrap gap-2">
             <Btn onClick={onConfirm} disabled={busy || blocked}>
               <Check size={15} /> {busy ? a.writing : a.confirm}
             </Btn>
