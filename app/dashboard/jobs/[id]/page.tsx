@@ -263,29 +263,32 @@ export default function JobDetailPage() {
     <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
       <Link href="/dashboard/jobs" className="text-sm text-blue-600 hover:underline">{p.common.back}</Link>
 
-      {/* Header */}
-      <div className={`flex items-start justify-between gap-4 mt-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
-        <div className={isAr ? "text-right" : ""}>
-          <div className={`flex items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
-            <h1 className="text-2xl font-bold text-gray-900">{job.code}</h1>
+      {/* Header. `flex-wrap` + `w-full sm:w-auto` on the controls: title, status
+          select and two icon buttons cannot share one 375px line, so on a phone
+          the controls drop to their own full-width row (the select stretches,
+          the buttons keep their size) instead of pushing the page sideways. */}
+      <div className={`flex flex-wrap items-start justify-between gap-3 mt-3 mb-1 ${isAr ? "flex-row-reverse" : ""}`}>
+        <div className={`min-w-0 ${isAr ? "text-right" : ""}`}>
+          <div className={`flex flex-wrap items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+            <h1 className="text-2xl font-bold text-gray-900 break-all">{job.code}</h1>
             <Pill text={localize(job.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(job.priority)} />
           </div>
           <p className="text-sm text-gray-500 mt-1">{[job.client, job.product].filter(Boolean).join(" · ")}</p>
         </div>
-        <div className={`flex items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+        <div className={`flex items-center gap-1.5 w-full sm:w-auto ${isAr ? "flex-row-reverse" : ""}`}>
           <select
             value={job.status}
             onChange={(e) => handleStatus(e.target.value)}
-            className={`${inputCls} w-auto`}
+            className={`${inputCls} flex-1 min-w-0 sm:flex-none sm:w-auto`}
           >
             {options(JOB_STATUSES, p.jobs.statuses).map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          <button onClick={openEdit} className="text-gray-400 hover:text-blue-600 transition-colors p-2" title={p.jobs.edit}>
+          <button onClick={openEdit} className="shrink-0 text-gray-400 hover:text-blue-600 transition-colors p-2" title={p.jobs.edit}>
             <Pencil size={16} />
           </button>
-          <button onClick={handleDeleteJob} className="text-gray-300 hover:text-red-500 transition-colors p-2" title={p.common.delete}>
+          <button onClick={handleDeleteJob} className="shrink-0 text-gray-300 hover:text-red-500 transition-colors p-2" title={p.common.delete}>
             <Trash2 size={16} />
           </button>
         </div>
@@ -295,18 +298,21 @@ export default function JobDetailPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4 mb-6">
         <div className={`flex flex-wrap items-center justify-between gap-3 mb-4 ${isAr ? "flex-row-reverse" : ""}`}>
           <h2 className="font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
-          <div className={`flex items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
+          {/* flex-wrap: the Arabic edit-standard label is long, and together
+              with Print the pair cannot share one phone line. min-h-9 keeps
+              both tappable with a thumb. */}
+          <div className={`flex flex-wrap items-center gap-2 ${isAr ? "flex-row-reverse" : ""}`}>
             {standard && (
               <button
                 onClick={openStd}
-                className="text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
+                className="min-h-9 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
               >
                 {p.jobs.editStandard}
               </button>
             )}
             <button
               onClick={() => window.print()}
-              className="text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
+              className="min-h-9 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 transition-colors print:hidden"
             >
               {isAr ? "طباعة" : "Print"}
             </button>
@@ -389,7 +395,7 @@ export default function JobDetailPage() {
       </div>
 
       {/* Runs credited to this job */}
-      <div className={`flex items-center justify-between mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-2 mb-3 ${isAr ? "flex-row-reverse" : ""}`}>
         <h2 className="font-semibold text-gray-900">{p.jobs.runsForJob}</h2>
         <Btn onClick={openLog}><Plus size={15} /> {p.runs.add}</Btn>
       </div>

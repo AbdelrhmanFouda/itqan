@@ -135,9 +135,11 @@ export default function JobsPage() {
                 href={`/dashboard/jobs/${j.id}`}
                 className="block bg-white border border-gray-200 hover:border-blue-300 rounded-xl px-5 py-4 transition-colors"
               >
-                <div className={`flex items-center justify-between gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
+                <div className={`flex items-start justify-between gap-4 ${isAr ? "flex-row-reverse" : ""}`}>
                   <div dir={isAr ? "rtl" : "ltr"} className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    {/* flex-wrap: code + two pills don't fit one phone line;
+                        wrapping beats squeezing the pills off the card. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="font-semibold text-gray-900">{j.code}</span>
                       <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
                       <Pill text={localize(j.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(j.priority)} />
@@ -153,8 +155,15 @@ export default function JobsPage() {
                           ? `${fmt(j.qtyOrderedKg)} ${p.jobs.kg} × ${j.pieceWeightG} ${p.jobs.gPerPc} = ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
                           : p.jobs.noWeight}
                     </p>
+                    {/* Phone: the due date lives under the meta instead of in a
+                        side column that would squeeze the code + pills row. */}
+                    {j.dueDate && (
+                      <p className={`sm:hidden text-xs mt-1 ${overdue ? "text-red-600 font-medium" : "text-gray-400"}`}>
+                        {p.jobs.due}: {j.dueDate}{overdue ? ` · ${p.jobs.overdue}` : ""}
+                      </p>
+                    )}
                   </div>
-                  <div className={`text-xs shrink-0 ${isAr ? "text-left" : "text-right"}`}>
+                  <div className={`hidden sm:block text-xs shrink-0 ${isAr ? "text-left" : "text-right"}`}>
                     {j.dueDate && (
                       <p className={overdue ? "text-red-600 font-medium" : "text-gray-400"}>
                         {p.jobs.due}: {j.dueDate}{overdue ? ` · ${p.jobs.overdue}` : ""}
