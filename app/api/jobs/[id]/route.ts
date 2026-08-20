@@ -33,6 +33,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const cycleSec = num(m.cycle), cavities = num(m.cavities);
       const perHour = cycleSec > 0 && cavities > 0 ? (3600 / cycleSec) * cavities : null;
       standard = {
+        // The Master row + raw cell text, so the page can offer an EDIT of the
+        // product's standard. Master's numeric columns are free text on purpose
+        // («4+4», «15جم», «تحتسب ورديات») — the edit must round-trip the raw
+        // string, never a parsed number, or it would destroy that notation.
+        row: m.row,
+        name: m.name || "",
+        cavitiesRaw: m.cavities || "",
+        cycleRaw: m.cycle || "",
         weight: m.weight || "",
         material: m.material || "",
         cavities: cavities || null,
@@ -55,12 +63,58 @@ const EDITABLE = new Set([
   "status", "priority", "machine", "materialIssued", "masterbatch", "instructions", "notes",
 ]);
 
+// The Master columns the job page may edit — the product's STANDARD, nothing
+// that carries identity. `name`, `code` and `id` are deliberately absent:
+// everything in the workbook joins on the product name, so renaming from here
+// would orphan every production row, job and hourly log at once.
+const MASTER_EDITABLE = new Set(["weight", "material", "cavities", "cycle", "defects"]);
+
+/**
+ * Edit the product's standard in «الرئيسي», located by NAME, not by row.
+ *
+ * The row number the client holds came from an earlier read, and a colleague
+ * edits this sheet daily — rows shift. So the name is verified against a FRESH
+ * read at the stored row first, and if it moved, re-resolved by name; zero or
+ * several matches refuse rather than guess («سماعة اريون» genuinely exists
+ * twice in Master, rows 289 and 453). Same identity rule as `mapToMaster()`,
+ * including the whitespace-folding normalization — «زراير» carries a trailing
+ * tab that one-sided trimming would break.
+ */
+async function updateMasterStandard(m: { row?: unknown; name?: unknown; changes?: unknown }) {
+  const row = Number(m.row);
+  const name = String(m.name ?? "");
+  const changes: Record<string, string> = {};
+  for (const [k, v] of Object.entries((m.changes ?? {}) as Record<string, unknown>)) {
+    if (MASTER_EDITABLE.has(k)) changes[k] = String(v ?? "");
+  }
+  if (!name.trim()) return { ok: false, reason: "no_name" };
+  if (Object.keys(changes).length === 0) return { ok: true };
+
+  const master = await getRecords("master", { fresh: true });
+  const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  let target = master.records.find((r) => r.row === row && norm(r.name) === norm(name));
+  if (!target) {
+    const hits = master.records.filter((r) => norm(r.name) === norm(name));
+    if (hits.length !== 1) return { ok: false, reason: "identity_mismatch" };
+    target = hits[0];
+  }
+  return updateRecord("master", target.row, changes);
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
   const { id } = await params;
   try {
     const body = (await req.json()) as Record<string, unknown>;
+
+    // A Master-standard edit rides this route (rather than the generic sheet
+    // PATCH) so it gets the name-verified row resolution above.
+    if (body.master && typeof body.master === "object") {
+      const res = await updateMasterStandard(body.master as Record<string, unknown>);
+      return NextResponse.json(res, { status: res.ok ? 200 : 400 });
+    }
+
     const changes: Record<string, string> = {};
     for (const [k, v] of Object.entries(body)) {
       const key = k === "qtyOrdered" ? "qty" : k;

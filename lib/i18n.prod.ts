@@ -100,6 +100,13 @@ export const pd = {
       noRuns: "No runs logged for this job yet.",
       placeholderCode: "e.g. JOB-0042",
       unitsRemaining: "remaining",
+      edit: "Edit Job",
+      editStandard: "Edit Master standard",
+      standardWarning:
+        "This edits the product's row in «الرئيسي» (Master) — it changes this product everywhere: every job, rate and OEE figure that uses it.",
+      saveFailed: "Saving failed — try again.",
+      masterIdentity:
+        "Could not locate this product's Master row — the name is duplicated or has changed. Reload the page and try again.",
     },
     runs: {
       title: "Production Log",
@@ -192,20 +199,21 @@ export const pd = {
       todayEvents: "Stoppages today",
       empty: "No stoppages recorded today.",
       minutes: "min",
+      day: "d",
       change: "Change",
       saving: "Saving…",
       failed: "Could not save — try again.",
       export: "Export CSV",
       machinesFailed: "Could not load the machine list.",
-      // Stoppages started and never stopped — see lib/downtime.ts isStaleOpen().
-      staleTitle: "Stoppages that were never stopped",
+      // Stoppages still running past their factory day. They KEEP recording
+      // (owner's rule, 2026-08-20) — these strings feed the owner's dashboard
+      // banner, which is informational, not a call to close anything.
+      staleTitle: "Machines down since a previous day",
       staleBody:
-        "These are NOT counted in Availability, so downtime is under-reported until each one is closed.",
-      staleReview: "Review them",
-      staleClose: "Close at end of shift",
+        "Still counting — the stoppage keeps recording until someone taps stop. The minutes are written the moment it is stopped; until then they are not yet in Availability.",
+      staleReview: "Open downtime",
       staleEstimated: "estimated",
       staleSince: "started",
-      estimatedNote: "Estimated — nobody tapped stop, so the time runs to the moment it was closed.",
       errAuth: "Your session expired. Sign out and sign in again.",
       errRole: "Your account does not have access to downtime. Ask the owner to grant it.",
       errNet: "Could not load the list — check the connection.",
@@ -306,6 +314,13 @@ export const pd = {
       noRuns: "لا توجد تسجيلات لهذا الأمر بعد.",
       placeholderCode: "مثال: JOB-0042",
       unitsRemaining: "متبقٍ",
+      edit: "تعديل الأمر",
+      editStandard: "تعديل بيانات المنتج في الرئيسي",
+      standardWarning:
+        "التعديل هنا يغيّر صف المنتج في «الرئيسي» — يعني بيتغيّر في كل مكان: كل الأوامر والمعدلات وحسابات الكفاءة اللي بتستخدمه.",
+      saveFailed: "فشل الحفظ — جرّب تاني.",
+      masterIdentity:
+        "تعذّر تحديد صف المنتج في «الرئيسي» — الاسم مكرر أو اتغيّر. حدّث الصفحة وجرّب تاني.",
     },
     runs: {
       title: "سجل الإنتاج",
@@ -395,19 +410,18 @@ export const pd = {
       todayEvents: "عدد التوقفات النهاردة",
       empty: "مفيش توقفات مسجلة النهاردة.",
       minutes: "دقيقة",
+      day: "يوم",
       change: "غيّر",
       saving: "بيتسجل…",
       failed: "مقدرناش نسجل — جرّب تاني.",
       export: "تنزيل CSV",
       machinesFailed: "مقدرناش نحمّل قائمة الماكينات.",
-      staleTitle: "توقفات مااتقفلتش",
+      staleTitle: "ماكينات واقفة من يوم سابق",
       staleBody:
-        "دي مش محسوبة في الجاهزية، يعني وقت التوقف أقل من الحقيقة لحد ما تتقفل.",
-      staleReview: "راجعها",
-      staleClose: "اقفلها بنهاية الوردية",
+        "لسه بتحسب — التوقف مستمر لحد ما حد يضغط «رجعت تشتغل». الدقايق بتتسجل ساعة الإيقاف، وقبلها مش داخلة في الجاهزية.",
+      staleReview: "افتح التوقفات",
       staleEstimated: "تقديري",
       staleSince: "بدأت",
-      estimatedNote: "تقديري — محدش ضغط «رجعت تشتغل»، والوقت محسوب لحد لحظة الإقفال.",
       errAuth: "الجلسة انتهت. اعمل تسجيل خروج ودخول تاني.",
       errRole: "الحساب ده مالوش صلاحية على التوقفات. كلّم صاحب المصنع يفتحها لك.",
       errNet: "مقدرناش نحمّل القائمة — اتأكد من النت.",

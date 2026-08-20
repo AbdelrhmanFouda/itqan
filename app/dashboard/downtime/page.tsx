@@ -35,9 +35,19 @@ const TAP =
   "min-h-[64px] rounded-2xl border-2 px-4 py-3 text-lg font-semibold transition " +
   "active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100";
 
-function elapsed(from: number, now: number): string {
+/**
+ * Live duration of a running stoppage. Day-aware since 2026-08-20 (owner's
+ * rule): a stoppage keeps recording across shift and day boundaries until
+ * somebody taps stop, so the counter must be able to say "2 يوم 5:20", not
+ * wrap into a meaningless "53:20 دقيقة".
+ */
+function elapsed(from: number, now: number, minWord: string, dayWord: string): string {
   const m = Math.max(0, Math.floor((now - from) / 60000));
-  return m < 60 ? `${m}` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  if (m < 60) return `${m} ${minWord}`;
+  const h = Math.floor(m / 60);
+  const mm = String(m % 60).padStart(2, "0");
+  if (h < 24) return `${h}:${mm}`;
+  return `${Math.floor(h / 24)} ${dayWord} ${h % 24}:${mm}`;
 }
 
 export default function DowntimePage() {
@@ -100,11 +110,13 @@ export default function DowntimePage() {
   }, []);
 
   // Re-poll while something is running so a stop from another phone shows here.
+  // Stoppages from a previous day count as running too — they keep recording.
+  const runningCount = (data?.open.length ?? 0) + (data?.stale.length ?? 0);
   useEffect(() => {
-    if (!data?.open.length) return;
+    if (!runningCount) return;
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
-  }, [data?.open.length, load]);
+  }, [runningCount, load]);
 
   async function start(reason: string) {
     if (!machine || busy) return;
@@ -132,17 +144,20 @@ export default function DowntimePage() {
   }
 
   /**
-   * `estimate` closes a stoppage nobody stopped. It is always a deliberate tap
-   * by a person — nothing here closes anything on a timer — and the row is
-   * flagged `estimated` for good, capped server-side at the end of its shift.
+   * Stop a running stoppage. Always a MEASURED stop, whichever day it started
+   * on: a shift ending does not restart the machine (owner's rule, 2026-08-17),
+   * and since 2026-08-20 a stoppage from a previous day is not closed "as
+   * estimated" either — it simply keeps recording until this tap, and the
+   * minutes run start → now. (`estimate: true` still exists server-side for a
+   * deliberate owner review, but nothing on this page sends it any more.)
    */
-  async function stop(id: string, estimate = false) {
+  async function stop(id: string) {
     if (busy) return;
     setBusy(true); setFailed(false);
     const res = await authedFetch("/api/downtime", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(estimate ? { id, estimate: true } : { id }),
+      body: JSON.stringify({ id }),
     }).catch(() => null);
     setBusy(false);
     if (!res || !res.ok) { setFailed(true); return; }
@@ -156,13 +171,18 @@ export default function DowntimePage() {
     return <Spinner text={p.common.loading} />;
   }
 
-  const openList = data?.open ?? [];
-  const staleList = data?.stale ?? [];
+  // A stoppage started on a previous day is still RUNNING — it keeps recording
+  // until somebody taps stop (owner's rule, 2026-08-20). The API still reports
+  // the two lists separately (the owner surfaces use `stale`), but this page
+  // shows them as one, longest-down first.
+  const openList = [...(data?.stale ?? []), ...(data?.open ?? [])]
+    .sort((a, b) => a.startedAt - b.startedAt);
   const todayList = data?.today ?? [];
 
-  // A machine with an unclosed stoppage — running OR stale — must not be
-  // startable again; that would open a second event and double-count it.
-  const openByMachine = new Set([...openList, ...staleList].map((e) => e.machine));
+  // A machine with an unclosed stoppage must not be startable again; that
+  // would open a second event and double-count it. openList already includes
+  // stoppages carried over from previous days.
+  const openByMachine = new Set(openList.map((e) => e.machine));
   const lostToday = todayList.reduce((s, e) => s + e.minutes, 0);
   // ALL_ rather than CAPTURE_: today's finished list comes from «التوقفات» now,
   // and the tab holds reasons that are no longer offered as buttons («عطل»,
@@ -218,42 +238,10 @@ export default function DowntimePage() {
         </div>
       )}
 
-      {/* ---- Never stopped. Above everything: these carry no minutes at all, so
-           they are missing from Availability until somebody closes them. ---- */}
-      {staleList.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-semibold text-amber-700 mb-2">
-            {t.staleTitle} ({staleList.length})
-          </h2>
-          <p className="text-sm text-gray-600 mb-3">{t.staleBody}</p>
-          <div className="space-y-3">
-            {staleList.map((e) => (
-              <div
-                key={e.id}
-                className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-lg font-bold text-gray-900 truncate">{e.machine}</div>
-                  <div className="text-sm text-amber-800">
-                    {reasonLabel(e.reason)} · {t.staleSince} {e.date}
-                  </div>
-                </div>
-                <button
-                  onClick={() => stop(e.id, true)}
-                  disabled={busy}
-                  className={`${TAP} border-amber-600 bg-amber-600 text-white px-5 shrink-0`}
-                >
-                  {t.staleClose}
-                </button>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-gray-500">{t.estimatedNote}</p>
-        </section>
-      )}
-
       {/* ---- Running stoppages: the STOP half. Always first — a machine that is
-           down is the most urgent thing on the page. ---- */}
+           down is the most urgent thing on the page. A stoppage from a previous
+           day stays HERE, still counting, with the same measured stop — it is
+           not moved to a "forgotten" pile (owner's rule, 2026-08-20). ---- */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-gray-500 mb-2">{t.running}</h2>
         {openList.length === 0 ? (
@@ -268,8 +256,16 @@ export default function DowntimePage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-lg font-bold text-gray-900 truncate">{e.machine}</div>
                   <div className="text-sm text-red-700">
-                    {reasonLabel(e.reason)} · {t.runningSince} {elapsed(e.startedAt, now)} {t.minutes}
+                    {reasonLabel(e.reason)} · {t.runningSince}{" "}
+                    {elapsed(e.startedAt, now, t.minutes, t.day)}
                   </div>
+                  {/* Started on an earlier factory day — say so, so a long
+                      stoppage reads as deliberate, not as a stuck counter. */}
+                  {e.date !== data?.todayDate && (
+                    <div className="text-xs text-amber-700 mt-0.5">
+                      {t.staleSince} {e.date}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => stop(e.id)}

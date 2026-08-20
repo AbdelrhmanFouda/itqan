@@ -190,6 +190,16 @@ sidebar and `canAccess()`.
     **Nothing auto-closes.** A person reviews each one and closes it, which marks the row
     `estimated: true` + `closedBy`, so a reconstructed number can never be mistaken for a
     measured one. `explain`/the report disclose the estimated total separately.
+  - ⚠ **A STOPPAGE FROM A PREVIOUS DAY IS STILL RUNNING (owner's rule, 2026-08-20).** The
+    floor page used to move a stale-open stoppage into a "never stopped" pile whose only
+    action was close-as-estimated — which read as "it stopped at the end of the shift as
+    if someone forgot to log it". It no longer does: the page merges `stale` into the
+    running list, the counter is day-aware ("2 يوم 5:20"), the card shows its start date,
+    and the SAME measured stop applies — minutes run start → now, `estimated: false`.
+    The API is unchanged (`open`/`stale` are still two lists; the owner surfaces read
+    `stale`, reworded from "forgotten" to "still down since a previous day"), and the
+    `estimate: true` PATCH branch survives server-side for a deliberate owner review —
+    but no UI sends it any more.
   - ⚠ **A SHIFT ENDING DOES NOT END THE STOPPAGE (owner's rule, 2026-08-17).** Closing a
     stale stoppage used to cap its minutes at `factoryDayEnd()` — 08:00 the next morning —
     reasoning that a machine "cannot have been down past the shift it was logged in". That
