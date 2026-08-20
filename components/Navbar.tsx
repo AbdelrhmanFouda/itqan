@@ -23,7 +23,7 @@ export default function Navbar() {
     { href: "#services", label: tr.nav.services },
     { href: "#about", label: tr.nav.about },
     { href: "#team", label: tr.nav.team },
-    { href: "#products", label: tr.nav.products },
+    // #products removed with the section (2026-08-20) — no product names on the landing page.
     { href: "#clients", label: tr.nav.clients },
     { href: "#tools", label: tr.nav.tools },
     { href: "#contact", label: tr.nav.contact },
