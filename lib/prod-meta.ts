@@ -103,6 +103,13 @@ export const DOWNTIME_CAPTURE_REASONS: DowntimeReason[] = [
   { key: "Maintenance",      ar: "صيانة في الماكينة",          en: "Machine maintenance", planned: false },
   { key: "Material drying",  ar: "تجفيف خامة",                en: "Material drying",   planned: true },
   { key: "No operator",      ar: "توقف بسبب عدم وجود عامل",    en: "No operator",       planned: false, organisational: true },
+  // Added 2026-08-22 at the owner's word, after «أخرى» reached 25 of 54 rows:
+  // the two causes it was hiding. "No order" is the RETIRED key revived — same
+  // key, so sheet history groups with it; "No material" is new (deliberately
+  // NOT the retired «خامة», which meant a material PROBLEM, not absence).
+  { key: "No material",      ar: "عدم وجود خامة",              en: "No material",       planned: false, organisational: true },
+  { key: "No order",         ar: "لا يوجد أمر شغل",            en: "No order",          planned: false, organisational: true },
+  { key: "Sprue broken",     ar: "كسر المصب",                 en: "Sprue broken",      planned: false },
   { key: "Other",            ar: "أخرى",                      en: "Other",             planned: false },
 ];
 
@@ -117,7 +124,7 @@ export const DOWNTIME_CAPTURE_REASONS: DowntimeReason[] = [
 const RETIRED_DOWNTIME_REASONS: DowntimeReason[] = [
   { key: "Breakdown",    ar: "عطل",              en: "Breakdown",    planned: false },
   { key: "Material",     ar: "خامة",             en: "Material",     planned: false },
-  { key: "No order",     ar: "لا يوجد أمر شغل",   en: "No order",     planned: false, organisational: true },
+  // "No order" left this list on 2026-08-22 — revived as a capture button.
   { key: "Quality hold", ar: "إيقاف للجودة",      en: "Quality hold", planned: false },
   { key: "None",         ar: "لا يوجد",           en: "None",         planned: true },
 ];

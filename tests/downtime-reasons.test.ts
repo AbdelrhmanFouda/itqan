@@ -14,18 +14,21 @@ import {
   downtimeReasonFromSheet, downtimeEstimatedFromSheet, normalizeArabic,
 } from "../lib/prod-meta.ts";
 
-test("the owner's seven reasons plus «أخرى», in the owner's order", () => {
+test("the owner's ten reasons plus «أخرى», in the owner's order", () => {
+  // 2026-08-22: «عدم وجود خامة», «لا يوجد أمر شغل» (the retired key revived) and
+  // «كسر المصب» added at the owner's word, after «أخرى» reached 25 of 54 rows.
   assert.deepEqual(
     DOWNTIME_CAPTURE_REASONS.map((r) => r.key),
     ["Setup", "Nozzle burn", "Mold change", "Mold maintenance", "Maintenance",
-     "Material drying", "No operator", "Other"],
+     "Material drying", "No operator", "No material", "No order", "Sprue broken", "Other"],
   );
   assert.deepEqual(
     DOWNTIME_CAPTURE_REASONS.map((r) => r.ar),
     ["ضبط منتج", "حرق فونيه", "تغيير الاسطمبة", "صيانة الاسطمبة",
-     "صيانة في الماكينة", "تجفيف خامة", "توقف بسبب عدم وجود عامل", "أخرى"],
+     "صيانة في الماكينة", "تجفيف خامة", "توقف بسبب عدم وجود عامل",
+     "عدم وجود خامة", "لا يوجد أمر شغل", "كسر المصب", "أخرى"],
   );
-  assert.equal(DOWNTIME_CAPTURE_REASONS.length, 8);
+  assert.equal(DOWNTIME_CAPTURE_REASONS.length, 11);
   assert.equal(DOWNTIME_CAPTURE_REASONS[DOWNTIME_CAPTURE_REASONS.length - 1].key, "Other",
     "«أخرى» stays last");
 });
@@ -81,6 +84,11 @@ test("an unknown reason counts as UNPLANNED, never as scheduled", () => {
 
 test("«عدم وجود عامل» is flagged organisational so the report can single it out", () => {
   assert.equal(isOrganisationalDowntime("No operator"), true);
+  // The two 2026-08-22 absence reasons are organisational for the same reason:
+  // nothing broke — something was not provided. A broken sprue is a machine fault.
+  assert.equal(isOrganisationalDowntime("No material"), true);
+  assert.equal(isOrganisationalDowntime("No order"), true);
+  assert.equal(isOrganisationalDowntime("Sprue broken"), false);
   assert.equal(isOrganisationalDowntime("Nozzle burn"), false);
   assert.equal(isOrganisationalDowntime("unknown"), false);
 });
@@ -90,12 +98,14 @@ test("«عدم وجود عامل» is flagged organisational so the report can s
 test("retired keys still resolve for display and grouping", () => {
   // They are gone from the buttons but remain in the sheet's own «سبب التوقف»
   // vocabulary, so anything typed there must still group and must not render as
-  // a bare English key on an Arabic page.
-  for (const k of ["Breakdown", "Material", "No order", "Quality hold", "None"]) {
+  // a bare English key on an Arabic page. ("No order" left this list on
+  // 2026-08-22 — it is a button again, same key, so its history groups with it.)
+  for (const k of ["Breakdown", "Material", "Quality hold", "None"]) {
     assert.ok(!DOWNTIME_CAPTURE_REASONS.some((r) => r.key === k), `${k} should not be a button`);
     assert.ok(ALL_DOWNTIME_REASONS.some((r) => r.key === k), `${k} must still resolve`);
     assert.notEqual(downtimeReasonAr(k), k, `${k} has no Arabic label`);
   }
+  assert.ok(DOWNTIME_CAPTURE_REASONS.some((r) => r.key === "No order"), "No order is a button again");
 });
 
 test("every reason in the sheet's own vocabulary resolves", () => {
