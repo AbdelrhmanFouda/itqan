@@ -79,6 +79,11 @@ export type JobShaped = {
   remaining: number;
   // --- pulled from «الرئيسي» by product name; 0 when the product isn't there
   linked: boolean;       // false ⇒ product not registered in Master yet
+  /** The product NAME matches MORE THAN ONE Master row (26 names do, as of the
+   *  2026-08-27 survey — it was one). First row wins for the standards below,
+   *  which may therefore belong to a different product with the same name; the
+   *  UI must say so rather than present them as certain. */
+  ambiguous: boolean;
   pieceWeightG: number;
   cavities: number;
   cycleSec: number;
@@ -108,12 +113,17 @@ export async function loadJobs(): Promise<{
     loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
   ]);
 
-  // Product → standards, first row wins (same as the sheet's VLOOKUP).
+  // Product → standards, first row wins (same as the sheet's VLOOKUP) — and a
+  // count per name, because "first row wins" is only honest while the name is
+  // unique. Names that appear twice get flagged on the job (`ambiguous`).
   const std = new Map<string, { w: number; cav: number; cyc: number; mat: string }>();
+  const nameCount = new Map<string, number>();
   for (const m of masterTab.records) {
     // NOTE: the master entity calls the product column `name`, not `product`.
     const key = normKey(m.name);
-    if (!key || std.has(key)) continue;
+    if (!key) continue;
+    nameCount.set(key, (nameCount.get(key) ?? 0) + 1);
+    if (std.has(key)) continue;
     std.set(key, {
       w: firstNum(m.weight),
       cav: sumCavities(m.cavities),
@@ -195,6 +205,7 @@ export async function loadJobs(): Promise<{
       qtyOrdered: pieces,
       qtyOrderedKg: kg,
       linked: !!s,
+      ambiguous: (nameCount.get(normKey(r.product)) ?? 0) > 1,
       pieceWeightG: s?.w ?? 0,
       cavities: s?.cav ?? 0,
       cycleSec: s?.cyc ?? 0,

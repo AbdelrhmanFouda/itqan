@@ -38,6 +38,8 @@ export default function DashboardPage() {
   // they are absent from Availability — the owner has to see that here, not
   // only on the entry page the floor uses.
   const [stale, setStale] = useState<StaleEvent[]>([]);
+  // "" until the guarded fetch answers; the tile only renders on a real date.
+  const [lastDowntimeLog, setLastDowntimeLog] = useState("");
 
   useEffect(() => {
     fetch("/api/machines").then((r) => r.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
@@ -46,7 +48,7 @@ export default function DashboardPage() {
     // Guarded route (the rows carry createdBy), so this one is authenticated.
     authedFetch("/api/downtime")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setStale(d?.stale ?? []))
+      .then((d) => { setStale(d?.stale ?? []); setLastDowntimeLog(d?.lastLoggedDate ?? ""); })
       .catch(() => {});
   }, []);
 
@@ -76,6 +78,13 @@ export default function DashboardPage() {
   const overdue = jobs.filter(
     (j) => !DONE.includes(j.status) && j.dueDate && j.dueDate < today
   ).length;
+
+  // Days since the last «التوقفات» row. Capture going quiet is invisible by
+  // nature — it looks exactly like nothing breaking — so the gap is surfaced
+  // here where the owner looks daily. (24→27 Aug 2026 went unnoticed this way.)
+  const daysSinceDowntimeLog = lastDowntimeLog
+    ? Math.max(0, Math.floor((Date.parse(today) - Date.parse(lastDowntimeLog)) / 86_400_000))
+    : null;
 
   const monthRuns = runs.filter((r) => (r.date || "").startsWith(ym));
   const good = monthRuns.reduce((s, r) => s + (r.goodUnits || 0), 0);
@@ -145,6 +154,14 @@ export default function DashboardPage() {
           value={overdue}
           tone={overdue > 0 ? "red" : undefined}
         />
+        {daysSinceDowntimeLog !== null && (
+          <Stat
+            label={p.overview.lastDowntimeLog}
+            value={fmt(daysSinceDowntimeLog)}
+            sub={`${p.overview.daysAgo} · ${lastDowntimeLog}`}
+            tone={daysSinceDowntimeLog > 2 ? "amber" : undefined}
+          />
+        )}
         <Stat label={p.overview.unitsThisMonth} value={fmt(good)} />
         <Stat
           label={p.overview.scrapThisMonth}

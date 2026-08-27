@@ -50,6 +50,8 @@ export const pd = {
       recentRuns: "Recent production",
       noData: "No production logged yet. Add a run to see numbers here.",
       units: "units",
+      lastDowntimeLog: "Days since last stoppage logged",
+      daysAgo: "days",
     },
     molds: {
       title: "Mold Catalog",
@@ -107,6 +109,9 @@ export const pd = {
       saveFailed: "Saving failed — try again.",
       masterIdentity:
         "Could not locate this product's Master row — the name is duplicated or has changed. Reload the page and try again.",
+      ambiguous: "duplicate name in Master",
+      ambiguousNote:
+        "This product name exists MORE THAN ONCE in «الرئيسي». The standards and piece counts shown here come from the first matching row and may belong to a different product with the same name. Rename one of the rows in Master (a distinguishing suffix is enough) to make this certain.",
     },
     runs: {
       title: "Production Log",
@@ -218,6 +223,14 @@ export const pd = {
       errRole: "Your account does not have access to downtime. Ask the owner to grant it.",
       errNet: "Could not load the list — check the connection.",
       retry: "Try again",
+      // Owner-only review: relabel «أخرى» rows with their real reason.
+      reclassTitle: "Stoppages logged as «أخرى» — set the real reason",
+      reclassBody: "Owner review: pick a stoppage, then pick what actually happened. One cell is written to the sheet.",
+      reclassEmpty: "No «أخرى» stoppages need review.",
+      reclassPick: "What actually happened?",
+      reclassRejected: "The sheet refused this value — add the new reasons to the «سبب التوقف» dropdown first (Data → Data validation).",
+      reclassChanged: "The row changed in the sheet — the list was refreshed, try again.",
+      reclassFailed: "Could not save — try again.",
     },
   },
   ar: {
@@ -262,6 +275,8 @@ export const pd = {
       recentRuns: "أحدث الإنتاج",
       noData: "لم يُسجَّل إنتاج بعد. أضف تسجيلاً لرؤية الأرقام هنا.",
       units: "وحدة",
+      lastDowntimeLog: "أيام منذ آخر تسجيل توقف",
+      daysAgo: "يوم",
     },
     molds: {
       title: "كتالوج القوالب",
@@ -321,6 +336,9 @@ export const pd = {
       saveFailed: "فشل الحفظ — جرّب تاني.",
       masterIdentity:
         "تعذّر تحديد صف المنتج في «الرئيسي» — الاسم مكرر أو اتغيّر. حدّث الصفحة وجرّب تاني.",
+      ambiguous: "اسم مكرر في الرئيسي",
+      ambiguousNote:
+        "اسم المنتج ده موجود أكتر من مرة في «الرئيسي». المعايير وعدد القطع المعروضة هنا جاية من أول صف مطابق وممكن تكون لمنتج تاني بنفس الاسم. غيّر اسم أحد الصفوف في الرئيسي (إضافة بسيطة للاسم تكفي) عشان الرقم يبقى مؤكد.",
     },
     runs: {
       title: "سجل الإنتاج",
@@ -426,6 +444,13 @@ export const pd = {
       errRole: "الحساب ده مالوش صلاحية على التوقفات. كلّم صاحب المصنع يفتحها لك.",
       errNet: "مقدرناش نحمّل القائمة — اتأكد من النت.",
       retry: "جرّب تاني",
+      reclassTitle: "توقفات متسجلة «أخرى» — حدد السبب الحقيقي",
+      reclassBody: "مراجعة للمالك: اختار التوقف، وبعدين اختار اللي حصل فعلاً. بيتكتب في الشيت خلية واحدة.",
+      reclassEmpty: "مفيش توقفات «أخرى» محتاجة مراجعة.",
+      reclassPick: "إيه اللي حصل فعلاً؟",
+      reclassRejected: "الشيت رفض القيمة — ضيف الأسباب الجديدة لقايمة «سبب التوقف» الأول (Data → Data validation).",
+      reclassChanged: "الصف اتغير في الشيت — القائمة اتحدثت، جرّب تاني.",
+      reclassFailed: "مقدرناش نحفظ — جرّب تاني.",
     },
   },
 } satisfies Record<Lang, unknown>;

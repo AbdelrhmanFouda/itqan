@@ -6,6 +6,7 @@ import { pd } from "@/lib/i18n.prod";
 import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
+import { hasFullAccess } from "@/lib/roles";
 
 /**
  * PHASE 2 — downtime capture, built for a phone on the factory floor.
@@ -29,6 +30,7 @@ type Event = {
   estimated?: boolean;
 };
 type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string };
+type OtherRow = { row: number; date: string; machine: string; minutes: number; notes: string };
 
 /** Big enough to hit with a work glove on. */
 const TAP =
@@ -53,7 +55,7 @@ function elapsed(from: number, now: number, minWord: string, dayWord: string): s
 
 export default function DowntimePage() {
   const { lang } = useLang();
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const p = pd[lang];
   const t = p.downtime;
   const isAr = lang === "ar";
@@ -66,6 +68,13 @@ export default function DowntimePage() {
   const [loadErr, setLoadErr] = useState<"auth" | "role" | "net" | null>(null);
   // Ticks once a minute so a running stoppage counts up on its own.
   const [now, setNow] = useState(() => Date.now());
+  // ---- Owner-only review of «أخرى» rows (never rendered for the floor) ----
+  const role = profile?.role;
+  const isBoss = !!role && hasFullAccess(role);
+  const [others, setOthers] = useState<OtherRow[] | null>(null);
+  const [reclassRow, setReclassRow] = useState<number | null>(null);
+  const [reclassBusy, setReclassBusy] = useState(false);
+  const [reclassErr, setReclassErr] = useState<"" | "save" | "rejected" | "changed">("");
 
   /**
    * Load the open/stale/today lists.
@@ -104,6 +113,36 @@ export default function DowntimePage() {
     if (authLoading || !user) return;
     load();
   }, [authLoading, user, load]);
+
+  const loadOthers = useCallback(async () => {
+    const res = await authedFetch("/api/downtime/reclassify").catch(() => null);
+    if (res?.ok) setOthers((await res.json()).rows ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !user || !isBoss) return;
+    loadOthers();
+  }, [authLoading, user, isBoss, loadOthers]);
+
+  /** Owner review: write the real reason onto one «أخرى» row. */
+  async function reclassify(r: OtherRow, reason: string) {
+    if (reclassBusy) return;
+    setReclassBusy(true); setReclassErr("");
+    const res = await authedFetch("/api/downtime/reclassify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row: r.row, date: r.date, machine: r.machine, minutes: r.minutes, reason }),
+    }).catch(() => null);
+    setReclassBusy(false);
+    if (res?.ok) {
+      setReclassRow(null);
+      await loadOthers();
+      return;
+    }
+    if (res?.status === 409) { setReclassErr("changed"); await loadOthers(); return; }
+    const why = res ? ((await res.json().catch(() => ({}))) as { reason?: string }).reason : "";
+    setReclassErr(why === "cell_rejected" ? "rejected" : "save");
+  }
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -368,6 +407,66 @@ export default function DowntimePage() {
           </div>
         )}
       </section>
+
+      {/* ---- OWNER REVIEW: relabel «أخرى» rows. Renders for owner/manager
+           only — the floor never sees it, so the four-tap flow is untouched.
+           «أخرى» reached 25 of 54 rows including the biggest events; a Pareto
+           where half the minutes are "Other" answers nothing. ---- */}
+      {isBoss && others !== null && (
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold text-gray-500 mb-1">
+            {t.reclassTitle}{others.length > 0 ? ` (${others.length.toLocaleString("ar-EG")})` : ""}
+          </h2>
+          <p className="text-sm text-gray-500 mb-3">{t.reclassBody}</p>
+          {reclassErr && (
+            <div className="mb-3 rounded-xl border-2 border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {reclassErr === "rejected" ? t.reclassRejected
+                : reclassErr === "changed" ? t.reclassChanged
+                : t.reclassFailed}
+            </div>
+          )}
+          {others.length === 0 ? (
+            <EmptyState text={t.reclassEmpty} />
+          ) : (
+            <div className="space-y-2">
+              {others.map((r) => (
+                <div key={r.row} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+                  <button
+                    onClick={() => { setReclassErr(""); setReclassRow(reclassRow === r.row ? null : r.row); }}
+                    className="w-full min-h-11 flex items-center justify-between gap-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold text-gray-900 truncate">{r.machine}</div>
+                      <div className="text-sm text-gray-500">{r.date}</div>
+                    </div>
+                    <div className="text-lg font-bold text-gray-900 shrink-0 tabular-nums">
+                      {r.minutes.toLocaleString("ar-EG")} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
+                    </div>
+                  </button>
+                  {reclassRow === r.row && (
+                    <div className="mt-3 border-t border-gray-100 pt-3">
+                      <p className="text-sm font-semibold text-gray-600 mb-2">{t.reclassPick}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {DOWNTIME_CAPTURE_REASONS.filter((x) => x.key !== "Other").map((x) => (
+                          <button
+                            key={x.key}
+                            onClick={() => reclassify(r, x.key)}
+                            disabled={reclassBusy}
+                            className="min-h-11 rounded-xl border-2 border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 hover:border-blue-400 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                          >
+                            {isAr ? x.ar : x.en}
+                          </button>
+                        ))}
+                      </div>
+                      {reclassBusy && <p className="mt-2 text-sm text-gray-500">{t.saving}</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

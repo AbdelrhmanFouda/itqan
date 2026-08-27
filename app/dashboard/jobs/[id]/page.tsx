@@ -25,7 +25,7 @@ type Job = {
   qtyOrdered: number; qtyOrderedKg: number; startDate: string; dueDate: string;
   status: string; priority: string; machine: string;
   materialIssued: string; masterbatch: string; instructions: string; notes: string;
-  produced: number; scrapped: number;
+  produced: number; scrapped: number; ambiguous: boolean;
 };
 type Standard = {
   // row + raw cell text let this page EDIT the standard in «الرئيسي». The raw
@@ -334,6 +334,14 @@ export default function JobDetailPage() {
             </button>
           </div>
         </div>
+        {/* Everything joins on the product NAME; when it exists twice in
+            Master, the standards and piece counts below are a first-match
+            guess, and the owner must hear that here, not discover it later. */}
+        {job.ambiguous && (
+          <div className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            {p.jobs.ambiguousNote}
+          </div>
+        )}
         <div className="grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm">
           <Detail label={p.jobs.part} value={job.product || "—"} />
           <Detail label={isAr ? "كود الاسطمبة" : "Mold code"} value={job.moldCode || "—"} />

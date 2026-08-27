@@ -61,6 +61,11 @@ export async function GET(req: NextRequest) {
       stale: open.filter((e) => isStaleOpen(e, today)),   // never stopped, day is over
       today: rows.filter((e) => e.date === today),        // from «التوقفات»
       todayDate: today,
+      // Newest row in «التوقفات» (rows are sorted newest first) — the dashboard
+      // home turns this into "days since the last stoppage was logged", because
+      // capture going quiet looked exactly like nothing breaking until someone
+      // checked the tab by hand (silent 24→27 Aug 2026 before this existed).
+      lastLoggedDate: rows[0]?.date ?? "",
     });
   } catch (err) {
     console.error(err);

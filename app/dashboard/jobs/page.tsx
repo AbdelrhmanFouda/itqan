@@ -24,7 +24,7 @@ type Job = {
   status: string; priority: string; machine: string;
   materialIssued: string; masterbatch: string; instructions: string; notes: string;
   produced: number; scrapped: number; remaining: number;
-  linked: boolean; pieceWeightG: number; cavities: number; cycleSec: number;
+  linked: boolean; ambiguous: boolean; pieceWeightG: number; cavities: number; cycleSec: number;
   material: string; estHours: number;
 };
 type Data = { jobs: Job[]; writable: boolean; configured: boolean };
@@ -155,6 +155,9 @@ export default function JobsPage() {
                       <span className="font-semibold text-gray-900">{j.code}</span>
                       <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
                       <Pill text={localize(j.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(j.priority)} />
+                      {/* The name matches >1 Master row — the numbers below may
+                          belong to a different product with the same name. */}
+                      {j.ambiguous && <Pill text={p.jobs.ambiguous} tone="amber" />}
                     </div>
                     <p className="text-xs text-gray-500 mt-1 truncate">
                       {[j.client, j.product, j.machine].filter(Boolean).join(" · ") || "—"}
