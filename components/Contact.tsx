@@ -11,19 +11,29 @@ export default function Contact() {
   const tr = t[lang];
   const isAr = lang === "ar";
   const [sent, setSent] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  /**
+   * Success is claimed ONLY on a confirmed 2xx. This used to call setSent(true)
+   * unconditionally, so a visitor whose enquiry hit a 500 (or no network) was
+   * told «تم الإرسال» while no record existed anywhere that they tried — a lead
+   * lost with a green checkmark on it. On failure the form stays filled and the
+   * visitor is told to retry.
+   */
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setFailed(false);
     const form = e.currentTarget;
     const data = Object.fromEntries(new FormData(form));
-    await fetch("/api/contact", {
+    const res = await fetch("/api/contact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    });
-    setSent(true);
+    }).catch(() => null);
+    if (res && res.ok) setSent(true);
+    else setFailed(true);
     setLoading(false);
   }
 
@@ -123,6 +133,11 @@ export default function Contact() {
                 className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors resize-y"
               />
             </motion.div>
+            {failed && (
+              <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300 text-sm">
+                {tr.contact.failed}
+              </div>
+            )}
             <motion.div variants={fadeInUp}>
               <button
                 type="submit"

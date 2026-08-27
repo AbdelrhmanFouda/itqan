@@ -80,6 +80,7 @@ export const t = {
       message: "Message",
       send: "Send Message",
       sent: "Message sent! We'll be in touch.",
+      failed: "Your message was NOT sent — please try again, or contact us directly.",
     },
     footer: {
       rights: "All rights reserved.",
@@ -208,6 +209,7 @@ export const t = {
       message: "الرسالة",
       send: "إرسال الرسالة",
       sent: "تم الإرسال! سنتواصل معك قريباً.",
+      failed: "لم يتم إرسال رسالتك — حاول مرة أخرى، أو تواصل معنا مباشرة.",
     },
     footer: {
       rights: "جميع الحقوق محفوظة.",
