@@ -41,6 +41,27 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-08-20 → 27) — see ../CHANGES-2026-08-27.md for the full story
+
+- **A stoppage from a previous day keeps recording** (`b5eb2f8`) — no more "forgotten"
+  pile on the floor page; day-aware counter, measured stop. Details in the Downtime
+  section below.
+- **Jobs are fully editable from the site** (`b5eb2f8`) — edit modal for every
+  «أوامر العمل» column + an edit-Master-standard modal; Master rows re-located by product
+  NAME on a fresh read, raw cell text round-tripped so «4+4» survives.
+- **Site-wide UI polish** (`ffbfea8`, 35 files, presentation only). Rollback tag
+  **`before-redesign`** is pushed. The marketing dark ground is a `.marketing-dark`
+  wrapper class on `app/page.tsx`, NOT on `body`.
+- **No real product names on the landing page** (`90ab433`) — «أعمالنا» section removed.
+- **Three new downtime reasons** (`032f18f`) — «عدم وجود خامة» (new key `No material`),
+  «لا يوجد أمر شغل» (`No order` revived from the retired list), «كسر المصب»
+  (`Sprue broken`). Eleven buttons, «أخرى» last. The sheet dropdown still needs the three
+  values (owner).
+- **The workbook was re-surveyed 2026-08-27** and several claims in this file dated 9 Aug
+  are corrected in place below, each marked *(REVISED 2026-08-27)*. The biggest: «الإنتاج»
+  now carries native سستم/هالك/«حالة السجل», and **`deriveScrap()` can double-count** until
+  it credits already-logged scrap — that fix is agreed but NOT yet built.
+
 ## Recently landed (2026-08-14) — downtime moved into the sheet
 
 «التوقفات» is the stoppage log now, read and written like «الإنتاج» and «الأعطال». The 37
@@ -142,8 +163,10 @@ sidebar and `canAccess()`.
   that need typing are empty across 417 rows, while the tapped hourly log has 20 unbroken
   days. **Treat it as a hard constraint: no extra tap, question, menu, free-text field or
   word of English may be added to that flow.** Raise it with the owner instead.
-  - The reason buttons are the owner's own eight (`DOWNTIME_CAPTURE_REASONS`), in his order,
-    «أخرى» last. ONE FLAT LIST — never grouped into planned/unplanned sections or a
+  - The reason buttons are the owner's own **eleven** (`DOWNTIME_CAPTURE_REASONS`), in his
+    order, «أخرى» last. Three added 2026-08-27 at his word: «عدم وجود خامة» (`No material`,
+    organisational), «لا يوجد أمر شغل» (`No order` — retired key revived), «كسر المصب»
+    (`Sprue broken`). ONE FLAT LIST — never grouped into planned/unplanned sections or a
     two-step pick; that distinction is none of the worker's business.
   - Each reason carries `planned` (and `organisational`) as **metadata set in code**. The
     worker is never asked it and never sees it. It surfaces only on owner-facing surfaces:
@@ -277,16 +300,16 @@ sidebar and `canAccess()`.
 
 | Tab | Role |
 |---|---|
-| `الرئيسي` (Master) | Source of truth, header row 2, data rows 3+. Cols A–P incl. F weight, H cavities (DESIGN count), I cycle(s), J worst cycle |
+| `الرئيسي` (Master) | Source of truth, header row 2, data rows 3+. *(REVISED 2026-08-27)* A new «الفئة / Category» column at E shifted the letters: F weight → **G نوع الخام, I cavities (DESIGN count), J cycle(s), K worst cycle**. Column matching is by keyword so code was unaffected — but don't trust old letters. 485 rows; **26 product names exist twice** (was just «سماعة اريون») |
 | `الاسطمبات` (Molds), `المنتجات` (Products) | Row-aligned formula views of Master — READ ONLY |
 | `الماكينات` (machines) | Registry, one row per physical machine. **The code label «PQ n — ton» (hidden col J) is the machine's identity everywhere** — production col C, OEE grouping, issue dropdowns. Tonnages repeat, so the code is the key. The registry has been renumbered four times: never hardcode it, always re-read. |
-| `الإنتاج` (production) | One row per machine/day: A date, B shift, C machine LABEL, D mold, E product (must match Master name EXACTLY — joins are by name), H good, I scrap, J downtime, K reason |
-| `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4; 24 hour columns 08:00→07:00 holding PIECES; AB سستم (=SUM), AC فعلي (hand count), AE متوقع, الكفاءة %, AF الهالك, AG حالة السجل, AH hidden scrap denominator |
+| `الإنتاج` (production) | One row per machine/**shift**: A date, B shift, C machine LABEL, E product (must match Master name EXACTLY — joins are by name). *(REVISED 2026-08-27)* The tab now carries QUALITY natively: H سليم, **I «الأجمالي سستم» (new), J هالك — FILLED on 374 of 593 rows, exactly سستم − سليم — and K «حالة السجل»** (سليم / لم يُعد بعد / الفعلي أكبر من العداد). Downtime/reason/operator/notes columns are still never filled — downtime still joins from «التوقفات». B also holds «عطلة» / «يوم جمعة» day-off markers |
+| `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4. *(REVISED 2026-08-27)* **The shift column is GONE** — layout is date \| machine/code \| product \| 24 hour columns 08:00→07:00 (PIECES) \| سستم (=SUM) \| فعلي \| «المتوقع (للساعات المسجلة)» — now computed for LOGGED hours \| الكفاءة % \| الهالك \| حالة السجل \| «أساس احتساب الهالك» (new). 307 rows; the 08:00 cell is filled on only 44 of them (crews skip the first hour) |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
 | `التوقفات` | **The stoppage log — the source of truth for downtime since 2026-08-14.** Header row 1, data row 2+. A date, B machine (dropdown ← «الماكينات»!J), C reason (Arabic dropdown), **D minutes — the only field anything computes from, validated > 0**, E/F optional clock times, G تقديري؟ نعم/لا, H سُجل بواسطة, I ملاحظات. Joins to «الإنتاج» on `date` + the machine label. Built by `../production/scripts/downtime-tab.gs` |
 | `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name. **K (status) and L (priority) are validated ARABIC lists** — K is exactly `لم يبدأ · جاري التشغيل · متوقف · مكتمل`. The app keeps English tokens internally and maps at the boundary via `jobStatusToSheet`/`FromSheet` in `lib/prod-meta.ts`. `Quoted`/`Delivered` have no Arabic counterpart, so they are no longer written — adding them is a sheet change the owner must approve |
 | `الأعطال` | Issues log (date, machine, **product**, category, description, action, status, notes). Dropdowns from machines!J / Master!C — layout applied by `setupIssuesTab()` in apps-script.gs (re-run to repair) |
-| `العملاء` (Clients), `لوحة البيانات` (Dashboard) | Manual contacts / counters |
+| `العملاء` (Clients), `لوحة البيانات` (Dashboard) | *(REVISED 2026-08-27)* «العملاء» was rebuilt as a mini-dashboard: title + note rows, headers at ROW 3 (الرقم / العميل / عدد المنتجات / آخر طلب / الشخص المسؤول / الهاتف), 60 clients. Contact person + phone are EMPTY (yellow, to fill). Keyword header detection still finds row 3 |
 
 **The hourly board «الإنتاج بالساعة» was DELETED on 2026-07-19** at the owner's request.
 `../board-formatting.gs` and `../scrap-autofill.gs` target it and will throw — they are dead.
@@ -297,6 +320,12 @@ Domain semantics:
   sheet. Computed **only on self-consistent rows** (both numeric AND سستم ≥ فعلي); rows where
   فعلي > سستم are flagged and excluded, because the cause is missing hours in the log.
   `deriveScrap()` mirrors this on the site side.
+  ⚠ *(REVISED 2026-08-27)* «الإنتاج» rows now carry scrap NATIVELY (374 of 593 rows), and
+  `deriveScrap()` predates that: it skips runs with logged scrap but still distributes the
+  FULL hourly day-total onto the day's scrapless runs, so a day mixing a native-scrap row
+  with a «لم يُعد بعد» row can count the same scrap twice in Quality/OEE. **The fix — credit
+  already-logged scrap against the day total before distributing, and prefer native scrap
+  as primary — is agreed and NOT yet built. Do it before trusting Quality.**
 - Master keeps the **design** cavity count. Molds often run with damaged cavities blocked.
   A per-run open-cavities column was built and then dropped from the final workbook — if you
   see `openCavities` in old code paths, it is vestigial.
