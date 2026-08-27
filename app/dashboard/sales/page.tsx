@@ -9,7 +9,7 @@ import { authedFetch } from "@/lib/authed-fetch";
 
 type Inquiry = {
   id: string; name: string; company: string; phone: string;
-  email: string; inquiryType: string; message: string; createdAt: number;
+  email: string; inquiryType: string; message: string; source: string; createdAt: number;
 };
 type Job = {
   id: string; code: string; client: string; product: string;
@@ -84,7 +84,11 @@ export default function SalesPage() {
                 ) : null}
               </div>
               {q.message ? <p className="text-sm text-gray-600 mt-3 leading-relaxed">{q.message}</p> : null}
-              <p className="text-xs text-gray-400 mt-3">{a.sales.received}: {recv(q.createdAt)}</p>
+              <p className="text-xs text-gray-400 mt-3">
+                {a.sales.received}: {recv(q.createdAt)}
+                {/* utm/referrer attribution, when the visit carried one */}
+                {q.source ? <span className="break-all [overflow-wrap:anywhere]" dir="ltr"> · {q.source}</span> : null}
+              </p>
             </div>
           ))}
         </div>

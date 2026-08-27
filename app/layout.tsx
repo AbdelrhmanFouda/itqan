@@ -9,9 +9,23 @@ import { LANG_COOKIE, langFromValue } from "@/lib/lang-cookie";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://itqan-taupe.vercel.app"),
   title: "Itqan — Industrial Manufacturing",
   description:
     "Plastic injection molding, fan counterweights, and CNC mold manufacturing in Egypt.",
+  // WhatsApp is the distribution channel here — without these a shared link
+  // renders with no preview card at all. The image comes from
+  // app/opengraph-image.tsx (generated, brand-true, no stock photos).
+  openGraph: {
+    title: "إتقان Itqan — حقن بلاستيك وتصنيع اسطمبات",
+    description:
+      "مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC — Plastic injection molding, fan counterweights and CNC mold making in Egypt.",
+    url: "/",
+    siteName: "Itqan إتقان",
+    type: "website",
+    locale: "ar_EG",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 /**

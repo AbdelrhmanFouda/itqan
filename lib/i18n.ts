@@ -12,6 +12,8 @@ export const t = {
       tools: "Equipment",
       contact: "Contact",
       dashboard: "Dashboard",
+      call: "Call us",
+      whatsapp: "WhatsApp",
     },
     hero: {
       tagline: "Industrial Manufacturing",
@@ -142,6 +144,8 @@ export const t = {
       tools: "المعدات",
       contact: "تواصل معنا",
       dashboard: "لوحة التحكم",
+      call: "اتصل بنا",
+      whatsapp: "واتساب",
     },
     hero: {
       tagline: "التصنيع الصناعي",

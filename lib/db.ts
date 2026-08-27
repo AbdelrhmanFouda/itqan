@@ -192,6 +192,10 @@ export type InquiryInput = {
   email?: string;
   inquiry_type?: string;
   message?: string;
+  /** Where the visitor came from: utm_* params + referrer, captured client-side
+   *  at submit. Stored from day one so ad attribution never needs to be
+   *  reconstructed retrospectively. */
+  source?: string;
 };
 
 export async function addInquiry(input: InquiryInput) {
@@ -202,6 +206,7 @@ export async function addInquiry(input: InquiryInput) {
     email: input.email ?? "",
     inquiryType: input.inquiry_type ?? "",
     message: input.message ?? "",
+    source: input.source ?? "",
     createdAt: Date.now(),
   });
   return { ok: true };
@@ -209,7 +214,7 @@ export async function addInquiry(input: InquiryInput) {
 
 type InquiryDoc = {
   name?: string; company?: string; phone?: string;
-  email?: string; inquiryType?: string; message?: string; createdAt?: number;
+  email?: string; inquiryType?: string; message?: string; source?: string; createdAt?: number;
 };
 
 export async function getInquiries() {
@@ -223,6 +228,7 @@ export async function getInquiries() {
       email: d.email ?? "",
       inquiryType: d.inquiryType ?? "",
       message: d.message ?? "",
+      source: d.source ?? "",
       createdAt: d.createdAt ?? 0,
     }))
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));

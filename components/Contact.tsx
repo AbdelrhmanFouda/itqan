@@ -5,6 +5,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { fadeInUp, staggerContainer } from "@/lib/animations";
 import { Send, CheckCircle } from "lucide-react";
+import ContactChannels from "@/components/ContactChannels";
 
 export default function Contact() {
   const { lang } = useLang();
@@ -26,7 +27,19 @@ export default function Contact() {
     setLoading(true);
     setFailed(false);
     const form = e.currentTarget;
-    const data = Object.fromEntries(new FormData(form));
+    const data = Object.fromEntries(new FormData(form)) as Record<string, string>;
+    // Attribution: utm_* + referrer, captured at submit. Must exist BEFORE any
+    // ad money is spent — it cannot be reconstructed retrospectively.
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const parts: string[] = [];
+      for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]) {
+        const v = q.get(k);
+        if (v) parts.push(`${k}=${v}`);
+      }
+      if (document.referrer) parts.push(`ref=${document.referrer}`);
+      data.source = parts.join("&").slice(0, 500);
+    } catch { /* attribution must never block the enquiry itself */ }
     const res = await fetch("/api/contact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,6 +71,11 @@ export default function Contact() {
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
           <p className="text-gray-500">{tr.contact.subtitle}</p>
+          {/* Phone-first channels above the form — most buyers here call or
+              WhatsApp rather than type. Hidden until the env carries a number. */}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <ContactChannels size="hero" />
+          </div>
         </motion.div>
 
         {sent ? (

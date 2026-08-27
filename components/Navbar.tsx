@@ -5,6 +5,7 @@ import { t } from "@/lib/i18n";
 import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import ContactChannels from "@/components/ContactChannels";
 
 export default function Navbar() {
   const { lang, setLang } = useLang();
@@ -70,6 +71,9 @@ export default function Navbar() {
             {tr.nav.dashboard}
             <span className="absolute -bottom-0.5 start-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
           </Link>
+          {/* Direct channels at the top of the page — renders only when the
+              owner has supplied the number via env (see ContactChannels). */}
+          <ContactChannels />
           <button
             onClick={() => setLang(isAr ? "en" : "ar")}
             className="text-sm px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 text-gray-300 hover:text-white hover:bg-blue-500/10 transition-all font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
@@ -125,6 +129,9 @@ export default function Navbar() {
               >
                 {tr.nav.dashboard}
               </Link>
+              <div className="flex flex-wrap items-center gap-2 pt-3">
+                <ContactChannels />
+              </div>
             </div>
           </motion.div>
         )}
