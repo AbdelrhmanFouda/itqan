@@ -65,6 +65,17 @@ Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
   double-counting days that mix a native-scrap row with a «لم يُعد بعد» row), and a
   multi-day stoppage's minutes are now split across the factory days it covered at READ
   time (`splitAcrossFactoryDays` in lib/downtime.ts — the sheet stays one tap = one row).
+- **Front door + review tools (second wave, ../CHANGES-2026-08-27.md §7):** the contact
+  form only claims success on a confirmed 2xx; `/api/contact` gained a per-IP rate limit,
+  field caps, a utm/referrer `source` on every inquiry and a Resend notify hook (env-
+  gated); WhatsApp/call buttons render only when `NEXT_PUBLIC_CONTACT_PHONE` exists — no
+  placeholder ever ships; OG/twitter card + generated `app/opengraph-image.tsx` (no stock
+  photos posing as the factory) + `/sitemap.xml`. Dashboard home shows days-since-last-
+  stoppage-logged (the 24→27 Aug silence was ADOPTION, not a bug — write path verified
+  live). `/api/downtime/reclassify` (owner/manager ONLY — note the `requireRole(req, [])`
+  pattern) relabels «أخرى» rows after a fresh-read identity check; the downtime page's
+  review section renders only for owner/manager, so the floor flow is untouched. Jobs
+  carry `ambiguous: true` when the product name matches >1 Master row.
 
 ## Recently landed (2026-08-14) — downtime moved into the sheet
 
