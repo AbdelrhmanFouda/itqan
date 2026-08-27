@@ -2,7 +2,9 @@ import { getRecords, appendRecord, type SheetRecord, type UpdateResult } from "@
 import {
   getOpenDowntimeEvents, getPendingDowntimeEvents, markDowntimeSynced, type DowntimeEvent,
 } from "@/lib/db";
-import { summarizeDowntime, countsTowardDowntime, isStaleOpen } from "@/lib/downtime";
+import {
+  summarizeDowntime, countsTowardDowntime, isStaleOpen, splitAcrossFactoryDays,
+} from "@/lib/downtime";
 import {
   normalizeDate, latinDigits, factoryDay, parseClockMinutes, factoryDaySpan, formatClock,
 } from "@/lib/dates";
@@ -46,6 +48,9 @@ export type DowntimeRecord = {
   reason: string;       // canonical key (see downtimeReasonFromSheet)
   minutes: number;
   startedAt: number;    // 0 when «بداية التوقف» was left blank
+  /** «بداية التوقف» as minutes-of-day (Cairo wall clock), null when blank —
+   *  what `splitAcrossFactoryDays` needs to place a multi-day stoppage. */
+  startClockMin: number | null;
   endedAt: number | null;
   createdBy: string;    // «سُجل بواسطة»
   estimated: boolean;   // «تقديري؟» = نعم
@@ -109,10 +114,11 @@ const num = (v: string | undefined): number => {
  */
 export function shapeDowntimeRow(r: SheetRecord): DowntimeRecord {
   const date = normalizeDate(r.date);
+  const startClockMin = parseClockMinutes(r.start);
   // Both clock times resolved as a PAIR — see factoryDaySpan() for why an end
   // of «8:00» after a 19:28 start belongs to the next morning.
   const { startedAt, endedAt } = factoryDaySpan(
-    date, parseClockMinutes(r.start), parseClockMinutes(r.end),
+    date, startClockMin, parseClockMinutes(r.end),
   );
   return {
     id: `row:${r.row}`,
@@ -122,6 +128,7 @@ export function shapeDowntimeRow(r: SheetRecord): DowntimeRecord {
     reason: downtimeReasonFromSheet(r.reason),
     minutes: num(r.minutes),
     startedAt,
+    startClockMin,
     endedAt: endedAt || null,
     createdBy: r.loggedBy || "",
     estimated: downtimeEstimatedFromSheet(r.estimated),
@@ -175,11 +182,27 @@ export async function loadDowntimeTotals(month: string | null = null): Promise<D
     getOpenDowntimeEvents().catch(() => [] as DowntimeEvent[]),
   ]);
 
-  const inRange = all.filter((e) => e.date >= from && e.date <= to);
-  const tally = summarizeDowntime(inRange);
-  // The same predicate the tally used, so `events` and the totals can never
+  /**
+   * The TALLY works on day-slices, not rows (2026-08-27, owner's word): a
+   * multi-day stoppage contributes to every factory day it covered, not just
+   * its start day. Sliced over ALL rows BEFORE the month filter, deliberately —
+   * a stoppage that started 31 July and ran into 2 August must contribute its
+   * August minutes to August, and its July minutes must not leak in. A row
+   * without a start clock stays whole on its start day (the old behaviour).
+   */
+  const slices = all.flatMap((e) => {
+    if (!countsTowardDowntime(e)) return [e];
+    const parts = splitAcrossFactoryDays(e.date, e.startClockMin, e.minutes);
+    if (parts.length <= 1) return [e];
+    return parts.map((p) => ({ ...e, date: p.date, minutes: p.minutes }));
+  });
+  const tally = summarizeDowntime(slices.filter((s) => s.date >= from && s.date <= to));
+  // `events` stays one entry per ROW (Pareto listing, report, CSV counts) —
+  // membership by start day, same predicate as the tally so they cannot
   // disagree about which rows are real.
-  const events = inRange.filter(countsTowardDowntime);
+  const events = all
+    .filter((e) => e.date >= from && e.date <= to)
+    .filter(countsTowardDowntime);
 
   const today = factoryDay();
   const staleOpen = open

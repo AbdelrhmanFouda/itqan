@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen,
-  summarizeDowntime, countsTowardDowntime,
+  summarizeDowntime, countsTowardDowntime, splitAcrossFactoryDays, addDaysISO,
   type DowntimeRun, type DowntimeCountable,
 } from "../lib/downtime.ts";
 import { factoryDayEnd, factoryDay } from "../lib/dates.ts";
@@ -239,6 +239,72 @@ test("summarizeDowntime feeds distributeDowntime without any glue", () => {
   const spread = distributeDowntime([run("2026-08-09", "PQ 7 — 100")], t.byKey);
   assert.equal(spread.perRun[0], 90);
   assert.equal(spread.unallocatedMin, 0);
+});
+
+/* --------------- splitting a stoppage across factory days ------------------ */
+
+test("a stoppage that fits its factory day stays whole", () => {
+  // 10:00 start (offset 120 past 08:00), 600 min — ends 20:00, same day.
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", 600, 600), [
+    { date: "2026-08-20", minutes: 600 },
+  ]);
+});
+
+test("THE OWNER'S CASE: a multi-day stoppage lands on every day it covered", () => {
+  // Started 22:00 (offset 840) — 600 min left in the day; 900 min total.
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", 22 * 60, 900), [
+    { date: "2026-08-20", minutes: 600 },
+    { date: "2026-08-21", minutes: 300 },
+  ]);
+  // Three full days from exactly 08:00.
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", 480, 3000), [
+    { date: "2026-08-20", minutes: 1440 },
+    { date: "2026-08-21", minutes: 1440 },
+    { date: "2026-08-22", minutes: 120 },
+  ]);
+});
+
+test("a 02:00 start belongs to the tail of its factory day, not the head", () => {
+  // 02:00 → offset 1080, only 360 min left before 08:00 ends the day.
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", 120, 500), [
+    { date: "2026-08-20", minutes: 360 },
+    { date: "2026-08-21", minutes: 140 },
+  ]);
+});
+
+test("slices always sum to the row's minutes — column D stays the truth", () => {
+  for (const [clock, min] of [[480, 1], [1439, 1440], [0, 4321], [1000, 26629]] as const) {
+    const total = splitAcrossFactoryDays("2026-08-31", clock, min)
+      .reduce((s, p) => s + p.minutes, 0);
+    assert.equal(total, min);
+  }
+});
+
+test("no start clock ⇒ no split — guessing would move minutes invisibly", () => {
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", null, 2000), [
+    { date: "2026-08-20", minutes: 2000 },
+  ]);
+});
+
+test("nothing to split yields nothing", () => {
+  assert.deepEqual(splitAcrossFactoryDays("", 480, 100), []);
+  assert.deepEqual(splitAcrossFactoryDays("2026-08-20", 480, 0), []);
+});
+
+test("addDaysISO crosses months and years like a calendar", () => {
+  assert.equal(addDaysISO("2026-08-31", 1), "2026-09-01");
+  assert.equal(addDaysISO("2026-12-31", 1), "2027-01-01");
+  assert.equal(addDaysISO("2026-02-28", 1), "2026-03-01");
+});
+
+test("slices feed summarizeDowntime: a spanning stoppage raises BOTH days", () => {
+  const e = { date: "2026-08-20", machine: "PQ 12 — 180", reason: "Maintenance", minutes: 900 };
+  const parts = splitAcrossFactoryDays(e.date, 22 * 60, e.minutes)
+    .map((p) => ({ ...e, date: p.date, minutes: p.minutes }));
+  const t = summarizeDowntime(parts);
+  assert.equal(t.byKey.get(downtimeKey("2026-08-20", "PQ 12 — 180")), 600);
+  assert.equal(t.byKey.get(downtimeKey("2026-08-21", "PQ 12 — 180")), 300);
+  assert.equal(t.byReason.get("Maintenance"), 900, "the reason total is unchanged by the split");
 });
 
 test("CSV quotes separators and carries a BOM for Excel", () => {

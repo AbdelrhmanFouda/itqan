@@ -1,5 +1,5 @@
 import { getRecords } from "@/lib/sheets";
-import { normalizeDate, latinDigits } from "@/lib/dates";
+import { normalizeDate } from "@/lib/dates";
 import { hourShapeOf, hasHourDetail, type HourShape } from "@/lib/hour-shape";
 
 export { hourShapeOf, hasHourDetail };
@@ -55,9 +55,6 @@ function num(v: string | undefined): number | null {
   const n = Number(s.replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
-
-const normKey = (s: string | undefined) =>
-  latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
 /**
  * @param opts.shiftMinutesFor resolves a machine label to its planned minutes.
@@ -152,50 +149,12 @@ export async function loadHourlyRows(
 
 /* ------------------------- scrap join for production ------------------------ */
 
-export type ScrapJoinRun = { date: string; machine: string; goodUnits: number; scrapUnits: number };
-
 /**
- * Distribute the hourly-derived scrap (سستم − فعلي) onto production runs that
- * have NO logged scrap of their own. Grouped by day+machine; when a day has
- * several runs (shifts) on one machine, the scrap is split proportionally to
- * their good units (remainder-exact). Returns one derived value per run (0 = none).
+ * The maths moved to lib/scrap.ts on 2026-08-27 (pure, zero imports, tested) —
+ * re-exported here so `app/api/runs`, `lib/oee-data.ts` and `lib/jobs.ts` keep
+ * importing from the module they always did. The move carried a FIX: logged
+ * scrap is now credited against the hourly day-total before distribution, so a
+ * day mixing a native-scrap «الإنتاج» row with a «لم يُعد بعد» row no longer
+ * counts the same scrap twice. See lib/scrap.ts for the whole story.
  */
-export function deriveScrap(runs: ScrapJoinRun[], hourly: HourlyRow[]): number[] {
-  const scrapByKey = new Map<string, number>();
-  for (const h of hourly) {
-    if (h.scrap === null || h.scrap <= 0) continue;
-    const k = `${h.date}|${normKey(h.machine)}`;
-    scrapByKey.set(k, (scrapByKey.get(k) ?? 0) + h.scrap);
-  }
-
-  const groups = new Map<string, number[]>();
-  runs.forEach((r, i) => {
-    if (r.scrapUnits > 0 || !r.date) return; // logged scrap wins; undated rows skip
-    const k = `${r.date}|${normKey(r.machine)}`;
-    if (!scrapByKey.has(k)) return;
-    const g = groups.get(k);
-    if (g) g.push(i);
-    else groups.set(k, [i]);
-  });
-
-  const out = new Array<number>(runs.length).fill(0);
-  for (const [k, idxs] of groups) {
-    const total = scrapByKey.get(k) ?? 0;
-    if (total <= 0) continue;
-    const goods = idxs.map((i) => Math.max(0, runs[i].goodUnits));
-    const sumGood = goods.reduce((a, b) => a + b, 0);
-    let assigned = 0;
-    idxs.forEach((i, j) => {
-      let share =
-        j === idxs.length - 1
-          ? Math.max(0, total - assigned)
-          : sumGood > 0
-          ? Math.round((goods[j] / sumGood) * total)
-          : Math.round(total / idxs.length);
-      if (share < 0) share = 0;
-      assigned += share;
-      out[i] = share;
-    });
-  }
-  return out;
-}
+export { deriveScrap, type ScrapJoinRun } from "@/lib/scrap";

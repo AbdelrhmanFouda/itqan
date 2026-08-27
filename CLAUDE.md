@@ -59,8 +59,12 @@ Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
   values (owner).
 - **The workbook was re-surveyed 2026-08-27** and several claims in this file dated 9 Aug
   are corrected in place below, each marked *(REVISED 2026-08-27)*. The biggest: «الإنتاج»
-  now carries native سستم/هالك/«حالة السجل», and **`deriveScrap()` can double-count** until
-  it credits already-logged scrap — that fix is agreed but NOT yet built.
+  now carries native سستم/هالك/«حالة السجل».
+- **Two number-correctness fixes landed the same day:** `deriveScrap()` now CREDITS
+  already-logged scrap before distributing (lib/scrap.ts — pure, 7 tests; it was
+  double-counting days that mix a native-scrap row with a «لم يُعد بعد» row), and a
+  multi-day stoppage's minutes are now split across the factory days it covered at READ
+  time (`splitAcrossFactoryDays` in lib/downtime.ts — the sheet stays one tap = one row).
 
 ## Recently landed (2026-08-14) — downtime moved into the sheet
 
@@ -234,15 +238,18 @@ sidebar and `canAccess()`.
     tapped stop uses. `estimatedStopMinutes()` is deleted; see the note in its place in
     `lib/downtime.ts`. What bounds a forgotten tap is `isStaleOpen()` surfacing it the next
     morning and the `estimated` flag, not a cap that silently discarded minutes.
-  - ⚠ **Consequence, and it is NOT yet solved: a stoppage's minutes are all attributed to
-    its START day.** One row, one date. `distributeDowntime()` can only give a run
-    `plannedMin − downtimeMin` of headroom, so a stoppage longer than one day's planned time
-    cannot fully land and the remainder returns as `readiness.downtimeUnallocatedMin`.
-    Production already shows **10,012 of 17,253 minutes unallocated**, and removing the cap
-    makes long stoppages more common. The fix is to split a spanning stoppage across the
-    factory days it actually covered, one row per day — which changes what «التوقفات»
-    contains (one tap becomes several rows) and is the owner's call. Do not "solve" the
-    unallocated number by reinstating the cap.
+  - **SOLVED 2026-08-27 (owner's word), at READ time: a spanning stoppage's minutes now
+    land on every factory day it covered.** `splitAcrossFactoryDays()` (lib/downtime.ts,
+    pure, 8 tests) slices a row by its date + «بداية» clock into 08:00-bounded days, and
+    `loadDowntimeTotals()` tallies the SLICES — sliced before the month filter, so a
+    stoppage crossing a month boundary contributes to the right months. Chosen over
+    write-time splitting deliberately: the sheet stays one tap = one row, no multi-append
+    over an at-least-once bridge, and the pre-existing long rows are handled too. A row
+    with no start clock stays whole on its start day. Only 6 of the 54 current rows
+    actually cross a day boundary (a factory day is 24h; most 12h+ stoppages still fit) —
+    residual `downtimeUnallocatedMin` now mostly means "more downtime than the day's
+    PLANNED minutes" or "no production row that day", which is a modeling question, not an
+    attribution bug. Do not "solve" it by reinstating the cap.
   - **The two stores, and which does what.** «التوقفات» is the log — every total, chart,
     Pareto, CSV and report reads it, through `loadDowntimeTotals()`. Firestore holds only
     the OPEN stoppage, because it has no minutes yet. Three consequences worth knowing
@@ -320,12 +327,12 @@ Domain semantics:
   sheet. Computed **only on self-consistent rows** (both numeric AND سستم ≥ فعلي); rows where
   فعلي > سستم are flagged and excluded, because the cause is missing hours in the log.
   `deriveScrap()` mirrors this on the site side.
-  ⚠ *(REVISED 2026-08-27)* «الإنتاج» rows now carry scrap NATIVELY (374 of 593 rows), and
-  `deriveScrap()` predates that: it skips runs with logged scrap but still distributes the
-  FULL hourly day-total onto the day's scrapless runs, so a day mixing a native-scrap row
-  with a «لم يُعد بعد» row can count the same scrap twice in Quality/OEE. **The fix — credit
-  already-logged scrap against the day total before distributing, and prefer native scrap
-  as primary — is agreed and NOT yet built. Do it before trusting Quality.**
+  *(REVISED 2026-08-27, FIXED same day)* «الإنتاج» rows now carry scrap NATIVELY (374 of
+  593 rows), and `deriveScrap()` used to distribute the FULL hourly day-total onto the
+  day's scrapless runs — counting the logged share twice on any day mixing a native-scrap
+  row with a «لم يُعد بعد» row. It now CREDITS the day's logged scrap first and lives in
+  **lib/scrap.ts** (pure, zero imports, 7 tests — `tests/scrap.test.ts` pins the
+  double-count case); lib/hourly.ts re-exports it so no caller changed.
 - Master keeps the **design** cavity count. Molds often run with damaged cavities blocked.
   A per-run open-cavities column was built and then dropped from the final workbook — if you
   see `openCavities` in old code paths, it is vestigial.

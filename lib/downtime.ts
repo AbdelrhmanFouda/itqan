@@ -91,6 +91,70 @@ export function isStaleOpen(
  * threw minutes away.
  */
 
+/* -------------------- spreading a stoppage across days --------------------- */
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** ISO date + n days, pure calendar arithmetic (no timezone involved). */
+export function addDaysISO(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+
+export type DaySlice = { date: string; minutes: number };
+
+/**
+ * Split one stoppage's minutes across the factory days it actually covered.
+ *
+ * ── Why (owner's word, 2026-08-27) ────────────────────────────────────────
+ * A «التوقفات» row carries ONE date — the factory day the stoppage STARTED.
+ * Since a shift ending no longer ends a stoppage, 16 of 54 rows exceed a whole
+ * 720-minute shift, and dumping a multi-day stoppage's minutes on its start day
+ * meant most of them could never attach to any run (`downtimeUnallocatedMin`).
+ *
+ * This splits at READ time, so the sheet stays one tap = one row (the
+ * write-time alternative would have turned one stop into several appends over
+ * an at-least-once bridge, and would have left the 16 existing long rows
+ * wrong). The sheet's own column-D total is unchanged; only the site's per-day
+ * attribution improves — the same relationship the derived-scrap join has
+ * always had to its tab.
+ *
+ * The maths: the row's `date` is the factory day (08:00 → 08:00 Cairo wall
+ * clock) and «بداية التوقف» is a wall-clock time, so the offset into the
+ * factory day is exact: clock ≥ 08:00 ⇒ clock − 08:00, else clock + 16:00.
+ * The first day takes what fits before the next 08:00; the rest fills forward
+ * in whole 1440-minute days. `minutes` stays the single source of truth — the
+ * end clock is never consulted, so a row with a blank «نهاية» splits fine.
+ *
+ * No start clock at all ⇒ no split (everything on the start day, the old
+ * behaviour) — guessing an offset would move minutes between days invisibly.
+ */
+export function splitAcrossFactoryDays(
+  dateISO: string,
+  startClockMin: number | null,
+  minutes: number,
+): DaySlice[] {
+  if (!dateISO || !(minutes > 0)) return [];
+  const total = Math.round(minutes);
+  if (startClockMin === null || !Number.isFinite(startClockMin)) {
+    return [{ date: dateISO, minutes: total }];
+  }
+  const clock = Math.min(1439, Math.max(0, Math.round(startClockMin)));
+  const offset = clock >= 480 ? clock - 480 : clock + 960; // minutes past 08:00
+  const slices: DaySlice[] = [];
+  let remaining = total;
+  let day = 0;
+  let capacity = 1440 - offset; // what fits before the next 08:00
+  while (remaining > 0) {
+    const take = Math.min(remaining, capacity);
+    slices.push({ date: day === 0 ? dateISO : addDaysISO(dateISO, day), minutes: take });
+    remaining -= take;
+    day += 1;
+    capacity = 1440;
+  }
+  return slices;
+}
+
 /* ------------------------------ the tally --------------------------------- */
 
 /** The fields of a stoppage that any total depends on, whatever the store. */
