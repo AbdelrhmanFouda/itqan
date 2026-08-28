@@ -1,30 +1,28 @@
 /**
  * The always-Arabic route rule. Run with `npm test`.
  *
- * The downtime capture page is used by workers who do not read English, so it
- * must be Arabic whatever is stored and whoever is signed in. This mirrors the
- * inline pre-hydration script in app/layout.tsx — if one changes, both must.
+ * THE LIST IS EMPTY since 2026-08-28, at the owner's word: forcing the
+ * downtime page to Arabic also forced HIM to Arabic (toggle hidden) every
+ * time he opened the tab. The worker protection moved to the site-wide
+ * DEFAULT language, which is now Arabic — a worker who never touches the
+ * toggle sees Arabic everywhere without any route being forced.
+ *
+ * These tests pin the reversal: nothing is forced, and the mechanism still
+ * behaves safely if a route is ever re-added.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isArabicOnlyPath, ARABIC_ONLY } from "../lib/arabic-only.ts";
 
-test("the downtime capture page is always Arabic", () => {
-  assert.equal(isArabicOnlyPath("/dashboard/downtime"), true);
-  assert.equal(isArabicOnlyPath("/dashboard/downtime/anything"), true);
+test("no route is forced to Arabic — the owner reversed the forcing on 2026-08-28", () => {
+  assert.deepEqual(ARABIC_ONLY, [], "re-adding a forced route is an owner decision, not housekeeping");
 });
 
-test("no other page is forced — everyone else keeps their choice", () => {
-  for (const p of ["/dashboard", "/dashboard/jobs", "/dashboard/issues",
-                   "/dashboard/assistant", "/login", "/"]) {
+test("the downtime page follows the chosen language like every other page", () => {
+  for (const p of ["/dashboard/downtime", "/dashboard/downtime/x", "/dashboard",
+                   "/dashboard/jobs", "/login", "/"]) {
     assert.equal(isArabicOnlyPath(p), false, `${p} should not be forced`);
   }
-});
-
-test("a lookalike path is not forced", () => {
-  // Guards against a sloppy startsWith that would catch unrelated routes.
-  assert.equal(isArabicOnlyPath("/dashboard/downtime-report"), false);
-  assert.equal(isArabicOnlyPath("/dashboard/downtimes"), false);
 });
 
 test("null and empty are safe", () => {
@@ -33,12 +31,17 @@ test("null and empty are safe", () => {
   assert.equal(isArabicOnlyPath(""), false);
 });
 
-test("the inline bootstrap in app/layout.tsx agrees with this rule", () => {
-  // The script uses indexOf(...)===0 on the same prefix. Kept as an explicit
-  // assertion so the duplication cannot drift unnoticed.
-  const bootstrapSaysArabic = (p: string) => p.indexOf("/dashboard/downtime") === 0;
-  for (const p of ["/dashboard/downtime", "/dashboard/downtime/x", "/dashboard/jobs", "/login"]) {
-    assert.equal(bootstrapSaysArabic(p), isArabicOnlyPath(p), `disagreement on ${p}`);
+test("the mechanism still matches by whole path segment if a route returns", () => {
+  // Guards the startsWith logic against lookalike-prefix bugs, so re-adding
+  // a route later cannot silently catch unrelated pages.
+  const was = ARABIC_ONLY.length;
+  ARABIC_ONLY.push("/dashboard/downtime");
+  try {
+    assert.equal(isArabicOnlyPath("/dashboard/downtime"), true);
+    assert.equal(isArabicOnlyPath("/dashboard/downtime/x"), true);
+    assert.equal(isArabicOnlyPath("/dashboard/downtime-report"), false);
+    assert.equal(isArabicOnlyPath("/dashboard/downtimes"), false);
+  } finally {
+    ARABIC_ONLY.length = was;
   }
-  assert.deepEqual(ARABIC_ONLY, ["/dashboard/downtime"]);
 });

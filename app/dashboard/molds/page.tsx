@@ -9,7 +9,7 @@ const TITLE = { en: "Molds Register", ar: "حصر الاسطمبات" };
 // A server component (unlike the rest of the dashboard), so the tab title can
 // come from real metadata; the root layout's template appends the brand suffix.
 export async function generateMetadata(): Promise<Metadata> {
-  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "en";
+  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "ar"; // no stored choice -> Arabic (owner's word, 2026-08-28)
   return { title: TITLE[lang] };
 }
 

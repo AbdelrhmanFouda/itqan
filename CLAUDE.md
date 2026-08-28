@@ -232,10 +232,14 @@ sidebar and `canAccess()`.
   - `ALL_DOWNTIME_REASONS` keeps the retired keys (Breakdown, Material, No order, Quality
     hold, None) resolving for display and grouping — they are still in the sheet's own
     «سبب التوقف» vocabulary, and dropping them would make sheet-side downtime ungroupable.
-  - **The page is always Arabic** (`ARABIC_ONLY` in `context/LangContext.tsx`), whatever is
-    stored and whoever is signed in — it is used by people who do not read English. The
-    language toggle is hidden there rather than left dead. The forcing is render-only, so
-    an owner visiting the page does not have the rest of the site switched on him. `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
+  - **The page is NO LONGER forced to Arabic — owner's word, 2026-08-28.** It was
+    (`ARABIC_ONLY`, 2026-08-17, because workers do not read English), but the force also
+    switched the OWNER to Arabic with the toggle hidden every time he opened the tab, and
+    he asked for that to stop. The worker protection moved to the DEFAULT: the whole site
+    now falls back to ARABIC when no choice is stored (layout, LangContext, bootstrap, and
+    the three server pages all agree — grep "owner's word, 2026-08-28"), so a worker who
+    never touches the toggle still sees Arabic everywhere. `ARABIC_ONLY` is an EMPTY list
+    now (mechanism kept, `tests/arabic-only.test.ts` pins the reversal). `/api/downtime` (GET/POST/PATCH) and `/api/downtime/export` are ALL guarded,
   including the reads, because the rows carry «سُجل بواسطة» (a staff email).
   ⚠ **So is `/api/sheet/downtime`.** Adding the entity to `ENTITIES` made the generic sheet
   route able to serve the tab, and that route leaves every entity open except the ones
@@ -663,9 +667,10 @@ own «المتوقع». It is a domain question that outlived the feature.
     `cookies()`) renders the right language in the first byte.
   - **localStorage is kept, not replaced.** The inline script migrates a pre-cookie choice
     into the cookie so nobody re-picks, and it is the fallback when cookies are blocked.
-  - ⚠ The cookie is written from `stored`, **never from the effective `lang`**.
-    `/dashboard/downtime` forces Arabic for everyone; writing that would silently convert an
-    English-reading manager's own preference because he opened the capture page once.
+  - ⚠ The cookie is written from `stored`, **never from the effective `lang`**. The rule
+    predates 2026-08-28 (when /dashboard/downtime forced Arabic and writing the effective
+    value would have converted a manager's own preference); ARABIC_ONLY is empty now, but
+    keep the rule — it is what makes re-adding a forced route safe.
   - **Cost: every route is dynamic now**, not a static shell. ~30ms per request against
     sheet reads of 2.5–40s, and the shells were never the slow part — every page fetches its
     data client-side anyway. Do not "restore" static rendering without also solving the

@@ -41,7 +41,7 @@ export function storedLang(): Lang | null {
 const LangContext = createContext<{
   lang: Lang;
   setLang: (l: Lang) => void;
-}>({ lang: "en", setLang: () => {} });
+}>({ lang: "ar", setLang: () => {} });
 
 export function LangProvider({
   children,
@@ -56,7 +56,12 @@ export function LangProvider({
   // wins if it holds something, which is what carries a choice made before the
   // cookie existed. Once both agree (one navigation later) there is no
   // mismatch between the two renders at all.
-  const [stored, setStored] = useState<Lang>(() => storedLang() ?? initial ?? "en");
+  //
+  // The no-choice fallback is ARABIC (owner's word, 2026-08-28): it is the
+  // company language and what the shop floor reads. Keep it in step with the
+  // "ar" defaults in app/layout.tsx (generateMetadata, RootLayout, and the
+  // inline bootstrap script).
+  const [stored, setStored] = useState<Lang>(() => storedLang() ?? initial ?? "ar");
   const pathname = usePathname();
   const forcedArabic = isArabicOnlyPath(pathname);
   const lang: Lang = forcedArabic ? "ar" : stored;

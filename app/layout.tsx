@@ -34,7 +34,9 @@ const META = {
 } as const;
 
 export async function generateMetadata(): Promise<Metadata> {
-  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "en";
+  // No stored choice → ARABIC (owner's word, 2026-08-28) — the company
+  // language. Same fallback in RootLayout, LangContext and the bootstrap.
+  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "ar";
   const m = META[lang];
   return {
     metadataBase: new URL("https://itqan-taupe.vercel.app"),
@@ -61,30 +63,26 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * Two jobs, and neither replaces the other.
- *
- *  1. MIGRATE a choice that predates the cookie. Anyone who picked Arabic
- *     before 2026-08-17 has it in localStorage only, which the server cannot
- *     read, so their first load after this deploy would still be English.
- *     Copying it into the cookie here means the NEXT request is right, without
- *     them touching anything.
- *  2. FORCE Arabic on /dashboard/downtime, which is used by people who do not
- *     read English. That must not depend on a stored preference, on a cookie,
- *     or on finding a toggle — and it deliberately does NOT write the cookie,
- *     so visiting the capture page never rewrites anyone's own preference.
+ * One job: MIGRATE a choice that predates the cookie. Anyone who picked a
+ * language before 2026-08-17 has it in localStorage only, which the server
+ * cannot read, so their first load after that deploy would still miss it.
+ * Copying it into the cookie here means the NEXT request is right, without
+ * them touching anything.
  *
  * It still corrects `<html lang/dir>` too, which matters for the one render
- * where the cookie is missing and localStorage is not.
+ * where the cookie is missing and localStorage is not. The no-choice fallback
+ * is ARABIC — owner's word, 2026-08-28 — matching RootLayout and LangContext.
+ * (The script used to also FORCE Arabic on /dashboard/downtime; that forcing
+ * was removed the same day, at the owner's word — see lib/arabic-only.ts.)
  * Kept in sync with LANG_STORAGE_KEY and lib/lang-cookie.ts.
  */
 const LANG_BOOTSTRAP = `(function(){try{
-var f=location.pathname.indexOf("/dashboard/downtime")===0;
 var m=document.cookie.match(/(?:^|;\\s*)itqan\\.lang=(ar|en)(?:;|$)/);
 var c=m?m[1]:null;
 var s=localStorage.getItem("itqan.lang");
 if(s!=="ar"&&s!=="en")s=null;
 if(!c&&s){document.cookie="itqan.lang="+s+"; path=/; max-age=31536000; SameSite=Lax";c=s;}
-var l=f?"ar":(s||c||"en");
+var l=s||c||"ar";
 document.documentElement.lang=l;
 document.documentElement.dir=l==="ar"?"rtl":"ltr";
 }catch(e){}})();`;
@@ -94,9 +92,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // first byte is already in the right language instead of being corrected a
   // second later. Costs static prerendering of the shell — see CLAUDE.md.
   // `.get()` returns {name, value}, so this is a bare "ar" — langFromValue, not
-  // the header parser. Getting that wrong renders the whole site in English
-  // with every test still green.
-  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "en";
+  // the header parser. Getting that wrong renders the whole site in the
+  // fallback language with every test still green.
+  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "ar";
   const dir = lang === "ar" ? "rtl" : "ltr";
   return (
     <html lang={lang} dir={dir}>
