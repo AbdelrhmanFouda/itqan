@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState, useCallback } from "react";
@@ -21,6 +22,7 @@ export default function ProductionPage() {
   const { lang } = useLang();
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(p.runs.title);
 
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [molds, setMolds] = useState<Mold[]>([]);
@@ -64,8 +66,8 @@ export default function ProductionPage() {
         const mc = machines.find((m) => m.label === v);
         if (mc && mc.shiftLength > 0) next.plannedMin = String(mc.shiftLength);
       }
-      // Picking a mold also records the PRODUCT NAME — the sheet's hourly
-      // board and OEE both join production rows to Master by that name.
+      // Picking a mold also records the PRODUCT NAME — OEE joins production
+      // rows to Master by that name.
       if (k === "mold") {
         const md = molds.find((m) => (m.code || m.name) === v);
         next.product = md?.name ?? "";

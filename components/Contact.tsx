@@ -13,6 +13,7 @@ export default function Contact() {
   const isAr = lang === "ar";
   const [sent, setSent] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [needContact, setNeedContact] = useState(false);
   const [loading, setLoading] = useState(false);
 
   /**
@@ -26,8 +27,18 @@ export default function Contact() {
     e.preventDefault();
     setLoading(true);
     setFailed(false);
+    setNeedContact(false);
     const form = e.currentTarget;
     const data = Object.fromEntries(new FormData(form)) as Record<string, string>;
+    // A lead with no phone AND no email cannot be answered — someone once could
+    // describe a whole project and leave no way to reply. Require at least one
+    // channel before anything is sent; the server enforces the same rule
+    // (reason: "missing_contact") against scripted POSTs.
+    if (!data.phone?.trim() && !data.email?.trim()) {
+      setNeedContact(true);
+      setLoading(false);
+      return;
+    }
     // Attribution: utm_* + referrer, captured at submit. Must exist BEFORE any
     // ad money is spent — it cannot be reconstructed retrospectively.
     try {
@@ -45,8 +56,13 @@ export default function Contact() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }).catch(() => null);
-    if (res && res.ok) setSent(true);
-    else setFailed(true);
+    if (res && res.ok) {
+      setSent(true);
+    } else {
+      const j = res ? ((await res.json().catch(() => null)) as { reason?: string } | null) : null;
+      if (j?.reason === "missing_contact") setNeedContact(true);
+      else setFailed(true);
+    }
     setLoading(false);
   }
 
@@ -98,42 +114,56 @@ export default function Contact() {
           >
             <motion.div variants={fadeInUp} className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.name}</label>
+                <label htmlFor="contact-name" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.name}</label>
                 <input
+                  id="contact-name"
                   name="name"
+                  autoComplete="name"
                   required
                   className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.company}</label>
+                <label htmlFor="contact-company" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.company}</label>
                 <input
+                  id="contact-company"
                   name="company"
+                  autoComplete="organization"
                   className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
             </motion.div>
             <motion.div variants={fadeInUp} className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.phone}</label>
+                <label htmlFor="contact-phone" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.phone}</label>
                 <input
+                  id="contact-phone"
                   name="phone"
                   type="tel"
+                  autoComplete="tel"
                   className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.email}</label>
+                <label htmlFor="contact-email" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.email}</label>
                 <input
+                  id="contact-email"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm placeholder-gray-700 focus:outline-none transition-colors"
                 />
               </div>
             </motion.div>
+            {needContact && (
+              <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-300 text-sm">
+                {tr.contact.needContact}
+              </div>
+            )}
             <motion.div variants={fadeInUp}>
-              <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.type}</label>
+              <label htmlFor="contact-type" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.type}</label>
               <select
+                id="contact-type"
                 name="inquiry_type"
                 className="w-full bg-gray-950 border border-white/8 hover:border-white/15 focus:border-blue-500/50 rounded-xl px-4 py-3 text-white text-base sm:text-sm focus:outline-none transition-colors"
               >
@@ -143,8 +173,9 @@ export default function Contact() {
               </select>
             </motion.div>
             <motion.div variants={fadeInUp}>
-              <label className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.message}</label>
+              <label htmlFor="contact-message" className="block text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{tr.contact.message}</label>
               <textarea
+                id="contact-message"
                 name="message"
                 rows={4}
                 required

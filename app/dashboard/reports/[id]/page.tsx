@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState, use } from "react";
@@ -35,9 +36,10 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   const tr = t[lang];
   const isAr = lang === "ar";
   const [report, setReport] = useState<Report | null>(null);
+  usePageTitle(report ? `${tr.dashboard.reportFor} ${(isAr ? monthNamesAr : monthNames)[report.month - 1]} ${report.year}` : tr.dashboard.reports);
 
   useEffect(() => {
-    fetch(`/api/reports/${id}`)
+    authedFetch(`/api/reports/${id}`)
       .then((r) => r.json())
       .then(setReport)
       .catch(() => {});

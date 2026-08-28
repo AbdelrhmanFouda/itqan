@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useState, useCallback } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
@@ -21,6 +22,7 @@ export default function QualityPage() {
   const a = ad[lang];
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(a.quality.title);
   const today = new Date().toISOString().slice(0, 10);
 
   const [date, setDate] = useState(today);

@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getReports, addReport } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
 
-export async function GET() {
+// Guarded read (2026-08-28): monthly reports are internal management narrative
+// (notes / issues / recommendations, routinely naming clients and products) —
+// they sat as an anonymous open read while POST/DELETE in the same files were
+// guarded. Any approved role may read; NAV limits the page to finance.
+export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const reports = await getReports();
     return NextResponse.json(reports);

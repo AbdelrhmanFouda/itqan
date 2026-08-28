@@ -1,8 +1,10 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
+import { authedFetch } from "@/lib/authed-fetch";
 import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
 
 type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
@@ -44,20 +46,35 @@ export default function FinancePage() {
   const a = ad[lang];
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(a.finance.title);
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/jobs").then((r) => r.json()),
-      fetch("/api/runs").then((r) => r.json()),
+      // A non-2xx (401 on a missing/expired token) must land in the ERROR
+      // state — parsed as data it renders every figure as zero, which lies to
+      // the owner. (Pattern from app/dashboard/jobs/page.tsx.)
+      authedFetch("/api/jobs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
+      fetch("/api/runs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
     ])
       .then(([j, r]) => { setJobs(j.jobs ?? []); setRuns(Array.isArray(r) ? r : []); })
-      .catch(() => setJobs([]));
+      .catch(() => setError(true));
   }, []);
 
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
 
+  if (error) {
+    return (
+      <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">{a.finance.title}</h1>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          {p.common.loadError}
+        </div>
+      </div>
+    );
+  }
   if (jobs === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
   const today = new Date().toISOString().slice(0, 10);

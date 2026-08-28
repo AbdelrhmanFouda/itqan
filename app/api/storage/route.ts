@@ -4,16 +4,20 @@ import {
   refreshStorageLists, storageConfigured, type MovementInput,
 } from "@/lib/storage";
 import { verifyIdToken, roleFor } from "@/lib/agent-auth";
+import { requireRole } from "@/lib/api-guard";
 import { hasFullAccess, type Role } from "@/lib/roles";
 
-// Reads are open like the other /api data routes (UI-gated); WRITES are the
-// sensitive part (stock in/out), so they require a Firebase ID token from a
-// user whose granted role may edit the storage.
+// The READ is guarded too (any approved role, 2026-08-28) — the balance and
+// movement logs name clients and their material stocks, which is client data,
+// not an operational read like runs/machines. WRITES (stock in/out) stay
+// stricter: they require a role that may edit the storage.
 function mayWrite(role: Role | null): boolean {
   return role !== null && (role === "storage" || hasFullAccess(role));
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const data = await getStorageData();
     return NextResponse.json(data);

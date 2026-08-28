@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState } from "react";
@@ -41,6 +42,7 @@ export default function JobsPage() {
   const { lang } = useLang();
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(p.jobs.title);
   const today = new Date().toISOString().slice(0, 10);
 
   const [data, setData] = useState<Data | null>(null);
@@ -55,7 +57,11 @@ export default function JobsPage() {
   async function load() {
     try {
       const [j, mo, ma] = await Promise.all([
-        fetch("/api/jobs").then((r) => r.json()),
+        // A non-2xx (401 on a missing/expired token) must land in the ERROR
+        // state — parsed as data it flows into `configured: undefined` and the
+        // page tells the user to go add a `jobs` tab to the sheet, which is a
+        // lie about what went wrong.
+        authedFetch("/api/jobs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
         fetch("/api/sheet/molds").then((r) => r.json()).catch(() => ({ records: [] })),
         fetch("/api/machines").then((r) => r.json()).catch(() => ({ machines: [] })),
       ]);

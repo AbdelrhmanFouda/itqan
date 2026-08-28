@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState, use } from "react";
@@ -18,6 +19,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
   const tr = t[lang];
   const isAr = lang === "ar";
   const [machine, setMachine] = useState<Machine | null>(null);
+  usePageTitle(machine ? machine.name : tr.dashboard.machines);
   const [notes, setNotes] = useState<Note[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [noteText, setNoteText] = useState("");

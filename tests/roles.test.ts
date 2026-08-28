@@ -44,8 +44,11 @@ test("worker exists, is requestable, and is the approval default", () => {
   assert.ok(!REQUESTABLE_ROLES.includes("owner"), "owner is never requestable");
 });
 
-test("worker sees exactly hourly, downtime, issues, assistant", () => {
-  assert.deepEqual(keysFor("worker").sort(), ["assistant", "downtime", "hourly", "issues"]);
+test("worker sees exactly downtime, issues, assistant", () => {
+  // Was four pages until 2026-08-27: «تسجيل الإنتاج» was removed from the
+  // workbook, so /dashboard/hourly — which rendered that tab and nothing else —
+  // went with it. Downtime is still the worker's landing page.
+  assert.deepEqual(keysFor("worker").sort(), ["assistant", "downtime", "issues"]);
 });
 
 test("worker cannot reach the pages it was not given", () => {
@@ -57,17 +60,17 @@ test("worker cannot reach the pages it was not given", () => {
 
 /* -------------------- production and quality have diverged ---------------- */
 
-test("production sees exactly its eight pages", () => {
+test("production sees exactly its seven pages", () => {
   assert.deepEqual(
     keysFor("production").sort(),
-    ["assistant", "downtime", "hourly", "issues", "jobs", "overview", "performance", "production"],
+    ["assistant", "downtime", "issues", "jobs", "overview", "performance", "production"],
   );
 });
 
-test("quality sees exactly its six pages", () => {
+test("quality sees exactly its five pages", () => {
   assert.deepEqual(
     keysFor("quality").sort(),
-    ["assistant", "hourly", "issues", "overview", "performance", "quality"],
+    ["assistant", "issues", "overview", "performance", "quality"],
   );
 });
 

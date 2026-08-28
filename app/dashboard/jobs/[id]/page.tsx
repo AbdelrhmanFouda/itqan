@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState, useCallback } from "react";
@@ -52,6 +53,7 @@ export default function JobDetailPage() {
   const id = String(params.id);
 
   const [job, setJob] = useState<Job | null>(null);
+  usePageTitle(job ? job.code : p.jobs.title);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [standard, setStandard] = useState<Standard | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -82,7 +84,7 @@ export default function JobDetailPage() {
 
   const load = useCallback(async () => {
     const [jRes, ma, mo] = await Promise.all([
-      fetch(`/api/jobs/${id}`),
+      authedFetch(`/api/jobs/${id}`),
       fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
       // Product/mold-code datalists for the edit form — a hand-typed product
       // name that doesn't match Master exactly breaks the join, so offer the

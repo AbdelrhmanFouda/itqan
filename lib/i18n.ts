@@ -83,6 +83,7 @@ export const t = {
       send: "Send Message",
       sent: "Message sent! We'll be in touch.",
       failed: "Your message was NOT sent — please try again, or contact us directly.",
+      needContact: "Please add a phone number or an email so we can get back to you.",
     },
     footer: {
       rights: "All rights reserved.",
@@ -214,6 +215,7 @@ export const t = {
       send: "إرسال الرسالة",
       sent: "تم الإرسال! سنتواصل معك قريباً.",
       failed: "لم يتم إرسال رسالتك — حاول مرة أخرى، أو تواصل معنا مباشرة.",
+      needContact: "أدخل رقم هاتف أو بريداً إلكترونياً حتى نتمكن من الرد عليك.",
     },
     footer: {
       rights: "جميع الحقوق محفوظة.",

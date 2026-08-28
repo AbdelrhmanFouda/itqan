@@ -103,7 +103,7 @@ test("a clean failure reports nothing to undo", () => {
   assert.equal(plan.stranded.length, 0);
 });
 
-test("an hourly import row rolls back fully — its columns are all numbers", () => {
+test("an all-numeric row rolls back fully — no date or time columns", () => {
   // The paper import writes hour counts and «الفعلي», none of which is a date
   // or a time, so an update to an EXISTING row is fully recoverable too.
   const targets = [cell(212, 16), cell(212, 17), cell(212, 18), cell(212, 29)];

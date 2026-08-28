@@ -41,8 +41,42 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-08-28) — leak closures + front-door fixes
+
+- **`/api/public/showcase` returns counts only.** It kept serving 30 real product names
+  and all 57 client names after the landing page stopped showing them (90ab433). The Hero
+  only ever used the counts; a revived «أعمالنا» section must bring its own genericized
+  content (`components/Products.tsx` no longer fetches).
+- **`/api/jobs` (list + detail) and `/api/storage` GETs are guarded** (any approved role) —
+  they name clients, order quantities and stocks. Callers switched to `authedFetch`:
+  overview, finance, sales, jobs, job detail, storage pages.
+- **`/api/sheet/[entity]` GET is DENY-BY-DEFAULT** behind an explicit
+  `OPEN_READS = {molds, products, machines, issues}` set (clients keeps its stricter
+  sales-only rule). The adversarial review of this very changeset found the jobs guard
+  was bypassable by URL: `sheet/jobs` served the same order book open, `sheet/production`
+  served the client name on every row (a column `/api/runs` deliberately omits), and
+  `sheet/master` was open too. A NEW entity added to `ENTITIES` is now guarded until
+  consciously added to that set — the old shape (open unless someone remembered a guard
+  line) is the exact "silent open read" the route's own comment warned about.
+- **`/api/reports` and `/api/reports/[id]` GETs are guarded** — monthly management
+  narrative (notes/issues/recommendations) was an anonymous read while POST/DELETE in the
+  same files were guarded (pre-existing since 545b10c, caught by the same review).
+  Reports pages switched to `authedFetch`.
+- **Five Firestore-era routes deleted:** `/api/clients`, `/api/clients/[id]`, `/api/molds`,
+  `/api/molds/[id]`, `/api/molds-register`. Zero callers; two of them were open reads.
+- **Nav offers no dead anchors:** the Team/Equipment links render only when their i18n
+  content exists, mirroring the `return null` gates in Team.tsx/Tools.tsx.
+- **The contact form requires a phone OR an email** (client + server, reason
+  `missing_contact`) — a lead with neither cannot be answered. Fields also gained
+  `id`/`htmlFor`/`autoComplete`, so labels are announced and phones offer autofill.
+
 ## Recently landed (2026-08-20 → 27) — see ../CHANGES-2026-08-27.md for the full story
 
+- **«تسجيل الإنتاج» was deleted from the workbook and the site was rewired off it**
+  (2026-08-27, second session) — scrap now comes off the run's own «الإنتاج» row via
+  `lib/scrap.ts`; the hourly page, route, lib and entity are deleted; a `no_tab` answer no
+  longer costs 5.5s of retries and now shows up in the readiness panel. Full story in
+  "«تسجيل الإنتاج» was removed from the workbook" below.
 - **A stoppage from a previous day keeps recording** (`b5eb2f8`) — no more "forgotten"
   pile on the floor page; day-aware counter, measured stop. Details in the Downtime
   section below.
@@ -60,9 +94,10 @@ Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 - **The workbook was re-surveyed 2026-08-27** and several claims in this file dated 9 Aug
   are corrected in place below, each marked *(REVISED 2026-08-27)*. The biggest: «الإنتاج»
   now carries native سستم/هالك/«حالة السجل».
-- **Two number-correctness fixes landed the same day:** `deriveScrap()` now CREDITS
-  already-logged scrap before distributing (lib/scrap.ts — pure, 7 tests; it was
-  double-counting days that mix a native-scrap row with a «لم يُعد بعد» row), and a
+- **Two number-correctness fixes landed the same day:** `deriveScrap()` was given a
+  credit-first rule so it stopped double-counting days that mix a native-scrap row with a
+  «لم يُعد بعد» row — *superseded hours later, when the tab it read was deleted and
+  lib/scrap.ts was rewritten around the run's own row* — and a
   multi-day stoppage's minutes are now split across the factory days it covered at READ
   time (`splitAcrossFactoryDays` in lib/downtime.ts — the sheet stays one tap = one row).
 - **Front door + review tools (second wave, ../CHANGES-2026-08-27.md §7):** the contact
@@ -102,7 +137,7 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
                                                                  ▼
                                     lib/sheets.ts  (generic ENTITIES reader/writer)
                                                                  ▼
-             app/api/* (sheet/[entity], runs, machines, hourly, jobs, issues,
+             app/api/* (sheet/[entity], runs, machines, jobs, issues,
                         oee, ai-review, agent, storage)
                                                                  ▼
                     /dashboard pages (client components, 20s auto-refresh)
@@ -125,10 +160,12 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   Clearing the `#REF!` rows is still the owner's job in the sheet.
 - `lib/oee.ts` (pure) + `lib/oee-data.ts` (fetch+shape, shared by `/api/oee` and
   `/api/ai-review`) — OEE = Availability × Performance × Quality with per-run capping.
-- `lib/hourly.ts` — `loadHourlyRows()` parses «تسجيل الإنتاج»; `deriveScrap()` computes
-  scrap per day+machine as سستم − فعلي and distributes it across that day's production runs
-  that have no logged scrap, proportional to good units. Feeds `/api/runs` and
-  `lib/oee-data.ts`, so quality is measured rather than assumed.
+- `lib/scrap.ts` — `resolveScrap(row)` reads a run's scrap off its OWN «الإنتاج» row:
+  «هالك» when filled (`source: "logged"`), else «الأجمالي سستم» − «إنتاج سليم»
+  (`"system"`), else `"none"` — which means UNKNOWN, not zero. Pure, zero imports,
+  11 tests. Used by all three run paths (`/api/runs`, `lib/oee-data.ts`, `lib/jobs.ts`),
+  so they cannot disagree. **`lib/hourly.ts` and `deriveScrap()` are gone** — see
+  "«تسجيل الإنتاج» was removed from the workbook" below.
 - `lib/jobs.ts` — joins «أوامر العمل» to Master by product name, converts ordered kg to
   pieces via the piece weight, and sums production for progress.
 - Auth: Firebase (email/Google) → role request → owner approves at `/dashboard/approvals`.
@@ -142,9 +179,9 @@ sidebar and `canAccess()`.
 
 | Role | Pages |
 |---|---|
-| `worker` (عامل) | hourly, downtime, issues, assistant |
-| `production` | overview, production, jobs, hourly, downtime, performance, assistant, issues |
-| `quality` | overview, quality, hourly, issues, performance, assistant |
+| `worker` (عامل) | downtime, issues, assistant |
+| `production` | overview, production, jobs, downtime, performance, assistant, issues |
+| `quality` | overview, quality, issues, performance, assistant |
 | `maintenance` | machines, downtime, issues |
 | `sales` | sales, products, jobs, clients |
 | `finance` | finance, reports |
@@ -154,7 +191,8 @@ sidebar and `canAccess()`.
   constant with a comment saying they must never drift apart; that coupling was
   deliberately removed, every entry now lists its roles explicitly, and there is no shared
   alias left. Production lost quality/machines/molds/products/storage/reports; quality lost
-  those plus jobs/production/downtime. Both keep overview.
+  those plus jobs/production/downtime. Both keep overview. *(2026-08-27: every role
+  also lost `hourly` — the page's only data source was deleted from the workbook.)*
 - `worker` is the least-privileged role and is therefore **first** in `REQUESTABLE_ROLES`,
   which is the default applied when a request is approved without a stated role.
 - ⚠ **`landingFor(role)` must always return a page that role can access**, or the user
@@ -162,7 +200,7 @@ sidebar and `canAccess()`.
   `canAccess(role, landingFor(role))` for every role in `ALL_ROLES` — change `NAV` and
   `landingFor` together. `worker` lands on `/dashboard/downtime` (it has no overview).
 - ⚠ **This table is UX gating, not a security boundary.** Operational read APIs (molds,
-  products, machines, runs, oee, hourly, issues) are deliberately open — removing a page
+  products, machines, runs, oee, issues) are deliberately open — removing a page
   from a role hides it, it does not classify the data. Mutating routes are guarded by
   `requireRole`, but with no allow-list, so **any approved role** may call them; only
   `/api/inquiries` and `sheet/clients` restrict further (`["sales"]`, both PII reads).
@@ -322,7 +360,7 @@ sidebar and `canAccess()`.
 | `الاسطمبات` (Molds), `المنتجات` (Products) | Row-aligned formula views of Master — READ ONLY |
 | `الماكينات` (machines) | Registry, one row per physical machine. **The code label «PQ n — ton» (hidden col J) is the machine's identity everywhere** — production col C, OEE grouping, issue dropdowns. Tonnages repeat, so the code is the key. The registry has been renumbered four times: never hardcode it, always re-read. |
 | `الإنتاج` (production) | One row per machine/**shift**: A date, B shift, C machine LABEL, E product (must match Master name EXACTLY — joins are by name). *(REVISED 2026-08-27)* The tab now carries QUALITY natively: H سليم, **I «الأجمالي سستم» (new), J هالك — FILLED on 374 of 593 rows, exactly سستم − سليم — and K «حالة السجل»** (سليم / لم يُعد بعد / الفعلي أكبر من العداد). Downtime/reason/operator/notes columns are still never filled — downtime still joins from «التوقفات». B also holds «عطلة» / «يوم جمعة» day-off markers |
-| `تسجيل الإنتاج` | **The hourly log — the only hourly surface.** Header row 4. *(REVISED 2026-08-27)* **The shift column is GONE** — layout is date \| machine/code \| product \| 24 hour columns 08:00→07:00 (PIECES) \| سستم (=SUM) \| فعلي \| «المتوقع (للساعات المسجلة)» — now computed for LOGGED hours \| الكفاءة % \| الهالك \| حالة السجل \| «أساس احتساب الهالك» (new). 307 rows; the 08:00 cell is filled on only 44 of them (crews skip the first hour) |
+| `تسجيل الإنتاج` | **DELETED from the workbook — 2026-08-27, deliberately.** The bridge answers `no_tab` under every spelling, and the workbook holds ZERO `#REF!` cells, which is what deleting a referenced tab would have left. Quality moved onto «الإنتاج»'s own row. Nothing in the site reads it any more |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
 | `التوقفات` | **The stoppage log — the source of truth for downtime since 2026-08-14.** Header row 1, data row 2+. A date, B machine (dropdown ← «الماكينات»!J), C reason (Arabic dropdown), **D minutes — the only field anything computes from, validated > 0**, E/F optional clock times, G تقديري؟ نعم/لا, H سُجل بواسطة, I ملاحظات. Joins to «الإنتاج» on `date` + the machine label. Built by `../production/scripts/downtime-tab.gs` |
 | `أوامر العمل` (jobs) | Manual cols A:N + computed O:X linking to Master by product name. **K (status) and L (priority) are validated ARABIC lists** — K is exactly `لم يبدأ · جاري التشغيل · متوقف · مكتمل`. The app keeps English tokens internally and maps at the boundary via `jobStatusToSheet`/`FromSheet` in `lib/prod-meta.ts`. `Quoted`/`Delivered` have no Arabic counterpart, so they are no longer written — adding them is a sheet change the owner must approve |
@@ -334,16 +372,17 @@ sidebar and `canAccess()`.
 
 Domain semantics:
 
-- **Scrap = سستم − فعلي** (counter minus hand count) — the owner's model, now native in the
-  sheet. Computed **only on self-consistent rows** (both numeric AND سستم ≥ فعلي); rows where
-  فعلي > سستم are flagged and excluded, because the cause is missing hours in the log.
-  `deriveScrap()` mirrors this on the site side.
-  *(REVISED 2026-08-27, FIXED same day)* «الإنتاج» rows now carry scrap NATIVELY (374 of
-  593 rows), and `deriveScrap()` used to distribute the FULL hourly day-total onto the
-  day's scrapless runs — counting the logged share twice on any day mixing a native-scrap
-  row with a «لم يُعد بعد» row. It now CREDITS the day's logged scrap first and lives in
-  **lib/scrap.ts** (pure, zero imports, 7 tests — `tests/scrap.test.ts` pins the
-  double-count case); lib/hourly.ts re-exports it so no caller changed.
+- **Scrap = سستم − سليم** — counter minus hand count, the owner's model, and NATIVE in
+  «الإنتاج» since the 27-Aug restructure. `resolveScrap()` in **lib/scrap.ts** (pure,
+  zero imports, 11 tests) reads it off the run's own row: «هالك» if filled, else
+  سستم − سليم, else nothing. A row where سليم exceeds سستم («الفعلي أكبر من العداد»,
+  56 rows) is REFUSED, never clamped to a flattering 0.
+  ⚠ **`source: "none"` means UNKNOWN, not "no scrap".** 63 of the 400 August rows are
+  «لم يُعد بعد» or counter-mismatched; they contribute good units to Quality's
+  denominator with zero scrap, which OVERSTATES it. `readiness.scrapUnknown` counts them
+  and `rowCheck` rides along on every run so a UI can say which rows are unconfirmed.
+  Do not "fix" this by inventing a number — the sheet does not know it yet either.
+
 - Master keeps the **design** cavity count. Molds often run with damaged cavities blocked.
   A per-run open-cavities column was built and then dropped from the final workbook — if you
   see `openCavities` in old code paths, it is vestigial.
@@ -367,49 +406,36 @@ Domain semantics:
 - Reports from the floor identify machines unreliably by code — resolve by PRODUCT NAME
   through the registry when validating.
 
-## Two numbers per shift instead of 24 cells — groundwork landed 2026-08-19
+## «تسجيل الإنتاج» was removed from the workbook — 2026-08-27
 
-The crew is to record سستم and فعلي per machine per shift rather than 24 hour cells.
-Read-side groundwork is in; **no write path has changed** pending confirmation that the
-sheet can take it without restructuring.
+The hourly log is gone, deliberately, and the site no longer has an hourly surface.
 
-- **Row SHAPES are derived from the cells** (`lib/hour-shape.ts`, zero imports, 6 tests):
-  `hourly` (readings that differ), `flat` (one constant filled across — 09/08 زراير is
-  1062 eleven times, which *looks* hourly and carries no hour-to-hour information),
-  `shiftTotal` (one cell), `empty`. **Never add a sheet column for this.** Only `hourly`
-  may appear in an hour-of-day view.
-- **`hoursLogged` is now `hourCellsFilled`.** It counts CELLS. Being named for hours is
-  what invited the inference; under the new shape it returns 1 for a twelve-hour shift.
-  Nothing may derive a duration from it.
-- **Planned time was already safe** — `resolvePlannedMin` takes it from the machines
-  registry «طول الوردية», and live readiness reports `plannedSource {column:0,
-  machines:544, default:0}`. `computeOEE()` reads no hour cell at all.
+**How that was established**, because "the read returned nothing" is exactly what a
+throttled bridge looks like: the bridge answered `no_tab` for the name and for fifteen
+plausible renames and alef/hamza/whitespace variants; the workbook contains **zero**
+`#REF!` cells, which is not what deleting a tab that formulas point at leaves behind;
+«الإنتاج» had already gained the numbers the hourly log used to carry; and the owner
+confirmed it.
 
-### ⚠ «تسجيل الإنتاج» rows hold ONE shift OR TWO, and one cell cannot say which
+What went with it: `app/dashboard/hourly/page.tsx`, `app/api/hourly/route.ts`,
+`lib/hourly.ts`, `lib/hour-shape.ts`, `tests/hour-shape.test.ts`, `ENTITIES.hourly`, the
+`hourly` NAV key and its i18n blocks, and the `hourly` entity from the assistant's
+`read_records` tool. **Recover from git if it ever comes back** — the last commit holding
+it all is the one before this note.
 
-The single most useful thing measured here. With all 175 August rows simulated as
-shift-totals, the efficiency badge read:
+What it means for the numbers:
 
-| basis | result |
-|---|---|
-| «المتوقع» (AD) as-is | **1024%–2628%** — AD is `3600/cycle × cavities × COUNT(D:AA)`, and COUNT is now 1 |
-| AD rescaled by the registry shift length | **83%–241%** — still exactly **2×** the 24-cell reading, every row |
-
-The 2× is the finding: the tab has **no shift column**, so both shifts share one row and
-are told apart only by which half of the 24 cells carries numbers. A row therefore covers
-12 hours or 24, and a single filled cell cannot distinguish them. **The efficiency badge is
-withheld on shift-total rows rather than guessed.** `/performance` is unaffected — it keys
-off «الإنتاج», which does carry a shift per row.
-
-**This decides the row model**: one row per shift (registry length is then right) or one
-per day (it is not). Do not implement the write path until that is settled.
-
-### ⚠ AB ≠ the sum of the displayed hour cells, on 110 of 175 rows
-
-`AB = SUM(D:AA)` computes on UNDERLYING values; the bridge returns DISPLAY values, which
-are rounded. The two differ by ±3–6 units on most rows. Anything that re-adds the visible
-hour cells and treats the result as سستم will drift. Read AB; never recompute it. (Found by
-a test harness that did exactly that and injected +49 units.)
+- **Scrap is no longer a join.** `deriveScrap()` — the day+machine distribution with the
+  credit-first fix landed the same morning — had nothing left to distribute FROM. It is
+  replaced by `resolveScrap()`, which reads the run's own row. Measured on the live August
+  rows: quality 87.93% → **87.42%**, because 11 rows whose «هالك» is blank but whose
+  سستم is filled now contribute 9,258 pieces of scrap that nothing was counting.
+- **`lib/jobs.ts` gained scrap it never had.** It read «هالك» raw and was the only one of
+  the three run paths that never saw derived scrap, so a job's total could sit below the
+  same runs' total on /performance. All three now call the same function.
+- **The "two numbers per shift" question is closed by the sheet, not by us.** The write
+  path was blocked on "a row holds one shift or two and one filled cell cannot say which".
+  There is no row and no cell any more; «الإنتاج» carries a shift per row and always did.
 
 ## The sheet read path — fixed 2026-08-12, and easy to undo by accident
 
@@ -419,7 +445,6 @@ Measured against production while the bridge itself answered every tab in ~2.5s:
 | | before | cold now | warm now |
 |---|---|---|---|
 | `/api/runs` | **71s → `[]`** (the tab has 455 rows) | 3.2s ✓ | 0.83s |
-| `/api/hourly` | **22s → empty** (994 rows) | 0.65s ✓ | 0.48s |
 | `/api/oee` | 30s | 2.9s ✓ | 0.62s |
 
 Three causes, and the first two produced the *same* symptom — a blank page, not
@@ -445,19 +470,25 @@ What is there now, and why each piece must stay:
 - **A one-at-a-time queue** around every bridge GET. This is what stopped the
   empty responses; the cache alone did not.
 - **A retry of the real tab name after 1.5s and 4s.** A bridge that refused
-  because it was busy usually answers a moment later.
+  because it was busy usually answers a moment later. ⚠ **Skipped entirely when
+  every candidate name came back `no_tab`** (2026-08-27) — that answer is
+  definitive, and re-asking cost 5.5s of sleeps plus five wasted bridge calls on
+  every uncached read for as long as «تسجيل الإنتاج» stayed in `ENTITIES`.
+  A refused tab is also recorded in `missingTabs()` and surfaces in the
+  Performance page's readiness panel, so "the tab is gone" can no longer read as
+  "the tab is empty".
 - **Empty results are never cached** — pinning a transient failure for 45s would
   be a worse version of the original bug.
 - **Writes and pre-write validation read `fresh`**, bypassing the cache
   entirely. `commitDraft()` exists to re-derive row numbers from the sheet as it
   is *right now*; a 45-second-old copy would defeat confirm-before-write.
-- **`?fresh=1` on `/api/hourly`** — no caller passes it since the paper import
-  was removed, but KEEP IT: any future write into «تسجيل الإنتاج» must reload
-  with it or show the crew their own rows missing. Tag invalidation is
-  the optimisation; this flag is the guarantee — `updateTag` (the
-  read-your-own-writes primitive) is Server-Actions-only and unavailable in a
-  Route Handler, and `revalidateTag`'s `profile: "max"` means
-  stale-while-revalidate, which is exactly wrong straight after a write.
+- **`fresh` on the read path** — writes and pre-write validation bypass the
+  cache entirely, because `commitDraft()` exists to re-derive row numbers from
+  the sheet as it is *right now*. Tag invalidation is the optimisation; this
+  flag is the guarantee — `updateTag` (the read-your-own-writes primitive) is
+  Server-Actions-only and unavailable in a Route Handler, and `revalidateTag`'s
+  `profile: "max"` means stale-while-revalidate, which is exactly wrong straight
+  after a write.
 
 **If sheet pages ever go blank again, look here first**, and check the server log
 for `[sheets] every attempt failed for tab "…"` — that line distinguishes "the
@@ -646,11 +677,19 @@ own «المتوقع». It is a domain question that outlived the feature.
 - Sheet writes send only CHANGED fields (diff vs original) — never clobber untouched cells.
 - Keep the GitHub repo PRIVATE — apps-script.gs carries the sheet write token.
 - **API auth:** every MUTATING /api route, plus the PII/cost reads (`sheet/clients`,
-  `inquiries`, `ai-review`), verifies the Firebase ID token via `lib/api-guard.ts`
+  `inquiries`, `ai-review`) **and the client-data reads (`jobs` list + detail, `storage` —
+  guarded 2026-08-28: job rows name the client and ordered quantity, storage names clients
+  and their stocks)**, verifies the Firebase ID token via `lib/api-guard.ts`
   `requireRole(req[, allowed])` (owner/manager always pass; any approved role by default).
   Client side, those calls go through `lib/authed-fetch.ts`. A NEW mutating route/caller must
-  follow the same pair. Operational reads (molds/products/machines/runs/oee/hourly/issues
-  list) stay open deliberately.
+  follow the same pair. Operational reads (sheet molds/products/machines/runs/oee/issues
+  list) stay open deliberately — **that list is exhaustive: a read not on it is either
+  guarded or it is a leak**, which is exactly how jobs and storage sat open for weeks.
+  `/api/public/showcase` returns the three counts ONLY — it served 30 real product names
+  and the full client list until 2026-08-28, after the landing page itself had stopped
+  showing names (90ab433). The Firestore-era `/api/clients*`, `/api/molds*` and
+  `/api/molds-register` routes are deleted (2026-08-28, zero callers; `/api/molds` served
+  leftover test data unauthenticated).
 - Prefer manual-with-preview over silent automation. The owner explicitly rejected
   script-driven auto-entry: complexity and silent mistakes are worse than manual work.
 

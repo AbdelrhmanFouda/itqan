@@ -28,7 +28,11 @@ export async function GET() {
     }));
     // Newest first (rows append chronologically; date text can be mixed shapes).
     issues.reverse();
-    return NextResponse.json({ issues, writable });
+    // Open operational read — browsers may reuse it briefly; error responses
+    // deliberately carry no cache header.
+    return NextResponse.json({ issues, writable }, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "sheet error" }, { status: 500 });

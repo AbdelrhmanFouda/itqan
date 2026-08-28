@@ -9,7 +9,7 @@ export default function Hero() {
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
-  const [stats, setStats] = useState<{ molds: number; products: number; clients: number } | null>(null);
+  const [stats, setStats] = useState<{ molds: number; machines: number; clients: number } | null>(null);
 
   useEffect(() => {
     fetch("/api/public/showcase")
@@ -106,7 +106,7 @@ export default function Hero() {
               >
                 {[
                   { v: stats.molds, l: isAr ? "اسطمبة" : "Molds" },
-                  { v: stats.products, l: isAr ? "منتج" : "Products" },
+                  { v: stats.machines, l: isAr ? "ماكينة" : "Machines" },
                   { v: stats.clients, l: isAr ? "عميل" : "Clients" },
                 ].map((s) => (
                   <div key={s.l}>

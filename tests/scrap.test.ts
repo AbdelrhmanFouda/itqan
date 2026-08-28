@@ -1,67 +1,67 @@
 /**
- * The scrap join, and the 2026-08-27 fix: logged scrap is CREDITED against the
- * hourly day-total before anything is distributed. «الإنتاج» carries native
- * scrap now, and the hourly log derives from the same counters — without the
- * credit, a day mixing a native-scrap row with a «لم يُعد بعد» row counted the
- * same scrap twice. Run with `npm test`.
+ * The scrap rules — pinned because Quality is computed from them on every page
+ * and a wrong answer here is silent everywhere.
+ *
+ * These replaced the «تسجيل الإنتاج» distribution tests on 2026-08-27, when that
+ * tab was removed from the workbook and «الإنتاج» became the only place a run's
+ * scrap lives. The behaviour the old tests protected — logged scrap wins, and
+ * nothing is ever invented for a row that was not counted — is still pinned
+ * below, because those were the properties that mattered, not the join.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveScrap } from "../lib/scrap.ts";
+import { resolveScrap } from "../lib/scrap.ts";
 
-const H = (date: string, machine: string, scrap: number | null) => ({ date, machine, scrap });
-const R = (date: string, machine: string, goodUnits: number, scrapUnits: number) =>
-  ({ date, machine, goodUnits, scrapUnits });
-
-test("THE DOUBLE-COUNT CASE: a logged row's scrap is credited, not re-distributed", () => {
-  // Day total from the hourly log: 100. The morning production row already
-  // logged 30 of it natively. The evening row («لم يُعد بعد») must receive
-  // only the remaining 70 — the old code gave it the full 100.
-  const runs = [R("2026-08-20", "PQ 7 — 100", 500, 30), R("2026-08-20", "PQ 7 — 100", 400, 0)];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ 7 — 100", 100)]);
-  assert.deepEqual(out, [0, 70]);
+const row = (good: string, scrap: string, system: string) => ({
+  goodUnits: good, scrapUnits: scrap, systemTotal: system,
 });
 
-test("logged scrap covering the whole total leaves nothing to distribute", () => {
-  const runs = [R("2026-08-20", "PQ 7 — 100", 500, 120), R("2026-08-20", "PQ 7 — 100", 400, 0)];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ 7 — 100", 100)]);
-  assert.deepEqual(out, [0, 0], "over-credit must clamp at zero, never go negative");
+test("«هالك» wins whenever it is filled", () => {
+  assert.deepEqual(resolveScrap(row("560", "140", "700")), { scrapUnits: 140, source: "logged" });
 });
 
-test("a day with no logged scrap distributes the full total, proportionally and remainder-exact", () => {
-  const runs = [R("2026-08-20", "PQ 7 — 100", 600, 0), R("2026-08-20", "PQ 7 — 100", 300, 0)];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ 7 — 100", 100)]);
-  assert.equal(out[0] + out[1], 100, "the split must sum to the day's total");
-  assert.ok(out[0] > out[1], "proportional to good units");
+test("a logged ZERO is a real answer, not a blank", () => {
+  // «سليم» with nothing scrapped is a measurement. It must not fall through to
+  // the سستم rule and it must not read as "unknown".
+  assert.deepEqual(resolveScrap(row("560", "0", "999")), { scrapUnits: 0, source: "logged" });
 });
 
-test("logged scrap on ANOTHER day or machine is not a credit here", () => {
-  const runs = [
-    R("2026-08-19", "PQ 7 — 100", 500, 40), // other day
-    R("2026-08-20", "PQ 5 — 100", 500, 40), // other machine (same tonnage!)
-    R("2026-08-20", "PQ 7 — 100", 400, 0),
-  ];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ 7 — 100", 100)]);
-  assert.deepEqual(out, [0, 0, 100]);
+test("blank «هالك» falls back to سستم − سليم", () => {
+  assert.deepEqual(resolveScrap(row("594", "", "614")), { scrapUnits: 20, source: "system" });
 });
 
-test("machine labels join through the same normalizer on both sides", () => {
-  const runs = [R("2026-08-20", "pq 7 — 100", 400, 0)];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ  7 — 100", 50)]);
-  assert.deepEqual(out, [50]);
+test("«الفعلي أكبر من العداد» yields no scrap, not a negative one", () => {
+  // 56 rows read this on the day the rule landed: the hand count exceeds the
+  // machine counter. The difference is not scrap and is refused, not clamped.
+  assert.deepEqual(resolveScrap(row("700", "", "560")), { scrapUnits: 0, source: "none" });
 });
 
-test("null and non-positive hourly scrap contribute nothing", () => {
-  const runs = [R("2026-08-20", "PQ 7 — 100", 400, 0)];
-  const out = deriveScrap(runs, [
-    H("2026-08-20", "PQ 7 — 100", null),
-    H("2026-08-20", "PQ 7 — 100", 0),
-  ]);
-  assert.deepEqual(out, [0]);
+test("«لم يُعد بعد» — no هالك and no سستم — is UNKNOWN, reported as source none", () => {
+  assert.deepEqual(resolveScrap(row("4850", "", "")), { scrapUnits: 0, source: "none" });
 });
 
-test("undated runs neither receive nor credit", () => {
-  const runs = [R("", "PQ 7 — 100", 400, 30), R("2026-08-20", "PQ 7 — 100", 400, 0)];
-  const out = deriveScrap(runs, [H("2026-08-20", "PQ 7 — 100", 100)]);
-  assert.deepEqual(out, [0, 100], "the undated row's scrap is not a credit for the dated day");
+test("«غير متاح / N/A» filler counts as blank, never as a zero", () => {
+  assert.deepEqual(resolveScrap(row("500", "غير متاح / N/A", "غير متاح / N/A")), {
+    scrapUnits: 0, source: "none",
+  });
+  assert.deepEqual(resolveScrap(row("500", "N/A", "600")), { scrapUnits: 100, source: "system" });
+});
+
+test("display formatting survives: thousands separators and Arabic-Indic digits", () => {
+  assert.deepEqual(resolveScrap(row("4,850", "", "5,000")), { scrapUnits: 150, source: "system" });
+  assert.deepEqual(resolveScrap(row("٥٠٠", "٢٥", "")), { scrapUnits: 25, source: "logged" });
+});
+
+test("a negative «هالك» never leaves the module negative", () => {
+  assert.deepEqual(resolveScrap(row("500", "-10", "")), { scrapUnits: 0, source: "logged" });
+});
+
+test("سستم equal to سليم is measured zero scrap, not unknown", () => {
+  assert.deepEqual(resolveScrap(row("600", "", "600")), { scrapUnits: 0, source: "system" });
+});
+
+test("numbers pass through as numbers, not only as sheet text", () => {
+  assert.deepEqual(resolveScrap({ goodUnits: 560, scrapUnits: null, systemTotal: 700 }), {
+    scrapUnits: 140, source: "system",
+  });
 });

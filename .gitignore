@@ -43,3 +43,6 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# Local dev-server launch config for the Claude Code preview pane
+.claude/

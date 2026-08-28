@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { motion } from "framer-motion";
@@ -20,14 +20,11 @@ export default function Products() {
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
-  const [items, setItems] = useState<P[]>([]);
-
-  useEffect(() => {
-    fetch("/api/public/showcase")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (Array.isArray(d?.products)) setItems(d.products.slice(0, 9)); })
-      .catch(() => {});
-  }, []);
+  // Deliberately empty. This used to fetch /api/public/showcase, but that
+  // endpoint stopped serving product names on 2026-08-28 (it leaked real names
+  // after the section itself was removed at the owner's word, 90ab433). A
+  // revival must feed `items` genericized content of its own — no sheet names.
+  const [items] = useState<P[]>([]);
 
   if (items.length === 0) return null;
 

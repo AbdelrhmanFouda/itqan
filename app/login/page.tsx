@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -46,6 +47,7 @@ export default function LoginPage() {
   const [role, setRole] = useState<Role | "">("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  usePageTitle(mode === "in" ? a.auth.signInTitle : a.auth.signUpTitle);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");

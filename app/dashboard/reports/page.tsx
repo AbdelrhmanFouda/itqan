@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
@@ -29,6 +30,7 @@ export default function ReportsPage() {
   const { lang } = useLang();
   const tr = t[lang];
   const isAr = lang === "ar";
+  usePageTitle(tr.dashboard.reports);
   const [reports, setReports] = useState<Report[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,7 +51,7 @@ export default function ReportsPage() {
   const [draftError, setDraftError] = useState(false);
 
   async function load() {
-    const res = await fetch("/api/reports");
+    const res = await authedFetch("/api/reports");
     if (res.ok) setReports(await res.json());
   }
 

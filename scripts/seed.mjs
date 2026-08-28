@@ -4,20 +4,37 @@
  * Usage:
  *   1. Create .env.local with your NEXT_PUBLIC_FIREBASE_* values (see .env.example)
  *   2. npm install
- *   3. npm run seed
+ *   3. SEED_CONFIRM=yes-clear-collections npm run seed
  *
  * WARNING: this clears the machines, machineNotes, monthlyReports,
  * contactInquiries and clients collections before inserting sample data.
+ * It refuses to run unless SEED_CONFIRM=yes-clear-collections is set.
  */
+
+// ---- DESTRUCTIVE-RUN GUARD ----------------------------------------------
+// This guard MUST stay above the Firebase imports, and those imports MUST
+// stay dynamic (await import) — a static `import` is hoisted and would load
+// Firebase before this check ever runs.
+if (process.env.SEED_CONFIRM !== "yes-clear-collections") {
+  console.error(
+    "\n  REFUSING TO RUN: this script DELETES every document in the\n" +
+      "  productionRuns, jobs, molds, machineNotes, machines, monthlyReports,\n" +
+      "  contactInquiries and clients Firestore collections, then inserts\n" +
+      "  sample data.\n\n" +
+      "  To confirm, set the environment variable SEED_CONFIRM to the exact\n" +
+      "  string yes-clear-collections and run again, e.g. in PowerShell:\n\n" +
+      '    $env:SEED_CONFIRM = "yes-clear-collections"; npm run seed\n'
+  );
+  process.exit(1);
+}
+// -------------------------------------------------------------------------
+
 import { readFileSync } from "node:fs";
-import { initializeApp } from "firebase/app";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  getDocs,
-  deleteDoc,
-} from "firebase/firestore";
+
+const { initializeApp } = await import("firebase/app");
+const { getFirestore, collection, addDoc, getDocs, deleteDoc } = await import(
+  "firebase/firestore"
+);
 
 // Load .env.local without any extra dependency.
 try {

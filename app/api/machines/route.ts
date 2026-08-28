@@ -52,11 +52,16 @@ export async function GET() {
       const bn = b.code ? num(b.code) : Infinity;
       return an !== bn ? an - bn : a.name.localeCompare(b.name, undefined, { numeric: true });
     });
-    return NextResponse.json({
-      machines,
-      writable: sheetsWritable(),
-      configured: tab.records.length > 0 || tab.fields.length > 0,
-    });
+    return NextResponse.json(
+      {
+        machines,
+        writable: sheetsWritable(),
+        configured: tab.records.length > 0 || tab.fields.length > 0,
+      },
+      // Open operational read — browsers may reuse it briefly. The empty
+      // fallback below carries no cache header on purpose.
+      { headers: { "Cache-Control": "private, max-age=30" } },
+    );
   } catch (err) {
     console.error(err);
     return NextResponse.json({ machines: [], writable: false, configured: false });

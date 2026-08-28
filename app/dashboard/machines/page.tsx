@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
@@ -59,6 +60,7 @@ export default function MachinesPage() {
   const tr = t[lang];
   const l = L[lang];
   const isAr = lang === "ar";
+  usePageTitle(tr.dashboard.machines);
 
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState(false);

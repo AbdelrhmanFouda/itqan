@@ -511,7 +511,7 @@ export async function deleteRun(id: string) {
  * by hand and re-appending them would double-count the month.
  *
  * `machine` is the «الماكينات»!J label ("PQ 7 — 100"), the same string the
- * production and hourly tabs use, because that is the only unique machine id —
+ * production tab uses, because that is the only unique machine id —
  * PQ 5 and PQ 7 are both 100 t, so tonnage alone would merge two machines.
  *
  * `date` is the FACTORY day (factoryDay(), 08:00→07:00), not the calendar day,

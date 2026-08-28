@@ -10,7 +10,12 @@ export async function GET(req: NextRequest) {
   try {
     const month = req.nextUrl.searchParams.get("month"); // "YYYY-MM" or null = all
     const data = await buildOEEData(month);
-    return NextResponse.json(data);
+    // Open operational read — browsers may reuse it briefly; the fallback
+    // below deliberately carries no cache header, so a transient failure is
+    // never pinned client-side.
+    return NextResponse.json(data, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json(

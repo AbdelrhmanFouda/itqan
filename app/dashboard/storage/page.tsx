@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 /**
  * المخزن — Storage page.
  *
@@ -11,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
+import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
 import { hasFullAccess } from "@/lib/roles";
 import { Btn, EmptyState, Field, inputCls, Modal, Spinner, Stat } from "@/components/dashboard/ui";
@@ -42,6 +44,7 @@ export default function StoragePage() {
   const { lang } = useLang();
   const isAr = lang === "ar";
   const s = sd[lang];
+  usePageTitle(s.title);
   const { user, profile } = useAuth();
   const role = profile?.role ?? null;
   const canWrite = role !== null && (role === "storage" || hasFullAccess(role));
@@ -62,7 +65,7 @@ export default function StoragePage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/storage", { cache: "no-store" });
+      const res = await authedFetch("/api/storage", { cache: "no-store" });
       const json = (await res.json()) as StorageData;
       // never blank a filled table on a transient empty fetch
       setData((prev) => (json.ok || !prev ? json : prev));

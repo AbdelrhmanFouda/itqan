@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { appendRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
-import { jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
+import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 
 // Jobs live in the sheet's `jobs` tab (they used to be in Firestore).
 // GET returns jobs with auto-computed production progress.
+//
+// The GET is GUARDED (any approved role) since 2026-08-28: every job row names
+// the CLIENT and the ordered quantity — the order book, not an operational
+// read like runs/machines. It sat open while the doc line listing the open
+// reads never included it.
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const { jobs, writable, configured } = await loadJobs();
     return NextResponse.json({ jobs, writable, configured });
@@ -26,6 +33,13 @@ export async function POST(req: NextRequest) {
     if (!s("code") || !s("product")) {
       return NextResponse.json({ ok: false, reason: "missing_fields" }, { status: 400 });
     }
+    // «أوامر العمل»!K is a validated dropdown of exactly four Arabic values —
+    // an unknown status must never reach the sheet (jobStatusToSheet refuses
+    // rather than guess), so surface the validation error here instead.
+    const status = s("status") || "Not Started";
+    if (!isJobStatus(status)) {
+      return NextResponse.json({ ok: false, reason: "invalid_status" }, { status: 400 });
+    }
     const res = await appendRecord("jobs", {
       code: s("code"),
       client: s("client"),
@@ -35,7 +49,7 @@ export async function POST(req: NextRequest) {
       startDate: s("startDate") || new Date().toISOString().slice(0, 10),
       dueDate: s("dueDate"),
       // «أوامر العمل»!K and !L are validated Arabic lists — translate on the way in.
-      status: jobStatusToSheet(s("status") || "Not Started"),
+      status: jobStatusToSheet(status),
       priority: jobPriorityToSheet(s("priority") || "Normal"),
       machine: s("machine"),
       materialIssued: s("materialIssued"),

@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { DOWNTIME_REASONS, localize } from "@/lib/prod-meta";
@@ -34,7 +35,7 @@ type TrendPoint = {
 type Readiness = {
   runs: number; stubs: number; withMold: number; withScrap: number; withDowntime: number;
   plannedSource: { column: number; machines: number; default: number };
-  machinesTabFound: boolean; defaultShiftMin: number;
+  machinesTabFound: boolean; defaultShiftMin: number; missingTabs?: string[];
   standardsInMaster: number; moldsSeen: number; moldsSeenWithStd: number;
 };
 type Suspect = {
@@ -109,6 +110,7 @@ const L = {
     rMachinesPartial: (n: number, d: number) => `${n} runs fell back to the default ${d} min shift — add those machines to the Machines tab`,
     rStd: (k: number, s: number) => `${k}/${s} logged molds have a cycle standard in Master`,
     rStubs: (n: number) => `${n} empty rows in the Production tab were ignored`,
+    rMissingTabs: (names: string) => `The workbook has no tab named ${names} — anything it fed is missing, not zero`,
     fillMaster: "Fill cycle + cavities in Master for:", units: "pcs",
     explainTitle: "How is this number calculated?",
     explainIntro: "OEE = Availability × Performance × Quality. Every input below comes straight from the sheet:",
@@ -163,6 +165,7 @@ const L = {
     rMachinesPartial: (n: number, d: number) => `${n} تشغيلات استخدمت الوردية الافتراضية ${d} دقيقة — أضف هذه الماكينات إلى تبويب Machines`,
     rStd: (k: number, s: number) => `${k}/${s} من الاسطمبات المسجَّلة لها معيار دورة في Master`,
     rStubs: (n: number) => `تم تجاهل ${n} صفوف فارغة في تبويب Production`,
+    rMissingTabs: (names: string) => `لا يوجد في الملف تبويب باسم ${names} — ما كان يعتمد عليه ناقص، وليس صفرًا`,
     fillMaster: "أكمل زمن الدورة + الكافيتي في Master لـ:", units: "قطعة",
     explainTitle: "كيف يُحسب هذا الرقم؟",
     explainIntro: "OEE = الإتاحة × الأداء × الجودة. كل رقم أدناه يأتي مباشرة من الشيت:",
@@ -201,6 +204,7 @@ export default function PerformancePage() {
   const p = pd[lang];
   const t = L[lang];
   const isAr = lang === "ar";
+  usePageTitle(t.title);
   const thisMonth = new Date().toISOString().slice(0, 7);
 
   const [period, setPeriod] = useState<"month" | "all">("month");
@@ -290,6 +294,11 @@ export default function PerformancePage() {
     else if (r.plannedSource.default > 0) readinessItems.push({ ok: false, text: t.rMachinesPartial(r.plannedSource.default, r.defaultShiftMin) });
     if (r.moldsSeen > 0 && r.moldsSeenWithStd < r.moldsSeen) readinessItems.push({ ok: false, text: t.rStd(r.moldsSeenWithStd, r.moldsSeen) });
     if (r.stubs > 0) readinessItems.push({ ok: true, text: t.rStubs(r.stubs) });
+  }
+  // Outside the `runs > 0` guard on purpose: a missing tab is exactly the case
+  // where there may be no runs to count.
+  if (r?.missingTabs?.length) {
+    readinessItems.unshift({ ok: false, text: t.rMissingTabs(r.missingTabs.map((n) => `«${n}»`).join(" · ")) });
   }
 
   const trendLabels = data.trend.map((d) => formatDate(d.date, lang));

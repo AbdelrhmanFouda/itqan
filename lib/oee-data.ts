@@ -1,10 +1,11 @@
-import { getRecords, type SheetRecord } from "@/lib/sheets";
+import { getRecords, missingTabs, type SheetRecord } from "@/lib/sheets";
 import {
   computeOEE, oeeBy, oeeByMachine, weakestFactor, topLoss, suspectStandards,
   type RunInput, type MoldStandard,
 } from "@/lib/oee";
 import { normalizeDate, latinDigits } from "@/lib/dates";
-import { loadHourlyRows, deriveScrap, type HourlyRow } from "@/lib/hourly";
+import { sumCavities } from "@/lib/cavities";
+import { resolveScrap } from "@/lib/scrap";
 import { distributeDowntime } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 // The run-join rules are SHARED with /api/runs and lib/jobs.ts — see lib/run-join.ts.
@@ -44,23 +45,25 @@ const normKey = (s: string | undefined) =>
 export type OEEData = Awaited<ReturnType<typeof buildOEEData>>;
 
 export async function buildOEEData(month: string | null) {
-  const [prod, master, machinesTab, hourlyRows, captured] = await Promise.all([
+  const [prod, master, machinesTab, captured] = await Promise.all([
     getRecords("production"),
     getRecords("master"),
     getRecords("machines"),
-    loadHourlyRows().catch(() => [] as HourlyRow[]),
     // Downtime from «التوقفات», narrowed to the period being computed. The tab
-    // rides the same 45s sheet cache as everything above it. Best-effort like
-    // the hourly load: if it is unreachable the OEE picture degrades to
-    // "downtime not measured" rather than failing the whole page.
+    // rides the same 45s sheet cache as everything above it. Best-effort: if it
+    // is unreachable the OEE picture degrades to "downtime not measured" rather
+    // than failing the whole page.
     loadDowntimeTotals(month).catch(() => EMPTY_DOWNTIME),
   ]);
 
   // Per-mold standards from Master, keyed by normalized code AND name.
+  // Cavities go through sumCavities — Master's H holds «4+4» for a two-part
+  // mould (8 pieces per shot), and a plain num() read only the first part,
+  // understating Performance for such moulds. Same read as lib/jobs.ts.
   const standards = new Map<string, MoldStandard>();
   let standardsInMaster = 0;
   for (const m of master.records) {
-    const cycleSec = num(m.cycle), cavities = num(m.cavities);
+    const cycleSec = num(m.cycle), cavities = sumCavities(m.cavities);
     if (cycleSec > 0 && cavities > 0) {
       standardsInMaster++;
       const std: MoldStandard = { cycleSec, cavities };
@@ -81,19 +84,19 @@ export async function buildOEEData(month: string | null) {
   const isBlank = (v: string | undefined) => !v || !String(v).trim();
   const isStub = isStubRun; // shared with /api/runs — see isStubRun()
 
-  let stubs = 0, withMold = 0, withScrap = 0, withDowntime = 0;
+  let stubs = 0;
   const plannedSource = { column: 0, machines: 0, default: 0 };
   const moldUnits = new Map<string, { label: string; units: number; hasStd: boolean }>();
 
   // `sheetDowntimeMin` keeps the run's ORIGINAL «زمن التوقف» value after phone-
   // captured minutes are added to downtimeMin, so the Pareto can still tell the
   // two sources apart.
-  let runs: (RunInput & { moldLabel: string; sheetDowntimeMin: number })[] = [];
+  let runs: (RunInput & {
+    moldLabel: string; sheetDowntimeMin: number;
+    scrapSource: "logged" | "system" | "none"; hasMold: boolean; hasSheetDowntime: boolean;
+  })[] = [];
   for (const r of prod.records) {
     if (isStub(r)) { stubs++; continue; }
-    if (!isBlank(r.mold) || !isBlank(r.product)) withMold++;
-    if (!isBlank(r.scrapUnits)) withScrap++;
-    if (!isBlank(r.downtimeMin)) withDowntime++;
 
     // Physical machine = the code label when logged (several tonnages have
     // TWO machines — the code is the only unique id), else the tonnage.
@@ -103,6 +106,10 @@ export async function buildOEEData(month: string | null) {
     // supervisors actually write) — Master standards are keyed by both.
     const moldKey = normKey(r.mold) || normKey(r.product);
     const moldLabel = (r.mold || r.product || "").trim();
+
+    // Scrap comes off the run's OWN row now — «هالك», else سستم − سليم. The
+    // cross-tab join it replaced died with «تسجيل الإنتاج»; see lib/scrap.ts.
+    const scrap = resolveScrap(r);
 
     const ownPlanned = num(r.plannedMin);
     const plannedMin = resolvePlannedMin(ownPlanned, machine, r.machine, lenByKey);
@@ -114,7 +121,7 @@ export async function buildOEEData(month: string | null) {
 
     if (moldKey) {
       const cur = moldUnits.get(moldKey) ?? { label: moldLabel, units: 0, hasStd: standards.has(moldKey) };
-      cur.units += num(r.goodUnits) + num(r.scrapUnits);
+      cur.units += num(r.goodUnits) + scrap.scrapUnits;
       moldUnits.set(moldKey, cur);
     }
 
@@ -127,31 +134,17 @@ export async function buildOEEData(month: string | null) {
       shift: r.shift || "",
       plannedMin,
       goodUnits: num(r.goodUnits),
-      scrapUnits: num(r.scrapUnits),
+      scrapUnits: scrap.scrapUnits,
+      // Carried so the readiness counters can be taken AFTER the month filter.
+      scrapSource: scrap.source,
+      hasMold: !isBlank(r.mold) || !isBlank(r.product),
+      hasSheetDowntime: !isBlank(r.downtimeMin),
       downtimeMin: num(r.downtimeMin),
       sheetDowntimeMin: num(r.downtimeMin),
       downtimeReason: r.downtimeReason || "None",
     });
   }
 
-  // Scrap from «تسجيل الإنتاج» (سستم − الفعلي per machine/day) fills runs whose
-  // scrap was never logged — Quality is MEASURED wherever the crew counted الفعلي.
-  const derivedScrap = deriveScrap(
-    runs.map((r) => ({
-      date: r.date || "",
-      machine: r.machine,
-      goodUnits: num(r.goodUnits),
-      scrapUnits: num(r.scrapUnits),
-    })),
-    hourlyRows,
-  );
-  let scrapFromHourly = 0;
-  runs = runs.map((r, i) => {
-    if (derivedScrap[i] <= 0) return r;
-    scrapFromHourly++;
-    return { ...r, scrapUnits: derivedScrap[i] };
-  });
-  withScrap += scrapFromHourly;
 
   // Downtime from «التوقفات» (phone capture writes the row on stop).
   // «الإنتاج»!J «زمن التوقف» has never been filled in 417 rows, so without this
@@ -167,12 +160,10 @@ export async function buildOEEData(month: string | null) {
     })),
     captured.byKey,
   );
-  let downtimeFromCapture = 0;
   runs = runs.map((r, i) => {
     const add = spread.perRun[i];
     if (add <= 0) return r;
     // Only count a run once, even if the sheet column ALSO had a value.
-    if (num(r.downtimeMin) === 0) downtimeFromCapture++;
     const reasonKnown = r.downtimeReason && r.downtimeReason !== "None";
     return {
       ...r,
@@ -185,7 +176,6 @@ export async function buildOEEData(month: string | null) {
         : captured.dominantByKey.get(`${r.date}|${normKey(r.machine)}`) ?? "Other",
     };
   });
-  withDowntime += downtimeFromCapture;
 
   // Months present in the data (for the period toggle) — from ALL runs, unfiltered.
   const months = Array.from(new Set(runs.map((r) => (r.date || "").slice(0, 7)).filter(Boolean)))
@@ -193,6 +183,23 @@ export async function buildOEEData(month: string | null) {
     .reverse();
 
   if (month) runs = runs.filter((r) => (r.date || "").startsWith(month));
+
+  /**
+   * Readiness counters are taken HERE, after the month filter, because
+   * `readiness.runs` is the filtered count and the panel prints them as a pair.
+   * They used to be incremented in the row loop above, over the WHOLE tab: with
+   * a month selected the panel read "466/398 runs log scrap" — a ratio over 100%
+   * that says the opposite of what it means. (Found 2026-08-27; `stubs` stays
+   * whole-tab and is reported on its own, not as a ratio.)
+   */
+  const withMold = runs.filter((r) => r.hasMold).length;
+  // AFTER the capture join, so this is "runs with any downtime at all" — the
+  // sheet's own column plus the minutes spread on from «التوقفات».
+  const withDowntime = runs.filter((r) => num(r.downtimeMin) > 0).length;
+  const downtimeFromCapture = runs.filter((r) => num(r.downtimeMin) > 0 && !r.hasSheetDowntime).length;
+  const withScrap = runs.filter((r) => r.scrapSource !== "none").length;
+  const scrapFromSystem = runs.filter((r) => r.scrapSource === "system").length;
+  const scrapUnknown = runs.filter((r) => r.scrapSource === "none").length;
 
   const overall = computeOEE(runs, standards);
 
@@ -298,7 +305,12 @@ export async function buildOEEData(month: string | null) {
     stubs,
     withMold,
     withScrap,
-    scrapFromHourly, // runs whose scrap came from «تسجيل الإنتاج» (سستم − الفعلي)
+    // Runs whose scrap was computed as سستم − سليم because «هالك» was blank…
+    scrapFromSystem,
+    // …and runs where NEITHER was available: «لم يُعد بعد» or
+    // «الفعلي أكبر من العداد». Their scrap reads 0 and is UNKNOWN, which
+    // overstates Quality — the honest count of how much of it is guesswork.
+    scrapUnknown,
     withDowntime,
     // PHASE 2 — how much of the downtime picture came from the phone capture
     // rather than the (never-filled) sheet column, and what could not be placed.
@@ -318,6 +330,9 @@ export async function buildOEEData(month: string | null) {
     })),
     plannedSource,
     machinesTabFound,
+    // Tabs the workbook no longer has. Surfaced rather than swallowed — an
+    // absent tab and an empty one used to be indistinguishable to a reader.
+    missingTabs: missingTabs(),
     defaultShiftMin: DEFAULT_SHIFT_MIN,
     standardsInMaster,
     moldsSeen: moldUnits.size,

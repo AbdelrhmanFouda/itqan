@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useState, useCallback } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
@@ -16,6 +17,7 @@ export default function ApprovalsPage() {
   const { lang } = useLang();
   const a = ad[lang];
   const isAr = lang === "ar";
+  usePageTitle(a.approvals.title);
   const { user } = useAuth();
   const [users, setUsers] = useState<UserProfile[] | null>(null);
   const [sel, setSel] = useState<Record<string, Role>>({});

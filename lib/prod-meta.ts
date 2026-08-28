@@ -46,13 +46,29 @@ const JOB_PRIORITY_EN = invert(JOB_PRIORITY_AR);
 export const jobStatusFromSheet = (v: string): string => JOB_STATUS_EN[v.trim()] ?? v.trim();
 export const jobPriorityFromSheet = (v: string): string => JOB_PRIORITY_EN[v.trim()] ?? v.trim();
 
+/** Is this one of the four canonical tokens «أوامر العمل»!K can accept? */
+export const isJobStatus = (v: string): boolean => JOB_STATUSES.includes(v);
+
 /**
- * App → sheet. Only the four validated values are translated; anything else is
- * passed through so we never invent an Arabic term the owner has not approved.
+ * App → sheet. «أوامر العمل»!K is a VALIDATED dropdown of exactly the four
+ * Arabic values above, and the bridge's `updates` path (setValue) ENFORCES that
+ * validation: an unknown value is rejected mid-batch and trips the whole
+ * rollback machinery (see CLAUDE.md → "Write semantics" §2 — this function
+ * passing unknowns through used to be the live reachable case). So an unknown
+ * status REFUSES here, before it can reach a write, instead of being passed
+ * through as a guess. Callers gate on `isJobStatus` first and return a clean
+ * validation error; the throw is the backstop for a caller that forgets.
  * "Quoted" and "Delivered" have no counterpart in the sheet's list — they are no
  * longer offered in the UI, and adding them is a sheet change for the owner.
  */
-export const jobStatusToSheet = (v: string): string => JOB_STATUS_AR[v] ?? v;
+export const jobStatusToSheet = (v: string): string => {
+  if (!isJobStatus(v)) {
+    throw new Error(
+      `unknown job status ${JSON.stringify(v)} — «أوامر العمل»!K accepts only: ${JOB_STATUSES.join(" · ")}`,
+    );
+  }
+  return JOB_STATUS_AR[v];
+};
 export const jobPriorityToSheet = (v: string): string => JOB_PRIORITY_AR[v] ?? v;
 export const DOWNTIME_REASONS = ["None", "Mold change", "Breakdown", "Material", "No order", "Quality hold", "Other"];
 

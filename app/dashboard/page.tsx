@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState } from "react";
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const { lang } = useLang();
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(p.overview.title);
 
   const [machines, setMachines] = useState<Machine[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -40,11 +42,22 @@ export default function DashboardPage() {
   const [stale, setStale] = useState<StaleEvent[]>([]);
   // "" until the guarded fetch answers; the tile only renders on a real date.
   const [lastDowntimeLog, setLastDowntimeLog] = useState("");
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch("/api/machines").then((r) => r.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
-    fetch("/api/jobs").then((r) => r.json()).then((j) => setJobs(j.jobs ?? [])).catch(() => {});
-    fetch("/api/runs").then((r) => r.json()).then((r) => setRuns(Array.isArray(r) ? r : [])).catch(() => {});
+    // A non-2xx (401 on a missing/expired token) must land in the ERROR state —
+    // parsed as data it renders as zeros and an empty list, which lies to the
+    // owner. Same rule for runs: swallowing its failure left the spinner
+    // spinning forever. (Pattern from app/dashboard/jobs/page.tsx.)
+    authedFetch("/api/jobs")
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then((j) => setJobs(j.jobs ?? []))
+      .catch(() => setError(true));
+    fetch("/api/runs")
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then((r) => setRuns(Array.isArray(r) ? r : []))
+      .catch(() => setError(true));
     // Guarded route (the rows carry createdBy), so this one is authenticated.
     authedFetch("/api/downtime")
       .then((r) => (r.ok ? r.json() : null))
@@ -53,6 +66,22 @@ export default function DashboardPage() {
   }, []);
 
   const fmt = (n: number) => n.toLocaleString(isAr ? "ar-EG" : "en-US");
+
+  // Checked BEFORE the loading gate: a failed runs fetch leaves `runs` null,
+  // so the spinner below would otherwise spin forever.
+  if (error) {
+    return (
+      <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{p.overview.title}</h1>
+          <p className="text-sm text-gray-500">{p.overview.subtitle}</p>
+        </div>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          {p.common.loadError}
+        </div>
+      </div>
+    );
+  }
 
   // Loading gate — presentation only: until the runs fetch resolves, show a
   // spinner instead of zero-filled stats (matches every sibling page).

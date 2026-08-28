@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useCallback, useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
@@ -59,6 +60,7 @@ export default function DowntimePage() {
   const p = pd[lang];
   const t = p.downtime;
   const isAr = lang === "ar";
+  usePageTitle(t.title);
 
   const [machines, setMachines] = useState<MachineInfo[] | null>(null);
   const [data, setData] = useState<Data | null>(null);

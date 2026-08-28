@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, Send, AlertTriangle, Check, X, User, Bot } from "lucide-react";
 import { useLang } from "@/context/LangContext";
@@ -35,6 +36,7 @@ export default function AssistantPage() {
   const { user } = useAuth();
   const isAr = lang === "ar";
   const a = ag[lang];
+  usePageTitle(a.title);
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");

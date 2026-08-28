@@ -3,7 +3,7 @@ import { getRecords, updateRecord, deleteRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { latinDigits } from "@/lib/dates";
 import { requireRole } from "@/lib/api-guard";
-import { jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
+import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
@@ -16,7 +16,11 @@ const num = (v: unknown) => {
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// Guarded like the jobs list (2026-08-28): the detail carries the client, the
+// ordered quantity and the Master standard — not an open operational read.
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   const { id } = await params;
   try {
     const [{ jobs, runsFor }, master] = await Promise.all([loadJobs(), getRecords("master")]);
@@ -66,7 +70,7 @@ const EDITABLE = new Set([
 // The Master columns the job page may edit — the product's STANDARD, nothing
 // that carries identity. `name`, `code` and `id` are deliberately absent:
 // everything in the workbook joins on the product name, so renaming from here
-// would orphan every production row, job and hourly log at once.
+// would orphan every production row and job at once.
 const MASTER_EDITABLE = new Set(["weight", "material", "cavities", "cycle", "defects"]);
 
 /**
@@ -121,6 +125,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!EDITABLE.has(key)) continue;
       const val = String(v ?? "");
       // «أوامر العمل»!K and !L are validated Arabic lists — translate on the way in.
+      // !K accepts EXACTLY four values; an unknown one would be rejected by the
+      // sheet mid-batch and trip the rollback machinery, so refuse it here with
+      // a clean validation error before it can reach a write.
+      if (key === "status" && !isJobStatus(val)) {
+        return NextResponse.json({ ok: false, reason: "invalid_status" }, { status: 400 });
+      }
       changes[key] =
         key === "status" ? jobStatusToSheet(val) : key === "priority" ? jobPriorityToSheet(val) : val;
     }

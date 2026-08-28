@@ -42,15 +42,14 @@ const TOOLS = [
   {
     name: "read_records",
     description:
-      "Read rows from a sheet tab. entity ∈ production|master|machines|molds|products|clients|jobs|issues|hourly. " +
-      "hourly = «تسجيل الإنتاج»: one row per machine per day, hour columns are PIECES; " +
-      "systemTotal−actualTotal ≈ scrap when the crew filled the hand-counted الفعلي. " +
+      "Read rows from a sheet tab. entity ∈ production|master|machines|molds|products|clients|jobs|issues. " +
+      "A production row carries its own scrap: «هالك», or «الأجمالي سستم» − «إنتاج سليم» when «هالك» is blank. " +
       "Optional case/space-insensitive `search` filters rows; `limit` (default 30, max 60). " +
       "Each record includes its sheet `row` number (needed for propose_cell_update).",
     input_schema: {
       type: "object",
       properties: {
-        entity: { type: "string", enum: ["production", "master", "machines", "molds", "products", "clients", "jobs", "issues", "hourly"] },
+        entity: { type: "string", enum: ["production", "master", "machines", "molds", "products", "clients", "jobs", "issues"] },
         search: { type: "string" },
         limit: { type: "number" },
       },
@@ -158,7 +157,7 @@ function systemPrompt(lang: string): string {
     "Rules:",
     "- Before proposing a production row, use read_records on `master` (products/standards) and `machines` (registry) to get EXACT product names and machine labels. Joins are by product NAME — an inexact name breaks OEE.",
     "- The machine's identity is its code label like 'PQ 4 — 220'. Resolve machines by product name when a code is unreliable.",
-    "- Hourly numbers are machine SHOTS, not pieces. Final good is counted pieces. scrap = shots × openCavities − good, and can never be negative.",
+    "- A production row's «الأجمالي سستم» is the machine COUNTER's total and «إنتاج سليم» is the hand count. Scrap is their difference and can never be negative; «حالة السجل» says whether the row has been counted back yet.",
     "- «غير متاح / N/A» means unknown — treat as blank, never invent numbers.",
     "- After you call a propose_* tool, relay its errors/warnings plainly, then STOP and tell the user to press Confirm. Do not re-propose or try to write.",
     "- For questions (OEE, downtime, a product, a client), answer from tools with real numbers only. Be concise and practical, like a plant manager.",

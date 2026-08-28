@@ -20,13 +20,17 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Team and Equipment render only when their i18n content exists (Team.tsx /
+  // Tools.tsx return null on empty arrays) — mirror those gates here so the
+  // nav never offers an anchor that scrolls nowhere. Filling in the content
+  // brings the links back with it, no nav edit needed.
   const navLinks = [
     { href: "#services", label: tr.nav.services },
     { href: "#about", label: tr.nav.about },
-    { href: "#team", label: tr.nav.team },
+    ...(tr.team.members.length ? [{ href: "#team", label: tr.nav.team }] : []),
     // #products removed with the section (2026-08-20) — no product names on the landing page.
     { href: "#clients", label: tr.nav.clients },
-    { href: "#tools", label: tr.nav.tools },
+    ...(tr.tools.categories.length ? [{ href: "#tools", label: tr.nav.tools }] : []),
     { href: "#contact", label: tr.nav.contact },
   ];
 

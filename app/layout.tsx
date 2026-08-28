@@ -8,25 +8,57 @@ import { LANG_COOKIE, langFromValue } from "@/lib/lang-cookie";
 
 const geist = Geist({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-  metadataBase: new URL("https://itqan-taupe.vercel.app"),
-  title: "Itqan — Industrial Manufacturing",
-  description:
-    "Plastic injection molding, fan counterweights, and CNC mold manufacturing in Egypt.",
-  // WhatsApp is the distribution channel here — without these a shared link
-  // renders with no preview card at all. The image comes from
-  // app/opengraph-image.tsx (generated, brand-true, no stock photos).
-  openGraph: {
-    title: "إتقان Itqan — حقن بلاستيك وتصنيع اسطمبات",
+// Bilingual, server-rendered metadata. The language cookie is readable here —
+// RootLayout below already reads it for <html lang/dir> — so the title and
+// description arrive in the visitor's own language in the first byte, same
+// rule as the page text itself.
+const META = {
+  en: {
+    title: "Itqan — Industrial Manufacturing",
     description:
+      "Plastic injection molding, fan counterweights, and CNC mold manufacturing in Egypt.",
+    ogTitle: "Itqan إتقان — Plastic Injection Molding & CNC Mold Making",
+    ogDescription:
+      "Plastic injection molding, fan counterweights and CNC mold making in Egypt — مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC.",
+    locale: "en_US",
+  },
+  ar: {
+    title: "إتقان — حقن بلاستيك وتصنيع اسطمبات",
+    description:
+      "مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC.",
+    ogTitle: "إتقان Itqan — حقن بلاستيك وتصنيع اسطمبات",
+    ogDescription:
       "مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC — Plastic injection molding, fan counterweights and CNC mold making in Egypt.",
-    url: "/",
-    siteName: "Itqan إتقان",
-    type: "website",
     locale: "ar_EG",
   },
-  twitter: { card: "summary_large_image" },
-};
+} as const;
+
+export async function generateMetadata(): Promise<Metadata> {
+  const lang = langFromValue((await cookies()).get(LANG_COOKIE)?.value) ?? "en";
+  const m = META[lang];
+  return {
+    metadataBase: new URL("https://itqan-taupe.vercel.app"),
+    // The template composes per-page titles ("العملاء — إتقان Itqan") for the
+    // few SERVER pages (clients/molds/products export a plain-string title).
+    // Client pages cannot export metadata at all — they set document.title via
+    // components/dashboard/use-page-title.ts, which composes the SAME suffix
+    // by hand. Change one, change both.
+    title: { default: m.title, template: "%s — إتقان Itqan" },
+    description: m.description,
+    // WhatsApp is the distribution channel here — without these a shared link
+    // renders with no preview card at all. The image comes from
+    // app/opengraph-image.tsx (generated, brand-true, no stock photos).
+    openGraph: {
+      title: m.ogTitle,
+      description: m.ogDescription,
+      url: "/",
+      siteName: "Itqan إتقان",
+      type: "website",
+      locale: m.locale,
+    },
+    twitter: { card: "summary_large_image" },
+  };
+}
 
 /**
  * Two jobs, and neither replaces the other.

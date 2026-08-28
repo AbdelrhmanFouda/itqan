@@ -1,4 +1,5 @@
 import { getRecords, type SheetRecord } from "@/lib/sheets";
+import { resolveScrap } from "@/lib/scrap";
 import { normalizeDate, latinDigits } from "@/lib/dates";
 import { jobStatusFromSheet, jobPriorityFromSheet } from "@/lib/prod-meta";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
@@ -143,7 +144,12 @@ export async function loadJobs(): Promise<{
     date: normalizeDate(r.date),
     machine: latinDigits((r.machine || "").trim()),
     goodUnits: num(r.goodUnits),
-    scrapUnits: num(r.scrapUnits),
+    // Same row-local rule the other two join paths use — «هالك», else سستم −
+    // سليم. Before 2026-08-27 this path read «هالك» raw and was the only one of
+    // the three that never saw derived scrap, so a job's «هالك» total could sit
+    // below the same runs' total on /performance.
+    scrapUnits: resolveScrap(r).scrapUnits,
+    rowCheck: r.rowCheck || "",
     downtimeMin: num(r.downtimeMin),
     downtimeReason: r.downtimeReason || "None",
     operator: r.operator || "",

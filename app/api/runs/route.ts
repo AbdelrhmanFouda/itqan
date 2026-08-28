@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, type SheetRecord } from "@/lib/sheets";
 import { requireRole } from "@/lib/api-guard";
 import { normalizeDate } from "@/lib/dates";
-import { loadHourlyRows, deriveScrap } from "@/lib/hourly";
+import { resolveScrap } from "@/lib/scrap";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
@@ -12,10 +12,14 @@ import {
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
 // data model). Each run is one row; the sheet row number is its id.
 //
-// TWO of a run's numbers are not in its own row and are joined on here:
+// ONE of a run's numbers is not in its own row and is joined on here:
 //
-//   scrapUnits   ← «تسجيل الإنتاج» (سستم − الفعلي), via deriveScrap()
 //   downtimeMin  ← «التوقفات», via distributeDowntime()
+//
+// Scrap used to be the second one, joined from «تسجيل الإنتاج». That tab was
+// removed from the workbook on 2026-08-27 and «الإنتاج» now carries the
+// numbers itself, so scrap is resolved from the run's OWN row — see
+// lib/scrap.ts — and is no longer a join at all.
 //
 // «الإنتاج»!J «زمن التوقف» has never been filled in 418 rows and will not be —
 // stoppages are logged in their own tab «التوقفات» instead (Firestore until
@@ -32,6 +36,7 @@ function num(v: string | undefined): number {
 }
 
 function shape(r: SheetRecord) {
+  const scrap = resolveScrap(r);
   return {
     id: String(r.row),
     date: normalizeDate(r.date) || (r.date ?? ""),
@@ -42,11 +47,23 @@ function shape(r: SheetRecord) {
     product: r.product ?? "",
     plannedMin: num(r.plannedMin),
     goodUnits: num(r.goodUnits),
-    scrapUnits: num(r.scrapUnits),
+    scrapUnits: scrap.scrapUnits,
+    // "logged" («هالك»), "system" (سستم − سليم), or "none" — which means
+    // NOT KNOWN, not "zero scrap". INTERNAL since 2026-08-28 (see publicRun):
+    // no consumer ever read it. A UI stating scrap confidence would want it —
+    // restore it to publicRun() then, don't re-derive it client-side.
+    scrapSource: scrap.source,
+    // The sheet's own verdict on the row: «سليم» / «لم يُعد بعد» /
+    // «الفعلي أكبر من العداد», or "" on a row the site appended (those
+    // get no formula). A consumer showing scrap SHOULD show this beside it —
+    // none does yet, so it too is stripped from the payload until one wants it.
+    rowCheck: r.rowCheck ?? "",
     openCavities: num(r.openCavities),
     downtimeMin: num(r.downtimeMin),
-    // The run's own «زمن التوقف» value, kept after captured minutes are added to
-    // downtimeMin so a consumer can still tell the two sources apart.
+    // The run's own «زمن التوقف» value, kept after captured minutes are added
+    // to downtimeMin so the join below can still tell the two sources apart.
+    // downtimeSource ("none" | "sheet" | "capture") was the consumer-facing
+    // form of the same distinction; both are internal-only now.
     sheetDowntimeMin: num(r.downtimeMin),
     downtimeReason: r.downtimeReason || "None",
     downtimeSource: "none" as "none" | "sheet" | "capture",
@@ -55,31 +72,50 @@ function shape(r: SheetRecord) {
   };
 }
 
+// The GET payload — ONLY the fields a consumer actually reads, verified
+// against all five dashboard callers on 2026-08-28 (overview, finance,
+// quality, production; jobs/[id] never reads the GET body at all). Everything
+// else in shape() stays INTERNAL because this route itself still needs it:
+// plannedMin feeds resolvePlannedMin() (the downtime headroom — skip it and
+// every captured minute silently returns as unallocated), sheetDowntimeMin
+// tells sheet minutes from captured ones during the join. So strip HERE, at
+// serialization time after the join — never inside shape(). Dropping the
+// seven never-read fields (plannedMin, scrapSource, rowCheck, openCavities,
+// sheetDowntimeMin, downtimeSource, note) cuts the ~593-row payload by
+// roughly a third; restoring one is a one-line addition.
+function publicRun(r: ReturnType<typeof shape>) {
+  return {
+    id: r.id,
+    date: r.date,
+    shift: r.shift,
+    machine: r.machine,
+    machineCode: r.machineCode,
+    mold: r.mold,
+    product: r.product,
+    goodUnits: r.goodUnits,
+    scrapUnits: r.scrapUnits,
+    downtimeMin: r.downtimeMin,
+    downtimeReason: r.downtimeReason,
+    operator: r.operator,
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const machine = req.nextUrl.searchParams.get("machine");
     const mold = req.nextUrl.searchParams.get("mold");
-    const [{ records }, hourly, machinesTab, captured] = await Promise.all([
+    const [{ records }, machinesTab, captured] = await Promise.all([
       getRecords("production"),
-      loadHourlyRows().catch(() => []),
-      // Best-effort, like the hourly load: a registry or Firestore that is
-      // briefly unreachable degrades this route to "downtime not measured"
-      // rather than failing the whole run list.
+      // Best-effort: a registry or Firestore that is briefly unreachable
+      // degrades this route to "downtime not measured" rather than failing the
+      // whole run list.
       getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
       loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
     ]);
     let runs = records.map(shape).map((r) => ({
       ...r,
-      scrapSource: r.scrapUnits > 0 ? "logged" : "none",
       downtimeSource: (r.downtimeMin > 0 ? "sheet" : "none") as "none" | "sheet" | "capture",
     }));
-    // Fill unlogged scrap from «تسجيل الإنتاج»: scrap = سستم − الفعلي per
-    // machine/day, split across that day's runs in proportion to good units.
-    const derived = deriveScrap(
-      runs.map((r) => ({ date: r.date, machine: r.machineCode || r.machine, goodUnits: r.goodUnits, scrapUnits: r.scrapUnits })),
-      hourly,
-    );
-    runs = runs.map((r, i) => (derived[i] > 0 ? { ...r, scrapUnits: derived[i], scrapSource: "hourly" } : r));
 
     // Downtime from «التوقفات», joined on the same way buildOEEData does
     // it. Stub rows are held out of the spread for the reason in isStubRun():
@@ -121,7 +157,12 @@ export async function GET(req: NextRequest) {
     if (machine) runs = runs.filter((r) => r.machine === machine);
     if (mold) runs = runs.filter((r) => r.mold === mold);
     runs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : Number(b.id) - Number(a.id)));
-    return NextResponse.json(runs);
+    // Open operational read — a browser may reuse it briefly. The server-side
+    // sheet cache (lib/sheets.ts, 45s) is the real one; this only spares a
+    // phone re-downloading the same list on every poll.
+    return NextResponse.json(runs.map(publicRun), {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "sheet error" }, { status: 500 });

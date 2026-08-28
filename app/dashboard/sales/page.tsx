@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
@@ -23,15 +24,20 @@ export default function SalesPage() {
   const a = ad[lang];
   const p = pd[lang];
   const isAr = lang === "ar";
+  usePageTitle(a.sales.title);
 
   const [inquiries, setInquiries] = useState<Inquiry[] | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [produced, setProduced] = useState<Record<string, number>>({});
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     Promise.all([
-      authedFetch("/api/inquiries").then((r) => r.json()),
-      fetch("/api/jobs").then((r) => r.json()),
+      // A non-2xx (401 on a missing/expired token) must land in the ERROR
+      // state — parsed as data it renders as "no inquiries / no orders",
+      // which lies to the owner. (Pattern from app/dashboard/jobs/page.tsx.)
+      authedFetch("/api/inquiries").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
+      authedFetch("/api/jobs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
     ])
       .then(([i, j]) => {
         setInquiries(Array.isArray(i) ? i : []);
@@ -41,12 +47,22 @@ export default function SalesPage() {
         for (const jb of list) by[jb.id] = jb.produced || 0;
         setProduced(by);
       })
-      .catch(() => setInquiries([]));
+      .catch(() => setError(true));
   }, []);
 
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
   const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? "ar-EG" : "en-US") : "—");
 
+  if (error) {
+    return (
+      <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">{a.sales.title}</h1>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          {p.common.loadError}
+        </div>
+      </div>
+    );
+  }
   if (inquiries === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
   const openJobs = jobs.filter((j) => !DONE.includes(j.status));

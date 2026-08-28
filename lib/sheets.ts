@@ -89,7 +89,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
       // machineCode BEFORE machine: its column header ("كود الماكينة\nMachine code")
       // contains both "machine" and "الماكينة", so `machine` would otherwise claim
       // the code column during appends. Value = the physical-machine label
-      // ("PQPI 4 — 220") that the hourly board's SUMIFS keys on.
+      // ("PQPI 4 — 220") the workbook joins machines on.
       { key: "machineCode", keywords: ["كود الماكينة", "machine code"] },
       { key: "machine", keywords: ["machine", "الماكينة"] },
       { key: "mold", keywords: ["mold", "الاسطمبة", "القالب"] },
@@ -101,9 +101,18 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "plannedMin", keywords: ["planned", "الزمن المخطط", "المخطط"] },
       { key: "goodUnits", keywords: ["good", "سليم"] },
       { key: "scrapUnits", keywords: ["scrap", "هالك"] },
+      // «الأجمالي سستم» and «حالة السجل» — added to the tab by the sheet's owner
+      // and read here since 2026-08-27, when «تسجيل الإنتاج» was removed from the
+      // workbook and this row became the ONLY place a run's scrap lives.
+      // systemTotal is the machine counter's total; scrap = سستم − سليم when
+      // «هالك» itself is blank. See lib/scrap.ts for the rule.
+      { key: "systemTotal", keywords: ["الأجمالي سستم", "system total"] },
+      // «سليم / لم يُعد بعد / الفعلي أكبر من العداد» — the sheet's own verdict on
+      // whether the row's counts agree. Read, never written.
+      { key: "rowCheck", keywords: ["حالة السجل", "row check"] },
       // Cavities actually OPEN during this run (damaged ones get blocked, so the
-      // count varies per run). Lets scrap be derived from the hourly board's
-      // shot counts: scrap = shots × open − good.
+      // count varies per run). Vestigial — the per-run column was dropped from
+      // the final workbook and the hourly board it fed is gone; see CLAUDE.md.
       { key: "openCavities", keywords: ["التجاويف", "open cav"] },
       { key: "downtimeReason", keywords: ["downtime reason", "سبب التوقف", "reason", "سبب"] },
       { key: "downtimeMin", keywords: ["downtime", "زمن التوقف", "توقف"] },
@@ -150,37 +159,6 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "priority", keywords: ["الأولوية", "priority"] },
       { key: "instructions", keywords: ["التعليمات", "instruction"], long: true },
       { key: "notes", keywords: ["ملاحظ", "note"], long: true },
-    ],
-  },
-  // «تسجيل الإنتاج» — the hourly log that REPLACED the old block-based board
-  // (2026-07-19 workbook). LONG format: one row per machine per day. Header row 4:
-  // date | shift | machine label | product | 24 hour columns (08:00→07:00) |
-  // الأجمالي سستم (=SUM of hours) | الأجمالي الفعلي (manually counted) |
-  // المتوقع (from الرئيسي cycle+cavities) | الكفاءة %. Hours are PIECES.
-  // scrap ≈ سستم − فعلي when both are present.
-  hourly: {
-    tab: "تسجيل الإنتاج", titleEn: "Hourly Log", titleAr: "تسجيل الإنتاج",
-    fields: [
-      { key: "date", keywords: ["التاريخ", "date"] },
-      { key: "shift", keywords: ["الوردية", "shift"] },
-      { key: "machine", keywords: ["الماكينة", "machine"] },
-      { key: "product", keywords: ["المنتج", "product"] },
-      { key: "h08", keywords: ["08:00"] }, { key: "h09", keywords: ["09:00"] },
-      { key: "h10", keywords: ["10:00"] }, { key: "h11", keywords: ["11:00"] },
-      { key: "h12", keywords: ["12:00"] }, { key: "h13", keywords: ["13:00"] },
-      { key: "h14", keywords: ["14:00"] }, { key: "h15", keywords: ["15:00"] },
-      { key: "h16", keywords: ["16:00"] }, { key: "h17", keywords: ["17:00"] },
-      { key: "h18", keywords: ["18:00"] }, { key: "h19", keywords: ["19:00"] },
-      { key: "h20", keywords: ["20:00"] }, { key: "h21", keywords: ["21:00"] },
-      { key: "h22", keywords: ["22:00"] }, { key: "h23", keywords: ["23:00"] },
-      { key: "h00", keywords: ["00:00"] }, { key: "h01", keywords: ["01:00"] },
-      { key: "h02", keywords: ["02:00"] }, { key: "h03", keywords: ["03:00"] },
-      { key: "h04", keywords: ["04:00"] }, { key: "h05", keywords: ["05:00"] },
-      { key: "h06", keywords: ["06:00"] }, { key: "h07", keywords: ["07:00"] },
-      { key: "systemTotal", keywords: ["سستم", "system"] },
-      { key: "actualTotal", keywords: ["الفعلي", "actual"] },
-      { key: "expected", keywords: ["المتوقع", "expected"] },
-      { key: "efficiency", keywords: ["الكفاءة", "efficiency"] },
     ],
   },
   // «التوقفات» — the stoppage log, created by ../production/scripts/downtime-tab.gs
@@ -318,6 +296,20 @@ type SheetRead = { title: string; values: string[][] };
  *  instance was measured SLOWER than the first. */
 const sheetInflight = new Map<string, Promise<SheetRead>>();
 
+/**
+ * Tabs the workbook turned out not to have. A tab vanishing is a WORKBOOK
+ * change, and until 2026-08-27 the only trace of one was an empty array that
+ * looked exactly like an empty tab — «تسجيل الإنتاج» was deleted and the
+ * site reported scrap of zero without a word. Recorded here so the readiness
+ * panel can SAY so.
+ *
+ * Per-instance, which is enough: it is populated by the read that just ran in
+ * this request, and a tab that is back simply never gets added again.
+ */
+const MISSING_TABS = new Set<string>();
+/** Tab names the bridge has refused as non-existent on this instance. */
+export const missingTabs = (): string[] => Array.from(MISSING_TABS);
+
 /** Drop cached reads everywhere — called after any successful write. */
 export function invalidateSheetCache(): void {
   sheetInflight.clear();
@@ -384,8 +376,23 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
     // page that looks exactly like "there is no data".
     const plan: (string | number)[] = [...candidates, 1500, tab, 4000, tab];
     let lastProblem = "";
+    // The bridge answers `{"error":"no_tab"}` when the workbook has no sheet by
+    // that name. That is a DEFINITIVE answer, not a throttled one: waiting 1.5s
+    // and 4s to ask the same question twice more cannot change it. Counting
+    // them lets the loop give up once every candidate name has been refused.
+    //
+    // Measured cost of not doing this: «تسجيل الإنتاج» was removed from the
+    // workbook on 2026-08-27, and until this route stopped asking for it, every
+    // uncached read that loaded it — /api/runs, /api/oee, /api/hourly,
+    // /api/jobs/[id] — spent 5.5s asleep plus five wasted bridge calls before
+    // returning the empty array it already had after the first one.
+    let refused = 0;
     for (const step of plan) {
-      if (typeof step === "number") { await new Promise((r) => setTimeout(r, step)); continue; }
+      if (typeof step === "number") {
+        if (refused >= candidates.length) break; // every name refused — no point waiting
+        await new Promise((r) => setTimeout(r, step));
+        continue;
+      }
       const name = step;
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
@@ -406,9 +413,12 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
           // moment became a silently blank dashboard.
           const body = await res.text();
           try {
-            const json = JSON.parse(body) as { values?: string[][] };
+            const json = JSON.parse(body) as { values?: string[][]; error?: string };
             if (json.values && json.values.length > 0) return { title: name, values: json.values };
-            lastProblem = `"${name}" returned no rows`;
+            if (json.error === "no_tab") {
+              refused++;
+              lastProblem = `"${name}" is not a tab in the workbook`;
+            } else lastProblem = `"${name}" returned no rows`;
           } catch {
             lastProblem = `"${name}" returned ${body.trim().startsWith("<") ? "an HTML error page (bridge throttled?)" : "unparseable output"}`;
           }
@@ -421,6 +431,15 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
     }
     // Loud, because the caller cannot tell "tab is empty" from "read failed" —
     // both arrive as [] — and the UI will render an empty page either way.
+    if (refused >= candidates.length) {
+      // A tab that does not exist is a WORKBOOK change, not an outage. Say so
+      // in those words: the last time this happened the message read like a
+      // transient failure and the real event — a tab deleted from the sheet —
+      // took a fresh survey to notice.
+      MISSING_TABS.add(tab);
+      console.error(`[sheets] tab "${tab}" does not exist in the workbook (tried: ${candidates.join(", ")}). Was it renamed or deleted?`);
+      return { title: tab, values: [] };
+    }
     console.error(`[sheets] every attempt failed for tab "${tab}" (last: ${lastProblem})`);
   }
   // Fallback: public read via API key.
@@ -541,22 +560,27 @@ export async function getRecords(
 
 /* --------------------------- public showcase -------------------------- */
 
-// Safe data for the public marketing home page — names + counts only.
+// Safe data for the public marketing home page — COUNTS ONLY.
+// This used to return 30 real product names and the full client list; the
+// landing page stopped showing product names at the owner's word (90ab433,
+// 2026-08-27) but the endpoint kept serving them to anyone who asked. Closed
+// 2026-08-28: nothing public gets a name, only the three numbers the Hero
+// shows. If the «أعمالنا» section ever comes back, it must be fed genericized
+// content — not this endpoint.
+// Molds and Products are both formula views of Master, so their counts are
+// always IDENTICAL — showing both read as a bug on the Hero. Machines (the
+// «الماكينات» registry, one row per physical machine) replaced products.
 export async function getPublicShowcase() {
-  const [molds, products, clients] = await Promise.all([
-    getRecords("molds"), getRecords("products"), getRecords("clients"),
+  const [molds, machines, clients] = await Promise.all([
+    getRecords("molds"), getRecords("machines"), getRecords("clients"),
   ]);
+  // The exclude list keeps the count honest (the factory itself and filler
+  // rows are not clients), even though the names themselves never leave.
   const exclude = new Set(["اتقان", "itqan", "غير محدد", "غير محدّد", "n/a"]);
-  const clientNames = Array.from(new Set(clients.records.map((r) => (r.name || "").trim()).filter(Boolean)))
-    .filter((n) => !exclude.has(n.toLowerCase()));
-  const productList = products.records
-    .filter((r) => r.name)
-    .slice(0, 30)
-    .map((r) => ({ name: r.name, material: r.material || "" }));
+  const clientCount = Array.from(new Set(clients.records.map((r) => (r.name || "").trim()).filter(Boolean)))
+    .filter((n) => !exclude.has(n.toLowerCase())).length;
   return {
-    stats: { molds: molds.records.length, products: products.records.length, clients: clientNames.length },
-    clients: clientNames,
-    products: productList,
+    stats: { molds: molds.records.length, machines: machines.records.length, clients: clientCount },
   };
 }
 

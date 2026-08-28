@@ -62,7 +62,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
-  | "hourly" | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
+  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
 
 /**
  * Sidebar entries with the (non-full-access) roles allowed to see/visit them.
@@ -75,7 +75,7 @@ export type NavKey =
  *
  * ⚠ This table is UX gating: it decides what a role SEES and can navigate to.
  * It is not a security boundary. The operational read APIs (molds, products,
- * machines, runs, oee, hourly, issues) stay deliberately open — see CLAUDE.md.
+ * machines, runs, oee, issues) stay deliberately open — see CLAUDE.md.
  * Removing a page from a role hides it; it does not classify the data.
  */
 export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
@@ -88,7 +88,6 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/products", key: "products", roles: ["sales"] },
   { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
   { href: "/dashboard/production", key: "production", roles: ["production"] },
-  { href: "/dashboard/hourly", key: "hourly", roles: ["production", "quality", "worker"] },
   // Downtime capture is the shop floor's own surface: the worker who stops the
   // machine, the supervisor who runs it, and maintenance who fix it.
   { href: "/dashboard/downtime", key: "downtime", roles: ["production", "worker", "maintenance"] },

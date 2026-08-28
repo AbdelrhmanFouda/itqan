@@ -36,7 +36,9 @@ function rateLimited(ip: string): boolean {
   return false;
 }
 
-const s = (v: unknown, max: number) => String(v ?? "").slice(0, max).trim();
+// Trim BEFORE slicing — sliced-then-trimmed, leading whitespace ate the length
+// cap and could reduce a real value to empty before the emptiness checks ran.
+const s = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 
 async function notify(fields: Record<string, string>) {
   const key = process.env.RESEND_API_KEY;
@@ -87,6 +89,13 @@ export async function POST(req: NextRequest) {
     // POST cannot store an empty husk.
     if (!fields.name || !fields.message) {
       return NextResponse.json({ ok: false, reason: "missing_fields" }, { status: 400 });
+    }
+    // A lead with no phone AND no email cannot be answered — a visitor once
+    // could describe a whole project and leave no way to reply. The form
+    // enforces this client-side; enforce it here too so a scripted POST cannot
+    // store an unanswerable lead.
+    if (!fields.phone && !fields.email) {
+      return NextResponse.json({ ok: false, reason: "missing_contact" }, { status: 400 });
     }
     await addInquiry(fields);
     await notify(fields);

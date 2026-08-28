@@ -15,7 +15,7 @@ test("the downtime capture page is always Arabic", () => {
 });
 
 test("no other page is forced — everyone else keeps their choice", () => {
-  for (const p of ["/dashboard", "/dashboard/jobs", "/dashboard/hourly", "/dashboard/issues",
+  for (const p of ["/dashboard", "/dashboard/jobs", "/dashboard/issues",
                    "/dashboard/assistant", "/login", "/"]) {
     assert.equal(isArabicOnlyPath(p), false, `${p} should not be forced`);
   }

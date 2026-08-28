@@ -1,4 +1,5 @@
 "use client";
+import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useEffect, useMemo, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
@@ -30,6 +31,7 @@ export default function IssuesPage() {
   const p = pd[lang];
   const t = p.issues;
   const isAr = lang === "ar";
+  usePageTitle(t.title);
 
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
