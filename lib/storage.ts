@@ -24,16 +24,24 @@ export type StorageBalance = {
   inQty: string; inLast: string; outQty: string; outLast: string; loss: string; avail: string;
 };
 
-// One row of an إيداع/سحب log (A..N) + which log it came from.
+// One row of an إيداع/سحب log (A..O) + which log it came from.
+// `forClient` («صرف لصالح (العميل المستفيد)») is column O, appended by the sheet's
+// v4 upgrade. `client` stays WHO OWNS the material — it is part of the balance
+// key — while `forClient` records who the movement was actually for. An older
+// bridge sends 14 columns and it simply arrives empty.
 export type StorageMovement = {
   log: "إيداع" | "سحب";
   num: string; itemType: string; item: string; client: string; loc: string; date: string;
   qtyCount: string; qtyKg: string; grams: string; loss: string; qtyFromWt: string;
-  net: string; unit: string; notes: string;
+  net: string; unit: string; notes: string; forClient: string;
 };
 
+// `locations` comes from «أماكن التخزين» through the bridge (v4.1+). It can be
+// empty — the page then falls back to the locations it can see in the data — but
+// it is the only source that knows about a slot which is currently EMPTY, and
+// those are exactly the ones you deposit into.
 export type StorageLists = {
-  products: string[]; materials: string[]; clients: string[];
+  products: string[]; materials: string[]; clients: string[]; locations: string[];
   weights: Record<string, number>;
 };
 
@@ -44,16 +52,28 @@ export type StorageData = {
   inLog: StorageMovement[];
   outLog: StorageMovement[];
   lists: StorageLists;
+  /**
+   * Whether the DEPLOYED bridge knows «صرف لصالح» — measured from the width of
+   * a log row (15 columns since sheet v4), not assumed. Verified 2026-08-30: the
+   * live deployment is still v3 and answers 14, so the site must not offer a
+   * beneficiary field that the sheet would silently drop.
+   */
+  supportsForClient: boolean;
 };
 
-export type StorageWriteResult = { ok: boolean; num?: string; error?: string };
+// `nums`/`split`/`message` come back when a سحب with no location was spread over
+// several places (sheet v4): one row per place, consecutive numbers. Reporting
+// only `num` would name one row and hide the rest.
+export type StorageWriteResult = {
+  ok: boolean; num?: string; nums?: string[]; split?: boolean; message?: string; error?: string;
+};
 
 // Fields the bridge's save/update actions accept.
 export type MovementInput = {
   moveType?: string; log?: string; num?: string;
   itemType: string; item: string; client: string; loc: string; date: string;
   qtyCount: string | number; qtyKg: string | number; grams: string | number;
-  loss: string | number; notes: string;
+  loss: string | number; notes: string; forClient?: string;
 };
 
 /* ------------------------------- helpers ------------------------------- */
@@ -68,7 +88,8 @@ function clean(v: string | undefined): string {
 const EMPTY: StorageData = {
   configured: storageConfigured(), ok: false,
   balance: [], inLog: [], outLog: [],
-  lists: { products: [], materials: [], clients: [], weights: {} },
+  lists: { products: [], materials: [], clients: [], locations: [], weights: {} },
+  supportsForClient: false,
 };
 
 function mapBalance(rows: string[][]): StorageBalance[] {
@@ -85,7 +106,7 @@ function mapLog(rows: string[][], log: "إيداع" | "سحب"): StorageMovement
     num: clean(r[0]), itemType: clean(r[1]), item: clean(r[2]), client: clean(r[3]),
     loc: clean(r[4]), date: clean(r[5]), qtyCount: clean(r[6]), qtyKg: clean(r[7]),
     grams: clean(r[8]), loss: clean(r[9]), qtyFromWt: clean(r[10]), net: clean(r[11]),
-    unit: clean(r[12]), notes: clean(r[13]),
+    unit: clean(r[12]), notes: clean(r[13]), forClient: clean(r[14]),
   })).filter((m) => m.num);
 }
 
@@ -100,11 +121,16 @@ export async function getStorageData(): Promise<StorageData> {
     if (!res.ok) return EMPTY;
     const json = (await res.json()) as {
       ok?: boolean; balance?: string[][]; inLog?: string[][]; outLog?: string[][];
-      lists?: { products?: string[]; materials?: string[]; clients?: string[]; weights?: Record<string, number> };
+      lists?: {
+        products?: string[]; materials?: string[]; clients?: string[];
+        locations?: string[]; weights?: Record<string, number>;
+      };
     };
     if (!json.ok) return EMPTY;
+    const width = Math.max(json.inLog?.[0]?.length ?? 0, json.outLog?.[0]?.length ?? 0);
     return {
       configured: true, ok: true,
+      supportsForClient: width >= 15,
       balance: mapBalance(json.balance ?? []),
       inLog: mapLog(json.inLog ?? [], "إيداع"),
       outLog: mapLog(json.outLog ?? [], "سحب"),
@@ -112,6 +138,7 @@ export async function getStorageData(): Promise<StorageData> {
         products: json.lists?.products ?? [],
         materials: json.lists?.materials ?? [],
         clients: json.lists?.clients ?? [],
+        locations: json.lists?.locations ?? [],
         weights: json.lists?.weights ?? {},
       },
     };

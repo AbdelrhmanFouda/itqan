@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: storageConfigured(), ok: false,
       balance: [], inLog: [], outLog: [],
-      lists: { products: [], materials: [], clients: [], weights: {} },
+      lists: { products: [], materials: [], clients: [], locations: [], weights: {} },
+      supportsForClient: false,
     });
   }
 }

@@ -582,15 +582,67 @@ just that one, and three of them contradict what the code comments used to claim
 
 ## Storage module (المخزن — SEPARATE spreadsheet)
 
+**Finding things — 2026-08-30.** `/dashboard/storage` had one text box matching four
+fields, in a room that is 55 slots deep. The two questions a storekeeper actually asks —
+«what is standing in A12» and «where is this item» — were both unanswerable on the page.
+Now: `lib/storage-filter.ts` (pure, import-free, 15 tests) holds the search + location
+rules; the page filters by location / item type / stock level and sorts, on every tab; a
+collapsible **map of the room** groups the slots by line (A/B/C, floor zones, named
+places) with a count on each and filters on one tap; and the movement form PICKS its
+location from «أماكن التخزين» instead of taking free text, listing where the chosen item
+is standing right now so a withdrawal starts from the pile that exists.
+
+Three things in there are worth knowing before touching it:
+
+- ⚠ **The filter folds case; the sheet's balance key does not.** `a12` and `A12` are two
+  balance lines in «الرصيد الحالي» and always were (open item 4 in
+  `../storage/CLAUDE.md`), so picking A12 shows both — one physical slot, one answer.
+  Each row still prints its own spelling, and `locKey()` is **never** used to write.
+- **Search is Arabic-folded and multi-term.** alef family, ى/ي, ة/ه, tatweel, harakat and
+  Arabic-Indic digits all fold, and terms are ANDed, so «A12 نايلون» narrows. Without the
+  folding the box silently misses «إسطمبة» when you typed «اسطمبه».
+- ⚠ **THE DEPLOYED BRIDGE IS STILL v3 — measured 2026-08-30**, not inferred: it answers
+  `lists.locations` empty and log rows **14 columns wide** (v4 pads every row to 15).
+  `storage-setup-v4.gs` / `v4-1.gs` were written on 19 Aug and never installed. So both v4
+  features are LATENT, and the page PROBES for each rather than assuming:
+  - **`supportsForClient`** (`lib/storage.ts`) = the log row's width ≥ 15. The «صرف لصالح»
+    column and the form field render only when it is true — offering the field against a
+    v3 bridge would take a beneficiary that the sheet then drops in silence.
+  - **`strictLocations`** = `lists.locations.length > 0`. Only «أماكن التخزين» knows the
+    slots that are currently EMPTY, and those are exactly the ones a deposit goes into:
+    the room has ~55 and 21 hold anything. With the list, the form is a strict `<select>`
+    like the sheet's own dropdown; without it, a datalist that SUGGESTS the codes in use
+    but still accepts a new one — a strict list built from observed data alone would make
+    filing stock into a fresh slot impossible. Both self-upgrade on the next read once
+    v4.1 is deployed; no code change.
+  `collectLocations()` likewise unions the sheet's list with every location the data
+  mentions, so the FILTER works on either bridge.
+- **`webUpdate_` rewrites the whole row from the request** (v4+), so once the sheet is
+  upgraded, an edit that does not send «صرف لصالح» blanks it. The site round-trips the
+  value now, which closes that before it can happen rather than after. A سحب with no
+  location likewise reports the bridge's own `message`/`nums` when v4 spreads it over
+  several places, instead of naming one of the rows it wrote — also inert until upgrade.
+
+**Live shape, read through the bridge on 2026-08-30** — the module is no longer
+"commercially empty", so the 9-Aug note claiming zero withdrawals is out of date:
+97 balance lines, 123 deposits, **46 withdrawals**, 21 locations in use, 0 negative
+balances; lists carry 436 products / 41 materials / 59 clients. `a12` and `A12` are BOTH
+live and hold different things — two materials for اتقان at `A12`, a product for
+الكترو فود at `a12` — which is exactly why the filter folds them together and the write
+path does not.
+
+
 - The storage sheet «مخزن اتقان» (`1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw`) is NOT the
-  DB sheet. Its bound script is `../storage-setup-v3.gs`: builds the whole sheet (form +
-  إيداع/سحب logs + الرصيد الحالي + «كتالوج الخامات») AND serves its own web bridge
+  DB sheet. Its bound script is `../storage/scripts/storage-setup-v4-1.gs` (v3 is history):
+  builds the whole sheet (form + إيداع/سحب logs + الرصيد الحالي + «كتالوج الخامات»
+  + «أماكن التخزين») AND serves its own web bridge
   (`doGet` = balance/logs/lists in one call; `doPost` = save/update/delete/refresh, reusing
   the sheet form's validate_/compute_/nextNumber_/available_ so website saves behave exactly
   like sheet saves — incl. the insufficient-balance block on withdrawals). Same redeploy
   gotcha as apps-script.gs. `POST {action:'refresh'}` re-syncs the dropdown lists remotely.
 - Env: `STORAGE_APPS_SCRIPT_URL` + `STORAGE_APPS_SCRIPT_SECRET` (= `WEB_TOKEN` in the .gs).
-- Website: `lib/storage.ts` → `/api/storage` (GET open; POST verifies the Firebase ID token
+- Website: `lib/storage.ts` + `lib/storage-filter.ts` → `/api/storage` (GET guarded since
+  2026-08-28 — the balance names clients and their stocks; POST verifies the Firebase ID token
   via `lib/agent-auth.ts` and requires role storage/owner/manager) → `/dashboard/storage`.
 - Conventions: خامة = kg only; منتج = pieces (kg×1000 ÷ piece-grams); blank client/loc stored
   as «غير متاح / N/A». **Location is part of the balance key and is NOT case-folded** —
