@@ -23,6 +23,13 @@ function doGet(e) {
   if (!e || !e.parameter || e.parameter.token !== TOKEN) return _json({ error: "unauthorized" });
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(e.parameter.tab);
   if (!sheet) return _json({ error: "no_tab", values: [] });
+  // ?mode=formulas → the formula text of every cell ("" where a cell holds a plain
+  // value) alongside the display values. Read-only; lets a review see WHY a cell shows
+  // what it shows without opening the workbook. Added 2026-09-02.
+  if (e.parameter.mode === "formulas") {
+    const rng = sheet.getDataRange();
+    return _json({ values: rng.getDisplayValues(), formulas: rng.getFormulas() });
+  }
   return _json({ values: sheet.getDataRange().getDisplayValues() });
 }
 
