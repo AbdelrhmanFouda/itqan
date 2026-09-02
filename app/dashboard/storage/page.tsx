@@ -28,10 +28,12 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
 import { hasFullAccess } from "@/lib/roles";
 import {
-  NO_LOCATION, collectLocations, compareLocKey, locKey, matchesTerms, sameLocation,
-  searchTerms, toNumber as num, whereIs, type LocationStat,
+  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, locKey, matchesTerms,
+  sameLocation, searchTerms, toNumber as num, whereIs,
+  type FloorPlan, type LocationStat, type PlanSlot,
 } from "@/lib/storage-filter";
 import { Btn, EmptyState, Field, inputCls, Modal, Spinner, Stat } from "@/components/dashboard/ui";
+import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
 import {
   Pencil, Plus, RefreshCw, Trash2, ExternalLink, ListRestart, Search, X, MapPin,
   ChevronDown, ChevronUp,
@@ -82,7 +84,6 @@ export default function StoragePage() {
   const [statusFilter, setStatusFilter] = useState<Status>("");
   const [sortBy, setSortBy] = useState<Sort>("sheet");
   const [mapOpen, setMapOpen] = useState(true);
-  const [showEmptyLocs, setShowEmptyLocs] = useState(false);
 
   // modal state
   const [open, setOpen] = useState(false);
@@ -163,7 +164,10 @@ export default function StoragePage() {
     (l: LocationStat) => (l.key === NO_LOCATION ? s.filters.noLocation : l.label),
     [s.filters.noLocation],
   );
-  // grouped the way the room is laid out — line A, line B, …, then named zones
+  // The room as the owner drew it: one box per physical column, its four places
+  // written around it. buildFloorPlan() explains why the grouping is what it is.
+  const plan = useMemo(() => buildFloorPlan(locStats), [locStats]);
+  // the dropdown keeps the flat grouping — a list is the right shape there
   const locGroups = useMemo(() => {
     const map = new Map<string, LocationStat[]>();
     locStats.forEach((l) => {
@@ -548,31 +552,15 @@ export default function StoragePage() {
             {mapOpen && (
               <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
                 <p className="text-xs text-gray-400">{s.filters.mapHint}</p>
-                {locGroups.map(([g, items]) => {
-                  const shown = showEmptyLocs ? items : items.filter((l) => l.inUse);
-                  if (shown.length === 0) return null;
-                  return (
-                    <div key={g || "zones"} className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11px] font-medium text-gray-400 w-12 shrink-0">{groupLabel(g)}</span>
-                      {shown.map((l) => (
-                        <LocChip
-                          key={l.key}
-                          label={locLabel(l)}
-                          count={locCount(l)}
-                          negative={l.negative}
-                          active={locFilter === l.key}
-                          onClick={() => setLocFilter(locFilter === l.key ? "" : l.key)}
-                        />
-                      ))}
-                    </div>
-                  );
-                })}
-                <button
-                  onClick={() => setShowEmptyLocs((v) => !v)}
-                  className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2 min-h-11 sm:min-h-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded"
-                >
-                  {showEmptyLocs ? s.filters.hideEmpty : s.filters.showEmpty}
-                </button>
+                <RoomPlan
+                  plan={plan}
+                  active={locFilter}
+                  count={locCount}
+                  lineLabel={(l) => s.filters.shelfLine.replace("{g}", l)}
+                  zonesLabel={s.filters.otherZones}
+                  noLocLabel={s.filters.noLocation}
+                  onPick={(k) => setLocFilter(locFilter === k ? "" : k)}
+                />
               </div>
             )}
           </div>
@@ -755,41 +743,6 @@ export default function StoragePage() {
           <Btn onClick={handleSave} disabled={saving}>{saving ? s.form.saving : s.form.save}</Btn>
         </div>
       </Modal>
-    </div>
-  );
-}
-
-/* --------------------------------- pieces --------------------------------- */
-
-function LocChip({
-  label, count, negative, active, onClick,
-}: {
-  label: string; count: number; negative: boolean; active: boolean; onClick: () => void;
-}) {
-  const tone = active
-    ? "border-blue-600 bg-blue-600 text-white"
-    : negative
-    ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-    : count === 0
-    ? "border-dashed border-gray-200 bg-white text-gray-400 hover:bg-gray-50"
-    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50";
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 min-h-11 sm:min-h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${tone}`}
-    >
-      <span dir="ltr">{label}</span>
-      {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
-    </button>
-  );
-}
-
-function FilteredEmpty({ text, label, onClear }: { text: string; label: string; onClear: () => void }) {
-  return (
-    <div className="bg-white border border-dashed border-gray-200 bg-gray-50/50 rounded-xl p-10 text-center space-y-3">
-      <p className="text-sm font-medium text-gray-600">{text}</p>
-      <Btn variant="outline" onClick={onClear}><X size={14} /> {label}</Btn>
     </div>
   );
 }

@@ -206,3 +206,95 @@ export function whereIs(
     .filter((r) => r.qty !== 0)
     .sort((a, b) => b.qty - a.qty);
 }
+
+/* ------------------------------- the floor plan ------------------------------ */
+
+/**
+ * The room as it is actually built, from the owner's own hand drawing
+ * (30 Aug 2026): **each box on the paper is a physical column**, and the four
+ * numbers written around it are the four storage places on that column's two
+ * sides. Line A is one row of columns, line B another, and the codes are
+ * `<line><side><slot>` — so `A23` is line A, side 2, place 3.
+ *
+ * The drawing pins the grouping exactly: the bottom column carries 11 and 21
+ * alone, then each column up carries a PAIR per side (12+13 / 22+23, then
+ * 14+15 / 24+25, then 16+17 / 26+27), and the top one carries 18 and 28 alone.
+ * That is `Math.floor(slot / 2) + 1` for every slot from 1 to 8 — no table
+ * needed, and it keeps working if a line ever grows a ninth place.
+ *
+ * A line is only ever drawn if the data or «أماكن التخزين» mentions it: the
+ * paper shows A and B, the code scheme allows C, and inventing a row of
+ * columns that does not exist in the room would be worse than showing none.
+ * Within a line the FULL grid is drawn, holes included — a place with nothing
+ * in it is the whole point of a plan.
+ */
+const SLOT_RE = /^([A-Z])([12])([1-9])$/;
+const ZONE_RE = /^([A-Z])([1-9])$/;
+
+export function parseSlot(key: string): { line: string; side: 1 | 2; slot: number } | null {
+  const m = SLOT_RE.exec(key);
+  return m ? { line: m[1], side: Number(m[2]) as 1 | 2, slot: Number(m[3]) } : null;
+}
+
+/** Which column of the line a place hangs on. See the note above. */
+export const pillarOf = (slot: number): number => Math.floor(slot / 2) + 1;
+
+export type PlanSlot = {
+  /** the full code, e.g. "A23" — what the filter is set to */
+  key: string;
+  /** what the paper writes next to the box, e.g. "23" */
+  short: string;
+  stat: LocationStat;
+};
+/** One physical column: what hangs on side 1 and on side 2, top place first. */
+export type PlanPillar = { index: number; side1: PlanSlot[]; side2: PlanSlot[] };
+export type PlanLine = { line: string; pillars: PlanPillar[] };
+export type FloorPlan = {
+  /** columns per line, each ordered TOP of the drawing first */
+  lines: PlanLine[];
+  /** floor areas — F1…F5 */
+  zones: LocationStat[];
+  /** named places — «رف», T … */
+  named: LocationStat[];
+  unfiled: LocationStat | null;
+};
+
+const blankStat = (key: string, group: string): LocationStat => ({
+  key, label: key, group, lines: 0, moves: 0, negative: false, inUse: false,
+});
+
+export function buildFloorPlan(stats: LocationStat[]): FloorPlan {
+  const byKey = new Map(stats.map((s) => [s.key, s]));
+  const lineMax = new Map<string, number>();
+  const zones: LocationStat[] = [];
+  const named: LocationStat[] = [];
+  let unfiled: LocationStat | null = null;
+
+  for (const s of stats) {
+    if (s.key === NO_LOCATION) { unfiled = s; continue; }
+    const p = parseSlot(s.key);
+    if (p) {
+      // eight places a side is the built room; only stretch if the sheet says so
+      lineMax.set(p.line, Math.max(lineMax.get(p.line) ?? 8, p.slot));
+      continue;
+    }
+    (ZONE_RE.test(s.key) ? zones : named).push(s);
+  }
+
+  const lines: PlanLine[] = [...lineMax.keys()].sort().map((line) => {
+    const max = lineMax.get(line) ?? 8;
+    const pillars: PlanPillar[] = [];
+    for (let p = pillarOf(max); p >= 1; p--) {
+      const slots: number[] = [];
+      for (let n = max; n >= 1; n--) if (pillarOf(n) === p) slots.push(n);
+      const side = (which: 1 | 2): PlanSlot[] => slots.map((n) => {
+        const key = `${line}${which}${n}`;
+        return { key, short: `${which}${n}`, stat: byKey.get(key) ?? blankStat(key, line) };
+      });
+      pillars.push({ index: p, side1: side(1), side2: side(2) });
+    }
+    return { line, pillars };
+  });
+
+  return { lines, zones: zones.sort((a, b) => compareLocKey(a.key, b.key)), named, unfiled };
+}

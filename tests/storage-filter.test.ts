@@ -13,8 +13,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  NO_LOCATION, collectLocations, compareLocKey, locGroup, locKey, matchesTerms,
-  normalizeText, sameLocation, searchTerms, toNumber, whereIs,
+  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, locGroup, locKey,
+  matchesTerms, normalizeText, parseSlot, pillarOf, sameLocation, searchTerms, toNumber,
+  whereIs,
 } from "../lib/storage-filter.ts";
 
 /* --------------------------------- search --------------------------------- */
@@ -144,4 +145,68 @@ test("toNumber survives thousands separators and blanks", () => {
   assert.equal(toNumber(undefined), 0);
   assert.equal(toNumber("غير متاح"), 0);
   assert.equal(toNumber("-5"), -5);
+});
+
+/* ------------------------------- floor plan ------------------------------- */
+
+test("a code splits into line / side / place — and a floor zone is not a slot", () => {
+  assert.deepEqual(parseSlot("A23"), { line: "A", side: 2, slot: 3 });
+  assert.deepEqual(parseSlot("B11"), { line: "B", side: 1, slot: 1 });
+  assert.equal(parseSlot("F5"), null);   // one digit = a floor area, not a column face
+  assert.equal(parseSlot("رف"), null);
+  assert.equal(parseSlot("A31"), null);  // there is no side 3
+});
+
+test("the columns group exactly as the owner's drawing has them", () => {
+  // bottom box carries place 1 alone, then pairs, then the top box carries 8 alone
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8].map(pillarOf), [1, 2, 2, 3, 3, 4, 4, 5]);
+});
+
+test("buildFloorPlan draws the whole line, holes included, top box first", () => {
+  const stats = collectLocations(
+    [bal("نايلون", "A12", "30"), bal("كسر", "A16", "5"), bal("بولي", "B11", "9")],
+    [], [],
+  );
+  const plan = buildFloorPlan(stats);
+  assert.deepEqual(plan.lines.map((l) => l.line), ["A", "B"]);
+
+  const a = plan.lines[0];
+  // five columns per line, top of the drawing (place 8) first
+  assert.equal(a.pillars.length, 5);
+  assert.deepEqual(a.pillars[0].side1.map((p) => p.key), ["A18"]);
+  assert.deepEqual(a.pillars[0].side2.map((p) => p.key), ["A28"]);
+  // the middle boxes carry a pair each, higher place on top
+  assert.deepEqual(a.pillars[1].side1.map((p) => p.key), ["A17", "A16"]);
+  assert.deepEqual(a.pillars[1].side2.map((p) => p.key), ["A27", "A26"]);
+  assert.deepEqual(a.pillars[4].side1.map((p) => p.key), ["A11"]);
+  assert.deepEqual(a.pillars[4].side2.map((p) => p.key), ["A21"]);
+
+  // the paper writes only the two-digit code; the line letter is the header
+  assert.deepEqual(a.pillars[3].side1.map((p) => p.short), ["13", "12"]);
+
+  // a place nobody has filled is still drawn, with nothing in it
+  const empty = a.pillars[0].side1[0].stat;
+  assert.equal(empty.lines, 0);
+  assert.equal(empty.inUse, false);
+  // and one that holds stock carries its count
+  const a12 = a.pillars[3].side1.find((p) => p.key === "A12");
+  assert.equal(a12.stat.lines, 1);
+});
+
+test("a line the room does not have is never invented", () => {
+  const plan = buildFloorPlan(collectLocations([bal("نايلون", "A12", "30")], [], []));
+  assert.deepEqual(plan.lines.map((l) => l.line), ["A"]);  // no B, no C
+});
+
+test("floor areas, named places and the unfiled bucket sit outside the columns", () => {
+  const stats = collectLocations(
+    [bal("نايلون", "A12", "30"), bal("كسر", "F3", "5"), bal("بواقي", "رف", "2"), bal("خام", "", "7")],
+    [], [],
+  );
+  const plan = buildFloorPlan(stats);
+  assert.deepEqual(plan.zones.map((z) => z.key), ["F3"]);
+  assert.deepEqual(plan.named.map((z) => z.key), ["رف"]);
+  assert.equal(plan.unfiled?.lines, 1);
+  // …and none of them leaked into a column
+  assert.deepEqual(plan.lines.map((l) => l.line), ["A"]);
 });
