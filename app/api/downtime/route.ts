@@ -47,6 +47,27 @@ export async function GET(req: NextRequest) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
   const today = factoryDay();
+  // `?quick=1` — the running stoppages only, from Firestore, no sheet read.
+  // Measured 2026-09-02: a sheet-backed endpoint answers in ~0.2s while the
+  // 45s data cache is warm and in ~9.5s once it has gone cold — and the floor
+  // page is opened sporadically, so it almost always hits the cold path, for
+  // two tabs in a row. Start and stop need nothing from the sheet; only the
+  // «today» list does. The page asks for this first, renders, then asks for
+  // the full answer below to fill the list in.
+  if (req.nextUrl.searchParams.get("quick") === "1") {
+    try {
+      const open = await getOpenDowntimeEvents();
+      return NextResponse.json({
+        quick: true,
+        open: open.filter((e) => !isStaleOpen(e, today)),
+        stale: open.filter((e) => isStaleOpen(e, today)),
+        todayDate: today,
+      });
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ quick: true, open: [], stale: [], todayDate: today });
+    }
+  }
   try {
     // Any stop whose row did not reach the sheet gets another go first, so the
     // list below shows it. Best-effort — a failure here must not take the read

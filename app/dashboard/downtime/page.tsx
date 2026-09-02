@@ -33,6 +33,8 @@ type Event = {
 type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string };
 type OtherRow = { row: number; date: string; machine: string; minutes: number; notes: string };
 
+const MACHINES_KEY = "itqan.downtime.machines"; // last machine list seen — see useState below
+
 /** Big enough to hit with a work glove on. */
 const TAP =
   "min-h-[64px] rounded-2xl border-2 px-4 py-3 text-lg font-semibold transition " +
@@ -62,8 +64,20 @@ export default function DowntimePage() {
   const isAr = lang === "ar";
   usePageTitle(t.title);
 
-  const [machines, setMachines] = useState<MachineInfo[] | null>(null);
+  // The machine buttons are the START flow, and the registry is the slowest read
+  // on the site when the cache has gone cold (9.5s measured, 2026-09-02). Show
+  // the list seen last time at once and swap in the fresh one when it lands —
+  // the registry has been renumbered four times in the project's life, never
+  // between two taps.
+  const [machines, setMachines] = useState<MachineInfo[] | null>(() => {
+    try {
+      const raw = localStorage.getItem(MACHINES_KEY);
+      return raw ? (JSON.parse(raw) as MachineInfo[]) : null;
+    } catch { return null; }
+  });
   const [data, setData] = useState<Data | null>(null);
+  // «today» comes from the sheet and arrives after the running list does
+  const [todayLoaded, setTodayLoaded] = useState(false);
   const [machine, setMachine] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -90,22 +104,53 @@ export default function DowntimePage() {
    * signal dropped in the workshop — so it must fail LOUDLY and be retryable,
    * and it must never block the start flow, which needs no token to render.
    */
-  const load = useCallback(async () => {
+  /**
+   * Two answers, not one. `?quick=1` is Firestore only — the running stoppages,
+   * which is all that start and stop need — and comes back in well under a
+   * second. The full answer adds today's finished list from «التوقفات», which
+   * costs a sheet read that takes ~9.5s whenever the 45s cache has gone cold,
+   * and it had been holding the whole screen behind a spinner.
+   */
+  const loadQuick = useCallback(async () => {
     setLoadErr(null);
     try {
-      const res = await authedFetch("/api/downtime");
-      if (res.ok) { setData(await res.json()); return; }
+      const res = await authedFetch("/api/downtime?quick=1");
+      if (res.ok) {
+        const q = (await res.json()) as Pick<Data, "open" | "stale" | "todayDate">;
+        setData((prev) => ({ today: prev?.today ?? [], ...q }));
+        return true;
+      }
       setLoadErr(res.status === 401 ? "auth" : res.status === 403 ? "role" : "net");
     } catch {
       setLoadErr("net");
     }
+    return false;
   }, []);
+
+  const loadFull = useCallback(async () => {
+    try {
+      const res = await authedFetch("/api/downtime");
+      if (!res.ok) return;
+      setData(await res.json());
+      setTodayLoaded(true);
+    } catch {
+      /* the quick answer is already on screen; the list fills in on the next load */
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    if (await loadQuick()) await loadFull();
+  }, [loadQuick, loadFull]);
 
   useEffect(() => {
     fetch("/api/machines")
       .then((r) => r.json())
-      .then((d) => setMachines(d.machines ?? []))
-      .catch(() => setMachines([]));
+      .then((d) => {
+        const list = (d.machines ?? []) as MachineInfo[];
+        setMachines(list);
+        try { localStorage.setItem(MACHINES_KEY, JSON.stringify(list)); } catch { /* private mode */ }
+      })
+      .catch(() => setMachines((prev) => prev ?? []));
   }, []);
 
   // Wait for Firebase to restore the session before the authenticated call.
@@ -156,9 +201,9 @@ export default function DowntimePage() {
   const runningCount = (data?.open.length ?? 0) + (data?.stale.length ?? 0);
   useEffect(() => {
     if (!runningCount) return;
-    const id = setInterval(load, 30_000);
+    const id = setInterval(loadQuick, 30_000);
     return () => clearInterval(id);
-  }, [runningCount, load]);
+  }, [runningCount, loadQuick]);
 
   async function start(reason: string) {
     if (!machine || busy) return;
@@ -251,8 +296,8 @@ export default function DowntimePage() {
       <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 max-w-sm">
-        <Stat label={t.todayMinutes} value={lostToday.toLocaleString("ar-EG")} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
-        <Stat label={t.todayEvents} value={todayList.length.toLocaleString("ar-EG")} />
+        <Stat label={t.todayMinutes} value={todayLoaded ? lostToday.toLocaleString("ar-EG") : "…"} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
+        <Stat label={t.todayEvents} value={todayLoaded ? todayList.length.toLocaleString("ar-EG") : "…"} />
       </div>
 
       {failed && (
@@ -381,7 +426,7 @@ export default function DowntimePage() {
       <section className="mt-8">
         <h2 className="text-sm font-semibold text-gray-500 mb-2">{t.today}</h2>
         {todayList.length === 0 ? (
-          <EmptyState text={t.empty} />
+          todayLoaded ? <EmptyState text={t.empty} /> : <Spinner text={p.common.loading} />
         ) : (
           <div className="space-y-3">
             {todayList.map((e) => (

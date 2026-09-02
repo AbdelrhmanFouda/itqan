@@ -208,6 +208,19 @@ sidebar and `canAccess()`.
   which prefixes every `/dashboard/*` path. So a role holding overview inherits any route
   with no NAV entry of its own. Every real page has one today, but **a new page added
   without a NAV entry is reachable by production and quality**, not owner/manager only.
+- **Downtime page speed — 2026-09-02, owner: "too slow".** Measured on production: a
+  sheet-backed endpoint answers in ~0.2s while the 45s data cache is warm and in
+  **~9.5s once it has gone cold** (`/api/machines` after 62s idle) — and the floor page is
+  opened sporadically, so it nearly always hit the cold path, for TWO tabs the bridge
+  serialises, behind a spinner that waited for both, which itself waited for Firebase to
+  restore the session. Fix, without touching the four-tap flow: `GET /api/downtime?quick=1`
+  returns the running stoppages from Firestore alone (no sheet); the page asks for that
+  first and renders, then asks for the full answer to fill in today's finished list (a
+  spinner in that section and «…» on the two tiles until it lands); the 30s poll uses
+  quick. The machine buttons come from the last list seen (localStorage
+  `itqan.downtime.machines`) at once and are replaced when `/api/machines` answers. What
+  is NOT fixed: the bridge itself — 2.5–4.6s per tab, serialised — which is the floor
+  under every cold read on the site.
 - **Downtime** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
   + `lib/downtime-data.ts` (reads and writes «التوقفات»), the same split as
   `oee.ts`/`oee-data.ts`.
