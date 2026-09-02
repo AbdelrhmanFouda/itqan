@@ -221,6 +221,25 @@ sidebar and `canAccess()`.
   `itqan.downtime.machines`) at once and are replaced when `/api/machines` answers. What
   is NOT fixed: the bridge itself — 2.5–4.6s per tab, serialised — which is the floor
   under every cold read on the site.
+  **Second pass, same day ("still slow on my phone") — two things bigger than the API:**
+  - **The functions ran in iad1 (Washington).** `x-vercel-id: fra1::iad1::…` — Frankfurt
+    edge, US function, Firestore in eur3: two Atlantic crossings per call and one per
+    Firestore round trip inside it. `vercel.json` now pins `regions: ["fra1"]`. Measured
+    from inside the function after the move (a temporary data-free probe, since removed):
+    Firestore SDK query 341ms cold / 15ms warm, certs 48/7ms, REST round trip ~60ms, the
+    sheet read 2,071ms cold / 7ms warm — so `?quick=1` is a few hundred ms even cold, and
+    the sheet is the only slow step left, off the critical path.
+  - **Every dashboard page was held behind the PROFILE, sequentially, from the phone.**
+    `AuthProvider` awaited `ensureProfile()` (a Firestore round trip to eur3) before
+    `loading` went false, and the layout then waited for `watchProfile`'s first snapshot
+    (another) before mounting anything. Now `loading` flips when Firebase reports the user;
+    the profile seen last time on that device (localStorage `itqan.profile.<uid>`) stands
+    in immediately; the live snapshot replaces it (a revoked role still redirects the
+    moment it lands — the API guard never trusted the client); and create-if-missing runs
+    alongside instead of in front. Nothing secret is cached: the user's own name, email
+    and role, on the user's own device.
+  - The page ships ~1 MB of JS decoded (~250 KB brotli), cached after the first visit. Not
+    touched.
 - **Downtime** — `lib/downtime.ts` (pure maths, zero imports, unit-tested)
   + `lib/downtime-data.ts` (reads and writes «التوقفات»), the same split as
   `oee.ts`/`oee-data.ts`.

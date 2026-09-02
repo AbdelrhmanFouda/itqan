@@ -27,6 +27,22 @@ type AuthCtx = {
 
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 
+const PROFILE_KEY = (uid: string) => `itqan.profile.${uid}`;
+function readCachedProfile(uid: string): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY(uid));
+    if (!raw) return null;
+    const p = JSON.parse(raw) as UserProfile;
+    return p && p.uid === uid ? p : null;
+  } catch { return null; }
+}
+function writeCachedProfile(uid: string, p: UserProfile | null) {
+  try {
+    if (p) localStorage.setItem(PROFILE_KEY(uid), JSON.stringify(p));
+    else localStorage.removeItem(PROFILE_KEY(uid));
+  } catch { /* private mode */ }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -35,26 +51,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, (u) => {
       if (unsubProfile) { unsubProfile(); unsubProfile = undefined; }
       setUser(u);
+      // Auth is resolved the moment Firebase reports the user. This used to wait
+      // for ensureProfile() too — a Firestore round trip from the phone to eur3,
+      // on every page open, before any page could mount (2026-09-02, "the
+      // downtime page is still slow on my phone").
+      setLoading(false);
       if (!u) {
         setProfile(null);
         setProfileLoading(false);
-        setLoading(false);
         return;
       }
-      setProfileLoading(true);
-      try {
-        await ensureProfile({ uid: u.uid, email: u.email ?? "", displayName: u.displayName ?? "" });
-      } catch {
-        // ignore — a sign-up path may create the profile with a requested role
-      }
+      // The profile seen last time on this device, keyed by uid, stands in
+      // until the live snapshot arrives — so the dashboard renders at once
+      // instead of holding every page behind one more round trip. The snapshot
+      // still wins: a revoked role redirects the moment it lands, and the API
+      // guard never trusted the client anyway. Nothing secret is stored: it is
+      // the user's own name, email and role, on the user's own device.
+      const cached = readCachedProfile(u.uid);
+      if (cached) setProfile(cached);
+      setProfileLoading(!cached);
       unsubProfile = watchProfile(u.uid, (p) => {
         setProfile(p);
         setProfileLoading(false);
+        writeCachedProfile(u.uid, p);
       });
-      setLoading(false);
+      // Create-if-missing runs alongside, not in front. For an existing user it
+      // is a read that changes nothing; for a brand-new one the snapshot above
+      // reports the document the instant this writes it.
+      ensureProfile({ uid: u.uid, email: u.email ?? "", displayName: u.displayName ?? "" }).catch(() => {
+        // ignore — a sign-up path may create the profile with a requested role
+      });
     });
     return () => {
       unsub();
