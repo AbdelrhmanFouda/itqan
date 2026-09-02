@@ -39,10 +39,12 @@ export function RoomPlan({
     <div dir="rtl">
       {plan.lines.length > 0 && (
         <div className="overflow-x-auto -mx-1 px-1">
-          <div className="flex items-start justify-center gap-3 sm:gap-6 min-w-max pb-1">
-            {/* far right of the room: «رف», T — where they sit on the drawing */}
+          <div className="flex items-start justify-center gap-2 sm:gap-6 min-w-max pb-1">
+            {/* far right of the room: «رف», T — where they sit on the drawing. On a
+                phone three lines already fill the width, so these drop to the
+                bottom row instead (see below). */}
             {plan.named.length > 0 && (
-              <div className="flex flex-col items-center gap-1.5 pt-5">
+              <div className="hidden sm:flex flex-col items-center gap-1.5 pt-5">
                 {plan.named.map((n) => (
                   <button
                     key={n.key}
@@ -60,7 +62,7 @@ export function RoomPlan({
               <div key={l.line} className="flex flex-col items-center gap-2.5">
                 <span className="text-[11px] font-medium text-gray-400">{lineLabel(l.line)}</span>
                 {l.pillars.map((p) => (
-                  <div key={p.index} className="grid grid-cols-[auto_1.5rem_auto] items-stretch gap-1">
+                  <div key={p.index} className="grid grid-cols-[auto_1.25rem_auto] sm:grid-cols-[auto_1.5rem_auto] items-stretch gap-0.5 sm:gap-1">
                     <div className="flex flex-col gap-1">{p.side1.map(slot)}</div>
                     {/* the column itself — solid, not somewhere anything can go */}
                     <div className="rounded-md bg-gray-100 border border-gray-300" aria-hidden />
@@ -72,9 +74,18 @@ export function RoomPlan({
           </div>
         </div>
       )}
-      {(plan.zones.length > 0 || plan.unfiled) && (
+      {(plan.zones.length > 0 || plan.named.length > 0 || plan.unfiled) && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3">
           <span className="text-[11px] font-medium text-gray-400 w-12 shrink-0">{zonesLabel}</span>
+          {/* phones only — on sm+ these stand at the right of the room */}
+          {plan.named.map((n) => (
+            <span key={n.key} className="contents sm:hidden">
+              <LocChip
+                label={n.label} count={count(n)} negative={n.negative}
+                active={active === n.key} onClick={() => onPick(n.key)}
+              />
+            </span>
+          ))}
           {plan.zones.map((z) => (
             <LocChip
               key={z.key} label={z.label} count={count(z)} negative={z.negative}
@@ -107,7 +118,7 @@ function SlotBtn({
       aria-pressed={active}
       aria-label={`${stat.label} — ${n}`}
       title={stat.label}
-      className={`w-10 h-10 shrink-0 rounded-md border flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${chipTone(active, stat.negative, n)}`}
+      className={`w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-md border flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${chipTone(active, stat.negative, n)}`}
     >
       <span dir="ltr">{short}</span>
       {n > 0 && <span className="text-[9px] font-normal opacity-70 tabular-nums">{n}</span>}

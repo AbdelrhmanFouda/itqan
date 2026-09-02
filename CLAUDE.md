@@ -617,18 +617,35 @@ with an undo, rather than retrying blind over an at-least-once bridge.
   place». The form now says whichever the bridge in front of it does (`blankLocMeansAll`
   = the v4 probe), and the hint under the field changes with it.
 
-**Live shape on 2026-09-02** (the 30-Aug numbers below are superseded): 117 balance
-lines, 162 deposits, 58 withdrawals, entries from that same day — the storekeeper is
-using it. **67 of 117 lines have no location.** Two lines are negative: «كوبوليمر» (اتقان,
-no place, −195 — while A12 holds 720 of the same; a withdrawal filed without the place) and
-«غطاء احمر بروبلين 58» (اشرف عوض, −5,100). **That second one is the sheet lying, not the
-stock:** its «الكمية المضافة» cell renders as an EMPTY STRING on a line with five deposits
-totalling 72,600, and a live SUMIFS never renders blank (zero shows as «0» on every other
-row) — the formula in F on that row, and F on the «غطاء أحمر جديد» row above it (shows
-1,500 against one 500 deposit), were overwritten by hand. The bridge, which sums the logs,
-still holds 67,500 for it. Owner item 8 in `../CLAUDE.md`. On the remaining 115 lines the
-movements sum to the sheet's figure exactly, and all 220 movements belong to a line
-(checked through the bridge, script in the 2026-09-02 session).
+**THE BRIDGE IS ON v4.1 NOW — measured later the same day (2026-09-02):** log rows are
+15 wide, `lists.locations` carries 55 places (A/B/C × 16, F1–F5, T, «رف»), and four rows
+already hold «صرف لصالح». So every probe in the page flipped by itself, no code change:
+the form's location is a strict `<select>` of the 55, the beneficiary field and column
+render, and a blank location on a سحب means «every place» again. The room plan therefore
+draws THREE lines, which is wider than a phone — at phone width the slots shrink and
+«رف»/T drop into the bottom row with the floor zones, so nothing scrolls sideways.
+
+**A number the sheet holds twice cannot be edited or deleted from the site.** «سحب»
+holds two identical ITQ0030 rows (ABS اسود مخرز, 100 kg, 2026-08-25, ISO date = written by
+the site): the v3 bridge had no lock around a save, so two saves landing together both
+took max+1. v4.1 serialises saves, but the twins are in the log, and `webFindRow_`
+locates a row by its NUMBER — an edit or delete would land on whichever twin comes first.
+`duplicateNums()` flags them (amber «مكرر» badge, buttons disabled, tooltip says fix it in
+the sheet), and React keys carry the index so the twins render. Owner item 11.
+
+**Live shape on 2026-09-02, morning** (the 30-Aug numbers below are superseded): 117
+balance lines, 162 deposits, 58 withdrawals, entries from that same day — the storekeeper
+is using it. **67 of 117 lines have no location.** Two lines were negative: «كوبوليمر»
+(اتقان, no place, −195 — while A12 holds 720 of the same; a withdrawal filed without the
+place) and «غطاء احمر بروبلين 58» (اشرف عوض, −5,100). **That second one was the sheet
+lying, not the stock:** its «الكمية المضافة» cell rendered as an EMPTY STRING on a line
+with five deposits totalling 72,600, and a live SUMIFS never renders blank (zero shows as
+«0» on every other row) — the formula in F on that row, and F on the «غطاء أحمر جديد» row
+above it (1,500 against one 500 deposit), had been overwritten by hand. The bridge, which
+sums the logs, held 67,500 for it throughout. **The v4.1 upgrade rebuilt the balance tab
+and both rows read true again by the afternoon** — the one negative left is «كوبوليمر».
+On the other 115 lines the movements summed to the sheet's figure exactly, and all 220
+movements belonged to a line (checked through the bridge).
 
 **Finding things — 2026-08-30.** `/dashboard/storage` had one text box matching four
 fields, in a room that is 55 slots deep. The two questions a storekeeper actually asks —
@@ -649,7 +666,9 @@ Three things in there are worth knowing before touching it:
 - **Search is Arabic-folded and multi-term.** alef family, ى/ي, ة/ه, tatweel, harakat and
   Arabic-Indic digits all fold, and terms are ANDed, so «A12 نايلون» narrows. Without the
   folding the box silently misses «إسطمبة» when you typed «اسطمبه».
-- ⚠ **THE DEPLOYED BRIDGE IS STILL v3 — measured 2026-08-30**, not inferred: it answers
+- ⚠ **THE DEPLOYED BRIDGE WAS v3 UNTIL 2026-09-02** (v4.1 since that afternoon — see the
+  top of this section). The probes below are what made the switch invisible to the code.
+  Measured on 2026-08-30, not inferred: it answered
   `lists.locations` empty and log rows **14 columns wide** (v4 pads every row to 15).
   `storage-setup-v4.gs` / `v4-1.gs` were written on 19 Aug and never installed. So both v4
   features are LATENT, and the page PROBES for each rather than assuming:

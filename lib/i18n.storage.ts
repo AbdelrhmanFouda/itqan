@@ -49,6 +49,8 @@ export const sd = {
     },
     readOnly: "View only — stock movements are recorded by the storage keeper.",
     tapRow: "Tap a line to see its movements",
+    dupNum: "This number exists twice in the sheet. It cannot be edited or deleted from here — the sheet finds a row by its number and could hit the other one. Fix it in the sheet.",
+    dupBadge: "duplicate",
     badDate: "not a date in the sheet: {raw}",
     item: {
       title: "Stock line",
@@ -181,6 +183,8 @@ export const sd = {
     },
     readOnly: "عرض فقط — تسجيل الحركات من صلاحية أمين المخزن.",
     tapRow: "اضغط على أي سطر لترى حركاته",
+    dupNum: "هذا الرقم موجود مرتين في الشيت. لا يمكن تعديله أو حذفه من هنا — الشيت يجد السطر برقمه وقد يصيب الآخر. صحّحه في الشيت.",
+    dupBadge: "مكرر",
     badDate: "ليس تاريخاً في الشيت: {raw}",
     item: {
       title: "سطر رصيد",

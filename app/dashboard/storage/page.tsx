@@ -40,9 +40,9 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
 import { hasFullAccess } from "@/lib/roles";
 import {
-  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, historyFor, locKey,
-  matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem, searchTerms,
-  storageDate, sumNet, toNumber as num, whereIs, type LocationStat,
+  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, dupKey, duplicateNums,
+  historyFor, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
+  searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LocationStat,
 } from "@/lib/storage-filter";
 import { Btn, EmptyState, Field, inputCls, Modal, Spinner } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
@@ -261,6 +261,8 @@ export default function StoragePage() {
   const activeFilters = [locFilter, typeFilter, statusFilter].filter(Boolean).length;
   const filtered = Boolean(search) || activeFilters > 0;
   const negatives = useMemo(() => allBalance.filter((b) => num(b.avail) < 0).length, [allBalance]);
+  // numbers the bridge cannot address unambiguously — see duplicateNums()
+  const dups = useMemo(() => duplicateNums(allMovements), [allMovements]);
   const unfiled = useMemo(() => allBalance.filter((b) => !locKey(b.loc)).length, [allBalance]);
 
   function clearFilters() {
@@ -717,7 +719,7 @@ export default function StoragePage() {
       ) : (
         shownMovements.length === 0 && filtered
           ? <FilteredEmpty text={s.noMatch} label={s.filters.clear} onClear={clearFilters} />
-          : <MovementsView rows={shownMovements} s={s} isAr={isAr} canWrite={canWrite} hasForClient={hasForClient} onEdit={openEdit} onDelete={handleDelete} />
+          : <MovementsView rows={shownMovements} s={s} isAr={isAr} canWrite={canWrite} hasForClient={hasForClient} dups={dups} onEdit={openEdit} onDelete={handleDelete} />
       )}
 
       {/* ------------------------------ a line, opened ------------------------------ */}
@@ -726,6 +728,7 @@ export default function StoragePage() {
         balance={allBalance}
         movements={allMovements}
         canWrite={canWrite}
+        dups={dups}
         isAr={isAr}
         s={s}
         onClose={() => setOpenLine(null)}
@@ -1055,19 +1058,28 @@ function BalanceView({
 /* ----------------------------- movements view ----------------------------- */
 
 function MovementsView({
-  rows, s, isAr, canWrite, hasForClient, onEdit, onDelete,
+  rows, s, isAr, canWrite, hasForClient, dups, onEdit, onDelete,
 }: {
   rows: StorageMovement[];
   s: (typeof sd)["en"] | (typeof sd)["ar"];
   isAr: boolean;
   canWrite: boolean;
   hasForClient: boolean;
+  dups: Set<string>;
   onEdit: (m: StorageMovement) => void;
   onDelete: (m: StorageMovement) => void;
 }) {
   if (rows.length === 0) return <EmptyState text={s.empty} />;
   const editLabel = isAr ? "تعديل" : "Edit";
   const deleteLabel = isAr ? "حذف" : "Delete";
+  // a number the sheet holds twice cannot be edited or deleted from here
+  const locked = (m: StorageMovement) => dups.has(dupKey(m));
+  const numCell = (m: StorageMovement) => (
+    <>
+      <span dir="ltr">{m.num}</span>
+      {locked(m) && <span className="ms-1 rounded bg-amber-50 border border-amber-200 px-1 text-[10px] text-amber-700 font-sans" title={s.dupNum}>{s.dupBadge}</span>}
+    </>
+  );
   const heads: { h: string; end?: boolean }[] = [
     { h: s.cols.num }, { h: s.cols.itemType }, { h: s.cols.item }, { h: s.cols.client },
     ...(hasForClient ? [{ h: s.cols.forClient }] : []),
@@ -1086,10 +1098,10 @@ function MovementsView({
     <>
       {/* phones: cards */}
       <div className="sm:hidden space-y-3">
-        {rows.map((m) => (
-          <div key={`${m.log}-${m.num}`} className="bg-white border border-gray-200 rounded-xl p-4">
+        {rows.map((m, i) => (
+          <div key={`${m.log}-${m.num}-${i}`} className="bg-white border border-gray-200 rounded-xl p-4">
             <div className="flex items-center justify-between gap-3 min-w-0 mb-1">
-              <p className="font-mono text-xs text-gray-500 min-w-0 truncate" dir="ltr">{m.num}</p>
+              <p className="font-mono text-xs text-gray-500 min-w-0 truncate">{numCell(m)}</p>
               <span className="shrink-0 text-xs text-gray-400">{when(m)}</span>
             </div>
             <p className="font-medium text-gray-900">{m.item}</p>
@@ -1109,14 +1121,18 @@ function MovementsView({
                 <button
                   onClick={() => onEdit(m)}
                   aria-label={editLabel}
-                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                  disabled={locked(m)}
+                  title={locked(m) ? s.dupNum : undefined}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                 >
                   <Pencil size={15} />
                 </button>
                 <button
                   onClick={() => onDelete(m)}
                   aria-label={deleteLabel}
-                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                  disabled={locked(m)}
+                  title={locked(m) ? s.dupNum : undefined}
+                  className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                 >
                   <Trash2 size={15} />
                 </button>
@@ -1138,9 +1154,9 @@ function MovementsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {rows.map((m) => (
-                <tr key={`${m.log}-${m.num}`} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap" dir="ltr">{m.num}</td>
+              {rows.map((m, i) => (
+                <tr key={`${m.log}-${m.num}-${i}`} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{numCell(m)}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{m.itemType}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{m.item}</td>
                   <td className="px-4 py-3 text-gray-600">{m.client || "—"}</td>
@@ -1161,14 +1177,18 @@ function MovementsView({
                       <button
                         onClick={() => onEdit(m)}
                         aria-label={editLabel}
-                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                        disabled={locked(m)}
+                        title={locked(m) ? s.dupNum : undefined}
+                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
                       >
                         <Pencil size={14} />
                       </button>
                       <button
                         onClick={() => onDelete(m)}
                         aria-label={deleteLabel}
-                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                        disabled={locked(m)}
+                        title={locked(m) ? s.dupNum : undefined}
+                        className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                       >
                         <Trash2 size={14} />
                       </button>

@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  NO_LOCATION, buildFloorPlan, caseTwin, collectLocations, compareLocKey, historyFor,
+  NO_LOCATION, buildFloorPlan, caseTwin, collectLocations, compareLocKey, duplicateNums, historyFor,
   locGroup, locKey, matchesTerms, movePayloads, normalizeText, parseSlot, pillarOf,
   sameLine, sameLocation, sameOwnerItem, searchTerms, siblingLines, storageDate, sumNet,
   toNumber, whereIs,
@@ -294,4 +294,13 @@ test("a move is one withdrawal here and one deposit there, on the line's exact s
   assert.equal(po.qtyKg, 0);
   assert.equal(pi.grams, 11);
   assert.equal(pi.itemType, "منتج");
+});
+
+test("a number the sheet holds twice in one log is flagged; the same number across logs is not", () => {
+  const dups = duplicateNums([
+    { log: "سحب", num: "ITQ0030" }, { log: "سحب", num: "ITQ0030" },   // the live twins
+    { log: "إيداع", num: "ITQ0030" },                                       // deposits number separately
+    { log: "سحب", num: "ITQ0031" },
+  ]);
+  assert.deepEqual([...dups], ["سحب|ITQ0030"]);
 });

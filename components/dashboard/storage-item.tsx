@@ -20,7 +20,7 @@ import { Btn, Field, inputCls, Modal } from "@/components/dashboard/ui";
 import type { sd } from "@/lib/i18n.storage";
 import type { StorageBalance, StorageMovement } from "@/lib/storage";
 import {
-  caseTwin, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber,
+  caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber,
 } from "@/lib/storage-filter";
 
 type Strings = (typeof sd)["en"] | (typeof sd)["ar"];
@@ -31,12 +31,14 @@ const fmt = (n: number, isAr: boolean) => n.toLocaleString(isAr ? "ar-EG" : "en-
 /* ------------------------------- the drawer ------------------------------- */
 
 export function ItemDrawer({
-  line, balance, movements, canWrite, isAr, s, onClose, onDeposit, onWithdraw, onMove, onEdit, onDelete, onSwitch,
+  line, balance, movements, canWrite, dups, isAr, s, onClose, onDeposit, onWithdraw, onMove, onEdit, onDelete, onSwitch,
 }: {
   line: StorageBalance | null;
   balance: StorageBalance[];
   movements: StorageMovement[];
   canWrite: boolean;
+  /** numbers the sheet holds twice — see duplicateNums(); these rows are read-only here */
+  dups: Set<string>;
   isAr: boolean;
   s: Strings;
   onClose: () => void;
@@ -140,11 +142,12 @@ export function ItemDrawer({
         <p className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3 py-4 text-center">{s.item.noHistory}</p>
       ) : (
         <ul className="divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">
-          {history.map((m) => {
+          {history.map((m, i) => {
             const out = m.log === "سحب";
             const iso = storageDate(m.date);
+            const locked = dups.has(dupKey(m));
             return (
-              <li key={`${m.log}-${m.num}`} className="flex items-center gap-3 px-3 py-2.5 bg-white">
+              <li key={`${m.log}-${m.num}-${i}`} className="flex items-center gap-3 px-3 py-2.5 bg-white">
                 <span className={`shrink-0 w-7 h-7 rounded-full inline-flex items-center justify-center ${out ? "bg-orange-50 text-orange-600" : "bg-emerald-50 text-emerald-600"}`}>
                   {out ? <ArrowUpFromLine size={14} /> : <ArrowDownToLine size={14} />}
                 </span>
@@ -155,6 +158,7 @@ export function ItemDrawer({
                   </p>
                   <p className="text-xs text-gray-400 flex flex-wrap gap-x-2">
                     <span className="font-mono" dir="ltr">{m.num}</span>
+                    {locked && <span className="rounded bg-amber-50 border border-amber-200 px-1 text-[10px] text-amber-700" title={s.dupNum}>{s.dupBadge}</span>}
                     {iso
                       ? <span dir="ltr">{iso}</span>
                       : <span className="text-amber-600">{fill(s.badDate, { raw: m.date || "—" })}</span>}
@@ -163,12 +167,12 @@ export function ItemDrawer({
                 </div>
                 {canWrite && (
                   <div className="shrink-0 flex">
-                    <button onClick={() => onEdit(m)} aria-label={s.item.edit} title={s.item.edit}
-                      className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                    <button onClick={() => onEdit(m)} aria-label={s.item.edit} title={locked ? s.dupNum : s.item.edit} disabled={locked}
+                      className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => onDelete(m)} aria-label={s.item.del} title={s.item.del}
-                      className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40">
+                    <button onClick={() => onDelete(m)} aria-label={s.item.del} title={locked ? s.dupNum : s.item.del} disabled={locked}
+                      className="min-w-9 min-h-9 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40">
                       <Trash2 size={14} />
                     </button>
                   </div>

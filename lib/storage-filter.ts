@@ -422,3 +422,21 @@ export function movePayloads(
     { ...base, moveType: "إيداع", loc: toLoc },
   ];
 }
+
+/* ------------------------------ duplicated numbers ----------------------------- */
+
+/**
+ * Numbers that appear more than once within the same log. The v3 bridge had no
+ * lock around a save, so two saves landing together could both take max+1 —
+ * «سحب» held two identical ITQ0030 rows on 2026-09-02. v4 serialises saves, but
+ * the twins stay in the log, and `webFindRow_` locates a row by its number: an
+ * edit or delete on such a number can land on the wrong twin. The page must
+ * refuse and point at the sheet.
+ */
+export const dupKey = (m: { log: string; num: string }): string => `${m.log}|${m.num}`;
+
+export function duplicateNums(movements: { log: string; num: string }[]): Set<string> {
+  const seen = new Map<string, number>();
+  movements.forEach((m) => { const k = dupKey(m); seen.set(k, (seen.get(k) ?? 0) + 1); });
+  return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+}
