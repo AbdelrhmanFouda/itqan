@@ -9,17 +9,29 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  * read-only. Saving reuses the sheet's own validation server-side, including
  * the insufficient-balance block on withdrawals.
  *
- * FINDING THINGS (2026-08-30). The page used to offer one text box matching four
- * fields, which is not enough once the room is 55 slots deep: the question a
- * storekeeper actually asks is «what is standing in A12» and «where is this
- * item», and neither was answerable here. So:
- *   - search is Arabic-folded and multi-term (lib/storage-filter.ts),
- *   - location / item-type / stock-level filters and a sort apply to all tabs,
- *   - a tappable map of the room (grouped by line, counts per slot) filters by
- *     one tap,
- *   - the movement form picks the location from «أماكن التخزين» instead of
- *     free text, and shows where the chosen item is standing right now.
- * The location filter folds case on purpose — see the note in storage-filter.ts.
+ * FINDING THINGS (2026-08-30). One text box over four fields was not enough for
+ * a room 55 slots deep: «what is standing in A12» and «where is this item» were
+ * both unanswerable. Search is Arabic-folded and multi-term, filters and a sort
+ * apply to every tab, and the room is drawn the way the owner draws it
+ * (components/dashboard/room-plan.tsx) — one tap on a place filters by it.
+ *
+ * EASY TO USE + EDIT INSIDE ANY PRODUCT (2026-09-02, owner's words). The two
+ * verbs a storekeeper has — إيداع and سحب — are the two big buttons; everything
+ * else stepped back. The stat tiles filter. The filter selects fold away on a
+ * phone. And every line of the balance OPENS (components/dashboard/storage-item.tsx):
+ * its movements, each editable; deposit here / withdraw from here / move to
+ * another place; the same item elsewhere; and two honesty checks — the
+ * movements summed against the sheet's figure, and a negative line paired with
+ * the pile it was almost certainly meant to draw from.
+ *
+ * Two things measured on the live bridge that day shaped the logic below:
+ *   - dates arrive as «9/2/2026 13:56:27» or «2026-09-02» (and once as «A17»);
+ *     handing the raw cell to <input type=date> blanked it, and the bridge then
+ *     stamped TODAY on any movement edited from the site. storageDate() fixes it.
+ *   - the deployed bridge is v3, whose available_() matches the location cell
+ *     EXACTLY: a blank location on a سحب means the line filed without a place,
+ *     not "every place". The form's «المتوفر» says the same thing the bridge
+ *     will check, or the two disagree about the same withdrawal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
@@ -28,32 +40,37 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
 import { hasFullAccess } from "@/lib/roles";
 import {
-  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, locKey, matchesTerms,
-  sameLocation, searchTerms, toNumber as num, whereIs,
-  type FloorPlan, type LocationStat, type PlanSlot,
+  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, historyFor, locKey,
+  matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem, searchTerms,
+  storageDate, sumNet, toNumber as num, whereIs, type LocationStat,
 } from "@/lib/storage-filter";
-import { Btn, EmptyState, Field, inputCls, Modal, Spinner, Stat } from "@/components/dashboard/ui";
+import { Btn, EmptyState, Field, inputCls, Modal, Spinner } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
+import { ItemDrawer, MoveModal, type MoveHalf, type MoveRequest } from "@/components/dashboard/storage-item";
 import {
-  Pencil, Plus, RefreshCw, Trash2, ExternalLink, ListRestart, Search, X, MapPin,
-  ChevronDown, ChevronUp,
+  ArrowDownToLine, ArrowUpFromLine, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
+  ListRestart, MapPin, Pencil, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import type { StorageBalance, StorageData, StorageMovement } from "@/lib/storage";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
+const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
 
 type Tab = "balance" | "in" | "out";
 type Sort = "sheet" | "item" | "loc" | "avail";
 type Status = "" | "in" | "zero" | "neg";
 type ItemType = "" | "منتج" | "خامة";
+type MoveType = "إيداع" | "سحب";
 
 const todayStr = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, local tz
 /** The sheet writes «خامة»/«منتج»; be tolerant of a stray «خامات» or a space. */
 const isMaterial = (t: string | undefined) => String(t ?? "").trim().startsWith("خام");
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const fill = (t: string, vars: Record<string, string | number>) =>
+  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
 
 type FormState = {
-  moveType: "إيداع" | "سحب";
+  moveType: MoveType;
   itemType: "منتج" | "خامة";
   item: string; client: string; forClient: string; loc: string; date: string;
   qtyCount: string; qtyKg: string; grams: string; loss: string; notes: string;
@@ -71,6 +88,7 @@ export default function StoragePage() {
   const { user, profile } = useAuth();
   const role = profile?.role ?? null;
   const canWrite = role !== null && (role === "storage" || hasFullAccess(role));
+  const fmtN = useCallback((n: number) => n.toLocaleString(isAr ? "ar-EG" : "en-US"), [isAr]);
 
   const [data, setData] = useState<StorageData | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -83,12 +101,26 @@ export default function StoragePage() {
   const [typeFilter, setTypeFilter] = useState<ItemType>("");
   const [statusFilter, setStatusFilter] = useState<Status>("");
   const [sortBy, setSortBy] = useState<Sort>("sheet");
-  const [mapOpen, setMapOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false); // phones only — sm+ always shows them
+  // Remembered preference. Read in the initializer, not an effect: the map only
+  // renders once `data` has loaded client-side, so a server/client difference
+  // here can never reach the DOM as a hydration mismatch.
+  const [mapOpen, setMapOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(MAP_KEY) !== "0"; } catch { return true; }
+  });
 
-  // modal state
+  // a stock line, opened
+  const [openLine, setOpenLine] = useState<StorageBalance | null>(null);
+  const [moveLine, setMoveLine] = useState<StorageBalance | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveErr, setMoveErr] = useState("");
+  const [moveHalf, setMoveHalf] = useState<MoveHalf | null>(null);
+
+  // movement modal
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<StorageMovement | null>(null); // null = add
   const [form, setForm] = useState<FormState>(blankForm());
+  const [itemQuery, setItemQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,34 +143,39 @@ export default function StoragePage() {
     return () => clearInterval(t);
   }, [load]);
 
+  const toggleMap = () => setMapOpen((v) => {
+    try { localStorage.setItem(MAP_KEY, v ? "0" : "1"); } catch { /* private mode */ }
+    return !v;
+  });
+
   const flash = (msg: string) => {
     setNotice(msg);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(""), 5000);
+    noticeTimer.current = setTimeout(() => setNotice(""), 6000);
   };
 
-  async function post(payload: Record<string, unknown>): Promise<{
-    ok: boolean; num?: string; nums?: string[]; split?: boolean; message?: string; error?: string;
-  }> {
+  type PostResult = { ok: boolean; num?: string; nums?: string[]; split?: boolean; message?: string; error?: string };
+  async function post(payload: Record<string, unknown>): Promise<PostResult> {
     const token = user ? await user.getIdToken() : "";
     const res = await fetch("/api/storage", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify(payload),
     });
-    return (await res.json().catch(() => ({ ok: false, error: "bad_response" }))) as {
-      ok: boolean; num?: string; nums?: string[]; split?: boolean; message?: string; error?: string;
-    };
+    return (await res.json().catch(() => ({ ok: false, error: "bad_response" }))) as PostResult;
   }
 
   /* ------------------------------ derived ------------------------------ */
 
   const lists = data?.lists;
-  const itemOptions = form.itemType === "خامة" ? lists?.materials ?? [] : lists?.products ?? [];
   // What the DEPLOYED bridge can actually do — measured, not assumed. The live
-  // deployment was still v3 on 2026-08-30, so both of these are false there and
+  // deployment was still v3 on 2026-09-02, so both of these are false there and
   // the page must not offer what the sheet would drop on the floor.
   const hasForClient = data?.supportsForClient ?? false;
+  // v4 is also where a blank location on a سحب started meaning "every place"
+  // (auto-allocation, oldest deposit first). v3's available_() matches the
+  // location cell exactly, so blank means the line filed WITHOUT a place.
+  const blankLocMeansAll = hasForClient;
   // «أماكن التخزين» exists → the sheet publishes the FULL list of slots, empty
   // ones included, and the site can be as strict as the sheet's own dropdown.
   // Without it we only know the slots already in use, and a strict select would
@@ -179,6 +216,11 @@ export default function StoragePage() {
     return [...map.entries()].sort((a, b) => (a[0] ? (b[0] ? a[0].localeCompare(b[0]) : -1) : 1));
   }, [locStats]);
   const groupLabel = (g: string) => (g ? s.filters.shelfLine.replace("{g}", g) : s.filters.otherZones);
+  // every place the form and the move can name (the sheet's own spelling)
+  const placeNames = useMemo(
+    () => locStats.filter((l) => l.key !== NO_LOCATION).map((l) => l.label),
+    [locStats],
+  );
 
   const terms = useMemo(() => searchTerms(search), [search]);
   const typeOk = useCallback(
@@ -209,16 +251,17 @@ export default function StoragePage() {
       .filter((m) =>
         sameLocation(m.loc, locFilter) &&
         typeOk(m.itemType) &&
-        matchesTerms([m.num, m.item, m.client, m.forClient, m.loc, m.date, m.notes], terms))
-      .slice()
+        matchesTerms([m.num, m.item, m.client, m.forClient, m.loc, storageDate(m.date), m.date, m.notes], terms))
       .reverse(),
     [movements, locFilter, typeOk, terms],
   );
 
   const shownCount = tab === "balance" ? balance.length : shownMovements.length;
   const totalCount = tab === "balance" ? allBalance.length : movements.length;
-  const filtered = Boolean(search || locFilter || typeFilter || statusFilter);
-  const negatives = allBalance.filter((b) => num(b.avail) < 0).length;
+  const activeFilters = [locFilter, typeFilter, statusFilter].filter(Boolean).length;
+  const filtered = Boolean(search) || activeFilters > 0;
+  const negatives = useMemo(() => allBalance.filter((b) => num(b.avail) < 0).length, [allBalance]);
+  const unfiled = useMemo(() => allBalance.filter((b) => !locKey(b.loc)).length, [allBalance]);
 
   function clearFilters() {
     setSearch("");
@@ -227,9 +270,23 @@ export default function StoragePage() {
     setStatusFilter("");
   }
 
+  // the opened line, kept fresh across the 20s refresh so its figure moves
+  const liveLine = useMemo(
+    () => (openLine ? allBalance.find((b) => sameLine(b, openLine)) ?? openLine : null),
+    [openLine, allBalance],
+  );
+
   /* --------------------------- form-side derived --------------------------- */
 
-  // live computed fields — mirrors the sheet form's C17/C18/C19 formulas
+  const itemOptions = useMemo(() => {
+    const all = form.itemType === "خامة" ? lists?.materials ?? [] : lists?.products ?? [];
+    const t = searchTerms(itemQuery);
+    const shown = t.length ? all.filter((o) => matchesTerms([o], t)) : all;
+    // the value being edited must stay selectable whatever was typed
+    return form.item && !shown.includes(form.item) ? [form.item, ...shown] : shown;
+  }, [form.itemType, form.item, lists, itemQuery]);
+
+  // live computed fields — mirrors the sheet form's compute_() exactly
   const pieces = form.itemType === "منتج" && num(form.qtyKg) > 0 && num(form.grams) > 0
     ? r2(num(form.qtyKg) * 1000 / num(form.grams)) : 0;
   const net = form.itemType === "خامة"
@@ -245,58 +302,71 @@ export default function StoragePage() {
     [allBalance, form.item, form.itemType],
   );
 
-  // v4: a blank location on a سحب means "all locations" — the sheet's own C19
-  // says «… — كل الأماكن» in that case, so this must agree or the two forms
-  // disagree about the same withdrawal.
+  // What the bridge will check a سحب against: the MOVEMENTS summed on the same
+  // four exact keys — not the balance tab's column, which available_() never
+  // reads and which can be overwritten by hand (it was, on 2026-09-02).
   const avail = useMemo(() => {
     if (!form.item || !data) return null;
-    const rows = data.balance.filter((b) =>
-      isMaterial(b.itemType) === isMaterial(form.itemType) &&
-      b.item.trim() === form.item.trim() &&
-      b.client.trim() === form.client.trim());
-    if (!form.loc.trim()) {
-      return { qty: r2(rows.reduce((t, b) => t + num(b.avail), 0)), all: true };
+    const line = { itemType: form.itemType, item: form.item, client: form.client, loc: form.loc.trim() };
+    if (!line.loc && blankLocMeansAll) {
+      return { qty: sumNet(allMovements.filter((m) => sameOwnerItem(m, line))), scope: "all" as const };
     }
-    const key = locKey(form.loc);
-    return { qty: r2(rows.filter((b) => locKey(b.loc) === key).reduce((t, b) => t + num(b.avail), 0)), all: false };
-  }, [data, form.item, form.itemType, form.client, form.loc]);
+    return { qty: sumNet(historyFor(allMovements, line)), scope: line.loc ? ("here" as const) : ("none" as const) };
+  }, [data, allMovements, form.item, form.itemType, form.client, form.loc, blankLocMeansAll]);
+  // ...and what can leave the line being moved, for the same reason
+  const moveAvail = useMemo(
+    () => (moveLine ? sumNet(historyFor(allMovements, moveLine)) : 0),
+    [moveLine, allMovements],
+  );
 
-  // The form offers every place «أماكن التخزين» defines — including the empty
-  // slots, which are exactly the ones a deposit goes into — plus the value the
-  // row being edited already carries, so editing can never silently move stock.
+  // The form offers every place the room names, plus the value the row being
+  // edited already carries — EXACT match, not locKey(): the sheet keys stock on
+  // the string as typed, so a row standing at the stale lowercase `a12` must
+  // stay selectable as `a12`, or withdrawing from `A12` is refused for no balance.
   const formLocations = useMemo(() => {
-    const opts = locStats.filter((l) => l.key !== NO_LOCATION).map((l) => l.label);
-    // EXACT match, not locKey(): the sheet keys stock on the string as typed, so
-    // a row standing at the stale lowercase `a12` must stay selectable as `a12`.
-    // Folding here would leave the select showing a blank while the form still
-    // held a value — and withdrawing from `A12` would be refused for no balance.
+    const opts = [...placeNames];
     const cur = form.loc.trim();
     if (cur && !opts.includes(cur)) opts.push(cur);
     return opts;
-  }, [locStats, form.loc]);
+  }, [placeNames, form.loc]);
   const locIsUnknown = Boolean(
     form.loc.trim() && !locStats.some((l) => l.key === locKey(form.loc)),
   );
 
   /* ------------------------------ actions ------------------------------ */
 
-  function openAdd() {
+  /** Open the movement form for a deposit or a withdrawal, optionally already
+   *  standing on a line (from the drawer) or a place (from the map filter). */
+  function openAdd(moveType: MoveType, line?: StorageBalance) {
     setEditing(null);
-    // a location already being filtered on is almost certainly the one being
-    // filled — carry it into the form rather than making it be picked twice
-    const pre = locStats.find((l) => l.key === locFilter && l.key !== NO_LOCATION);
-    setForm({ ...blankForm(), loc: pre ? pre.label : "" });
+    setItemQuery("");
+    const pre = !line && locStats.find((l) => l.key === locFilter && l.key !== NO_LOCATION);
+    setForm({
+      ...blankForm(),
+      moveType,
+      ...(line
+        ? {
+            itemType: isMaterial(line.itemType) ? "خامة" : "منتج",
+            item: line.item, client: line.client, loc: line.loc,
+            grams: !isMaterial(line.itemType) && lists?.weights?.[line.item] ? String(lists.weights[line.item]) : "",
+          }
+        : { loc: pre ? pre.label : "" }),
+    });
     setFormErr("");
     setOpen(true);
   }
 
   function openEdit(m: StorageMovement) {
     setEditing(m);
+    setItemQuery("");
     setForm({
       moveType: m.log,
       itemType: isMaterial(m.itemType) ? "خامة" : "منتج",
       item: m.item, client: m.client, forClient: m.forClient, loc: m.loc,
-      date: m.date || todayStr(),
+      // the raw cell («9/2/2026 13:56:27») is not a value <input type=date>
+      // accepts; an unparseable one is left EMPTY so the save asks for it
+      // instead of the bridge quietly stamping today
+      date: storageDate(m.date),
       qtyCount: m.qtyCount ? String(num(m.qtyCount)) : "",
       qtyKg: m.qtyKg ? String(num(m.qtyKg)) : "",
       grams: m.grams ? String(num(m.grams)) : "",
@@ -316,6 +386,7 @@ export default function StoragePage() {
 
   async function handleSave() {
     if (!form.item) { setFormErr(s.form.needItem); return; }
+    if (!form.date) { setFormErr(s.form.needDate); return; }
     setSaving(true);
     setFormErr("");
     const payload = {
@@ -345,6 +416,37 @@ export default function StoragePage() {
     flash("…");
     const res = await post({ action: "refresh" });
     flash(res.ok ? "✓" : res.error || "error");
+    load();
+  }
+
+  /** A move is two bridge calls, and the bridge is at-least-once with no
+   *  transaction across calls. So: withdraw first (that is the one the sheet
+   *  can REFUSE, on balance), and if the deposit then fails, stop and show
+   *  exactly what landed — with an undo — rather than retrying blind. */
+  async function handleMove(req: MoveRequest) {
+    if (!moveLine) return;
+    setMoveBusy(true);
+    setMoveErr("");
+    const grams = !isMaterial(moveLine.itemType) ? Number(lists?.weights?.[moveLine.item]) || undefined : undefined;
+    const [out, inn] = movePayloads(moveLine, req.toLoc, req.qty, req.date, req.notes, grams);
+    const r1 = await post(out);
+    if (!r1.ok) { setMoveBusy(false); setMoveErr(r1.error || "error"); return; }
+    const r2 = await post(inn);
+    setMoveBusy(false);
+    if (!r2.ok) { setMoveHalf({ out: r1.num ?? "?", error: r2.error || "error" }); load(); return; }
+    setMoveLine(null);
+    flash(fill(s.move.done, { out: r1.num ?? "?", in: r2.num ?? "?" }));
+    load();
+  }
+
+  async function handleUndoMove(outNum: string) {
+    setMoveBusy(true);
+    const res = await post({ action: "delete", log: "سحب", num: outNum });
+    setMoveBusy(false);
+    if (!res.ok) { setMoveErr(res.error || "error"); return; }
+    setMoveHalf(null);
+    setMoveLine(null);
+    flash(s.move.undone);
     load();
   }
 
@@ -381,31 +483,54 @@ export default function StoragePage() {
     "border border-gray-300 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 text-base sm:text-sm " +
     "text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 " +
     "focus:border-blue-400 flex-1 min-w-[8.5rem] sm:flex-none sm:w-auto sm:max-w-[12rem]";
+  const iconBtn =
+    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 " +
+    "hover:bg-gray-100 active:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 " +
+    "focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
+  const bigBtn =
+    "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-12 sm:min-h-10 rounded-xl " +
+    "text-base sm:text-sm font-semibold text-white shadow-sm transition-colors focus-visible:outline-none " +
+    "focus-visible:ring-2 focus-visible:ring-offset-1";
   const activeLoc = locStats.find((l) => l.key === locFilter);
 
   return (
     <div dir={isAr ? "rtl" : "ltr"}>
-      <div className="mb-6 sm:mb-8">
+      <div className="mb-5 sm:mb-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{s.title}</h1>
         <p className="text-sm text-gray-500">{s.subtitle}</p>
-        {/* Actions row — always flex-wrap: this row once held four controls
-            (~460px) in a single unbreakable line on a 375px screen. */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* The two verbs, big; everything else small. Always flex-wrap. */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           {canWrite && (
             <>
-              <a
-                href={SHEET_URL} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
+              <button
+                onClick={() => openAdd("إيداع")}
+                className={`${bigBtn} bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 focus-visible:ring-emerald-500/40`}
               >
-                <ExternalLink size={14} /> {s.openSheet}
-              </a>
-              <Btn variant="outline" onClick={handleRefreshLists}>
-                <ListRestart size={14} /> {s.refreshLists}
-              </Btn>
-              <Btn onClick={openAdd}><Plus size={15} /> {s.form.addBtn}</Btn>
+                <ArrowDownToLine size={18} /> {s.actions.deposit}
+              </button>
+              <button
+                onClick={() => openAdd("سحب")}
+                className={`${bigBtn} bg-orange-500 hover:bg-orange-400 active:bg-orange-600 focus-visible:ring-orange-500/40`}
+              >
+                <ArrowUpFromLine size={18} /> {s.actions.withdraw}
+              </button>
             </>
           )}
-          <Btn variant="ghost" onClick={load}><RefreshCw size={14} /> {s.refresh}</Btn>
+          <div className="flex items-center gap-0.5 ms-auto">
+            <button onClick={load} className={iconBtn} title={s.refresh} aria-label={s.refresh}>
+              <RefreshCw size={15} /><span className="hidden sm:inline">{s.refresh}</span>
+            </button>
+            {canWrite && (
+              <>
+                <button onClick={handleRefreshLists} className={iconBtn} title={s.refreshLists} aria-label={s.refreshLists}>
+                  <ListRestart size={15} /><span className="hidden sm:inline">{s.refreshLists}</span>
+                </button>
+                <a href={SHEET_URL} target="_blank" rel="noreferrer" className={iconBtn} title={s.openSheet} aria-label={s.openSheet}>
+                  <ExternalLink size={15} /><span className="hidden sm:inline">{s.openSheet}</span>
+                </a>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -417,29 +542,38 @@ export default function StoragePage() {
       {loadErr && <p className="text-xs text-amber-600 mb-3">{s.loadError}</p>}
       {!canWrite && <p className="text-xs text-gray-400 mb-3">{s.readOnly}</p>}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
-        <Stat label={s.stats.items} value={data.balance.length.toLocaleString(isAr ? "ar-EG" : "en-US")} />
-        <Stat label={s.stats.movements} value={(data.inLog.length + data.outLog.length).toLocaleString(isAr ? "ar-EG" : "en-US")} />
-        <Stat label={s.stats.negative} value={negatives.toLocaleString(isAr ? "ar-EG" : "en-US")} tone={negatives > 0 ? "red" : "green"} />
+      {/* stat tiles that filter */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-1">
+        <StatTile label={s.stats.items} value={fmtN(allBalance.length)} active={tab === "balance" && !filtered}
+          onClick={() => { setTab("balance"); clearFilters(); }} />
+        <StatTile label={s.stats.unfiled} value={fmtN(unfiled)} active={locFilter === NO_LOCATION}
+          onClick={() => setLocFilter(locFilter === NO_LOCATION ? "" : NO_LOCATION)} />
+        <StatTile label={s.stats.negative} value={fmtN(negatives)} tone={negatives > 0 ? "red" : "green"}
+          active={statusFilter === "neg"}
+          onClick={() => { setTab("balance"); setStatusFilter(statusFilter === "neg" ? "" : "neg"); }} />
+        <StatTile label={s.stats.movements} value={fmtN(data.inLog.length + data.outLog.length)} />
       </div>
+      <p className="text-[11px] text-gray-400 mb-4">{s.statsHint}</p>
 
       {/* ----------------------------- controls ----------------------------- */}
       <div className="space-y-3 mb-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-3 py-1.5 min-h-11 sm:min-h-0 inline-flex items-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-                  tab === t.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="relative flex-1 min-w-[13rem] sm:max-w-sm">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          {tabs.length > 1 && (
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+              {tabs.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={`px-3 py-1.5 min-h-11 sm:min-h-0 inline-flex items-center rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                    tab === t.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm">
             <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               value={search}
@@ -458,9 +592,20 @@ export default function StoragePage() {
               </button>
             )}
           </div>
+          {/* phones: the selects fold away behind this */}
+          <button
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-expanded={filtersOpen}
+            className={`sm:hidden inline-flex items-center gap-1.5 px-3 min-h-11 rounded-lg border text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+              activeFilters ? "border-blue-400 text-blue-700 bg-blue-50" : "border-gray-300 text-gray-700 bg-white"
+            }`}
+          >
+            <SlidersHorizontal size={15} /> {s.filters.toggle}
+            {activeFilters > 0 && <span className="tabular-nums text-xs rounded-full bg-blue-600 text-white px-1.5">{activeFilters}</span>}
+          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`${filtersOpen ? "flex" : "hidden sm:flex"} flex-wrap items-center gap-2`}>
           <select
             value={locFilter}
             onChange={(e) => setLocFilter(e.target.value)}
@@ -521,9 +666,7 @@ export default function StoragePage() {
             <Btn variant="ghost" onClick={clearFilters}><X size={14} /> {s.filters.clear}</Btn>
           )}
           <span className="ms-auto text-xs text-gray-400 tabular-nums whitespace-nowrap">
-            {s.filters.showing
-              .replace("{n}", shownCount.toLocaleString(isAr ? "ar-EG" : "en-US"))
-              .replace("{total}", totalCount.toLocaleString(isAr ? "ar-EG" : "en-US"))}
+            {fill(s.filters.showing, { n: fmtN(shownCount), total: fmtN(totalCount) })}
           </span>
         </div>
 
@@ -531,7 +674,7 @@ export default function StoragePage() {
         {locStats.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-xl">
             <button
-              onClick={() => setMapOpen((v) => !v)}
+              onClick={toggleMap}
               aria-expanded={mapOpen}
               className="w-full flex items-center gap-2 px-4 py-3 min-h-11 text-sm font-medium text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-xl"
             >
@@ -541,7 +684,7 @@ export default function StoragePage() {
                 {locStats.filter((l) => l.key !== NO_LOCATION).length}
               </span>
               {activeLoc && (
-                <span className="text-xs font-normal text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+                <span className="text-xs font-normal text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5 truncate max-w-[9rem]">
                   {s.filters.atLocation.replace("{loc}", locLabel(activeLoc))}
                 </span>
               )}
@@ -570,21 +713,54 @@ export default function StoragePage() {
       {tab === "balance" ? (
         balance.length === 0 && filtered
           ? <FilteredEmpty text={s.noMatch} label={s.filters.clear} onClear={clearFilters} />
-          : <BalanceView rows={balance} s={s} />
+          : <BalanceView rows={balance} s={s} onOpen={setOpenLine} />
       ) : (
         shownMovements.length === 0 && filtered
           ? <FilteredEmpty text={s.noMatch} label={s.filters.clear} onClear={clearFilters} />
           : <MovementsView rows={shownMovements} s={s} isAr={isAr} canWrite={canWrite} hasForClient={hasForClient} onEdit={openEdit} onDelete={handleDelete} />
       )}
 
-      <Modal open={open} title={editing ? `${s.form.editTitle} — ${editing.num}` : s.form.addTitle} onClose={() => setOpen(false)} isAr={isAr}>
+      {/* ------------------------------ a line, opened ------------------------------ */}
+      <ItemDrawer
+        line={liveLine}
+        balance={allBalance}
+        movements={allMovements}
+        canWrite={canWrite}
+        isAr={isAr}
+        s={s}
+        onClose={() => setOpenLine(null)}
+        onDeposit={(l) => openAdd("إيداع", l)}
+        onWithdraw={(l) => openAdd("سحب", l)}
+        onMove={(l) => { setMoveErr(""); setMoveHalf(null); setMoveLine(l); }}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+        onSwitch={setOpenLine}
+      />
+      <MoveModal
+        key={moveLine ? `${moveLine.itemType}|${moveLine.item}|${moveLine.client}|${moveLine.loc}` : "none"}
+        line={moveLine}
+        avail={moveAvail}
+        locations={placeNames}
+        strict={strictLocations}
+        isAr={isAr}
+        s={s}
+        busy={moveBusy}
+        error={moveErr}
+        half={moveHalf}
+        onClose={() => { if (!moveBusy) { setMoveLine(null); setMoveHalf(null); setMoveErr(""); } }}
+        onConfirm={handleMove}
+        onUndo={handleUndoMove}
+      />
+
+      {/* ------------------------------ the movement form ------------------------------ */}
+      <Modal open={open} title={editing ? `${s.form.editTitle} — ${editing.num}` : (form.moveType === "سحب" ? s.moveTypes.out : s.moveTypes.in)} onClose={() => setOpen(false)} isAr={isAr}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
           <Field label={s.form.moveType}>
             <select
               className={inputCls}
               value={form.moveType}
               disabled={!!editing}
-              onChange={(e) => setForm((f) => ({ ...f, moveType: e.target.value as FormState["moveType"] }))}
+              onChange={(e) => setForm((f) => ({ ...f, moveType: e.target.value as MoveType }))}
             >
               <option value="إيداع">{s.moveTypes.in}</option>
               <option value="سحب">{s.moveTypes.out}</option>
@@ -594,9 +770,10 @@ export default function StoragePage() {
             <select
               className={inputCls}
               value={form.itemType}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, itemType: e.target.value as FormState["itemType"], item: "", grams: "" }))
-              }
+              onChange={(e) => {
+                setItemQuery("");
+                setForm((f) => ({ ...f, itemType: e.target.value as FormState["itemType"], item: "", grams: "" }));
+              }}
             >
               <option value="منتج">{s.itemTypes.product}</option>
               <option value="خامة">{s.itemTypes.material}</option>
@@ -604,12 +781,22 @@ export default function StoragePage() {
           </Field>
           <div className="sm:col-span-2">
             <Field label={s.form.item}>
-              <select className={inputCls} value={form.item} onChange={(e) => pickItem(e.target.value)}>
-                <option value="">{s.form.selectItem}</option>
-                {itemOptions.map((o) => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
+              <>
+                {/* 469 products in one dropdown is unusable on a phone: type to narrow,
+                    pick from the (still strict) list — a typo must not create a new line */}
+                <input
+                  value={itemQuery}
+                  onChange={(e) => setItemQuery(e.target.value)}
+                  placeholder={s.form.itemSearch}
+                  className={`${inputCls} mb-1.5`}
+                />
+                <select className={inputCls} value={form.item} onChange={(e) => pickItem(e.target.value)} size={itemQuery ? Math.min(6, Math.max(2, itemOptions.length)) : undefined}>
+                  <option value="">{s.form.selectItem}</option>
+                  {itemOptions.map((o) => (
+                    <option key={o} value={o}>{o}</option>
+                  ))}
+                </select>
+              </>
             </Field>
             {form.item && (
               <div className="-mt-2 mb-3 text-xs">
@@ -624,12 +811,12 @@ export default function StoragePage() {
                         type="button"
                         onClick={() => setForm((f) => ({ ...f, loc: w.loc }))}
                         className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 min-h-9 tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-                          locKey(w.loc) === locKey(form.loc)
+                          locKey(w.loc) === locKey(form.loc) && (w.loc || !form.loc)
                             ? "border-blue-600 bg-blue-600 text-white"
                             : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                         }`}
                       >
-                        {w.loc} <b>{w.qty}</b> <span className="opacity-70">{w.unit}</span>
+                        <span dir={w.loc ? "ltr" : undefined}>{w.loc || s.filters.noLocation}</span> <b>{w.qty}</b> <span className="opacity-70">{w.unit}</span>
                       </button>
                     ))}
                   </span>
@@ -680,7 +867,7 @@ export default function StoragePage() {
                     className={inputCls}
                     value={form.loc}
                     onChange={(e) => setForm((f) => ({ ...f, loc: e.target.value }))}
-                    placeholder={s.form.anyLoc}
+                    placeholder={s.filters.noLocation}
                   />
                   <datalist id="storage-locations">
                     {formLocations.map((o) => <option key={o} value={o} />)}
@@ -690,12 +877,15 @@ export default function StoragePage() {
             </Field>
             {locIsUnknown && <p className="-mt-2 mb-3 text-xs text-amber-600">{s.form.locUnknown}</p>}
             {form.moveType === "سحب" && !form.loc.trim() && (
-              <p className="-mt-2 mb-3 text-xs text-gray-400">{s.form.locOutHint}</p>
+              <p className="-mt-2 mb-3 text-xs text-gray-400">{blankLocMeansAll ? s.form.locOutHint : s.form.locOutHintV3}</p>
             )}
           </div>
           <Field label={s.form.date}>
             <input type="date" className={inputCls} value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
           </Field>
+          {editing && !form.date && (
+            <p className="sm:col-span-2 -mt-2 mb-3 text-xs text-amber-600">{fill(s.badDate, { raw: editing.date || "—" })}</p>
+          )}
           {form.itemType === "منتج" && (
             <Field label={s.form.qtyCount}>
               <input type="number" min={0} className={inputCls} value={form.qtyCount} onChange={(e) => setForm((f) => ({ ...f, qtyCount: e.target.value }))} />
@@ -730,8 +920,9 @@ export default function StoragePage() {
           {avail !== null && (
             <div>
               <span className="text-gray-500">{s.form.avail}:</span>{" "}
-              <b>{avail.qty} {unit}</b>
-              {avail.all && <span className="text-gray-400"> — {s.form.availAll}</span>}
+              <b className={form.moveType === "سحب" && net > avail.qty + 1e-9 ? "text-red-600" : ""}>{avail.qty} {unit}</b>
+              {avail.scope === "all" && <span className="text-gray-400"> — {s.form.availAll}</span>}
+              {avail.scope === "none" && <span className="text-gray-400"> — {s.form.availNone}</span>}
             </div>
           )}
         </div>
@@ -747,9 +938,41 @@ export default function StoragePage() {
   );
 }
 
+/* --------------------------------- pieces --------------------------------- */
+
+/** A number that is also a filter. Plain when it has no onClick. */
+function StatTile({
+  label, value, tone, active, onClick,
+}: {
+  label: string; value: string; tone?: "red" | "green"; active?: boolean; onClick?: () => void;
+}) {
+  const valueCls = tone === "red" ? "text-red-600" : tone === "green" ? "text-emerald-700" : "text-gray-900";
+  const box = `text-start bg-white border rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 transition-colors ${
+    active ? "border-blue-400 ring-2 ring-blue-500/20" : "border-gray-200"
+  }`;
+  const inner = (
+    <>
+      <p className="text-[11px] sm:text-xs text-gray-500 truncate">{label}</p>
+      <p className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${valueCls}`}>{value}</p>
+    </>
+  );
+  if (!onClick) return <div className={box}>{inner}</div>;
+  return (
+    <button onClick={onClick} aria-pressed={active} className={`${box} hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40`}>
+      {inner}
+    </button>
+  );
+}
+
 /* ------------------------------ balance view ------------------------------ */
 
-function BalanceView({ rows, s }: { rows: StorageBalance[]; s: (typeof sd)["en"] | (typeof sd)["ar"] }) {
+function BalanceView({
+  rows, s, onOpen,
+}: {
+  rows: StorageBalance[];
+  s: (typeof sd)["en"] | (typeof sd)["ar"];
+  onOpen: (b: StorageBalance) => void;
+}) {
   if (rows.length === 0) return <EmptyState text={s.empty} />;
   const availCls = (v: string) =>
     num(v) < 0 ? "text-red-600" : num(v) === 0 ? "text-gray-400" : "text-emerald-700";
@@ -758,29 +981,33 @@ function BalanceView({ rows, s }: { rows: StorageBalance[]; s: (typeof sd)["en"]
     { h: s.cols.avail, end: true }, { h: s.cols.inQty, end: true }, { h: s.cols.inLast },
     { h: s.cols.outQty, end: true }, { h: s.cols.outLast }, { h: s.cols.loss, end: true },
   ];
+  const place = (b: StorageBalance) => b.loc
+    ? <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-700 text-xs" dir="ltr"><MapPin size={11} />{b.loc}</span>
+    : <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700 text-xs"><MapPin size={11} />{s.filters.noLocation}</span>;
   return (
     <>
+      <p className="text-[11px] text-gray-400 mb-2">{s.tapRow}</p>
       {/* phones: cards */}
-      <div className="sm:hidden space-y-3">
+      <div className="sm:hidden space-y-2">
         {rows.map((b, i) => (
-          <div key={i} className="bg-white border border-gray-200 rounded-xl p-4">
+          <button
+            key={i}
+            onClick={() => onOpen(b)}
+            className="w-full text-start bg-white border border-gray-200 rounded-xl p-4 hover:bg-gray-50 active:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
             <div className="flex items-center justify-between gap-3 min-w-0 mb-1">
               <p className="font-medium text-gray-900 min-w-0 truncate">{b.item}</p>
               <span className="shrink-0 text-xs text-gray-400 whitespace-nowrap">{b.itemType}</span>
             </div>
-            <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
+            <div className="flex items-end justify-between gap-3">
+              <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
+              <ChevronRight size={16} className="text-gray-300 rtl:-scale-x-100" />
+            </div>
             <p className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-1.5">
-              {b.loc && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-700" dir="ltr">
-                  <MapPin size={11} />{b.loc}
-                </span>
-              )}
+              {place(b)}
               {b.client && <span>{b.client}</span>}
             </p>
-            <p className="text-xs text-gray-400 mt-1 tabular-nums">
-              {s.cols.inQty}: {b.inQty || "0"} — {s.cols.outQty}: {b.outQty || "0"} — {s.cols.loss}: {b.loss || "0"}
-            </p>
-          </div>
+          </button>
         ))}
       </div>
       {/* sm+: table */}
@@ -792,25 +1019,29 @@ function BalanceView({ rows, s }: { rows: StorageBalance[]; s: (typeof sd)["en"]
                 {heads.map((c) => (
                   <th key={c.h} className={`${c.end ? "text-end" : "text-start"} px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap`}>{c.h}</th>
                 ))}
+                <th className="px-2 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.map((b, i) => (
-                <tr key={i} className="hover:bg-gray-50/50 transition-colors">
+                <tr
+                  key={i}
+                  onClick={() => onOpen(b)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(b); } }}
+                  tabIndex={0}
+                  className="hover:bg-blue-50/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-blue-50/60"
+                >
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{b.itemType}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{b.item}</td>
                   <td className="px-4 py-3 text-gray-600">{b.client || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                    {b.loc
-                      ? <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-700 text-xs" dir="ltr"><MapPin size={11} />{b.loc}</span>
-                      : "—"}
-                  </td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{place(b)}</td>
                   <td className={`px-4 py-3 text-end tabular-nums font-bold whitespace-nowrap ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.inQty || "0"}</td>
-                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{b.inLast || "—"}</td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap" dir="ltr">{storageDate(b.inLast) || b.inLast || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.outQty || "0"}</td>
-                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{b.outLast || "—"}</td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap" dir="ltr">{storageDate(b.outLast) || b.outLast || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.loss || "0"}</td>
+                  <td className="px-2 py-3 text-gray-300"><ChevronRight size={15} className="rtl:-scale-x-100" /></td>
                 </tr>
               ))}
             </tbody>
@@ -844,6 +1075,13 @@ function MovementsView({
     { h: s.cols.qtyKg, end: true }, { h: s.cols.loss, end: true }, { h: s.cols.net, end: true },
     { h: s.cols.notes },
   ];
+  // the sheet's cell in one shape; a cell that is not a date says so, in amber
+  const when = (m: StorageMovement) => {
+    const iso = storageDate(m.date);
+    return iso
+      ? <span dir="ltr">{iso}</span>
+      : <span className="text-amber-600" title={fill(s.badDate, { raw: m.date || "—" })}>⚠ {m.date || "—"}</span>;
+  };
   return (
     <>
       {/* phones: cards */}
@@ -852,7 +1090,7 @@ function MovementsView({
           <div key={`${m.log}-${m.num}`} className="bg-white border border-gray-200 rounded-xl p-4">
             <div className="flex items-center justify-between gap-3 min-w-0 mb-1">
               <p className="font-mono text-xs text-gray-500 min-w-0 truncate" dir="ltr">{m.num}</p>
-              <span className="shrink-0 text-xs text-gray-400">{m.date}</span>
+              <span className="shrink-0 text-xs text-gray-400">{when(m)}</span>
             </div>
             <p className="font-medium text-gray-900">{m.item}</p>
             <p className="text-sm text-gray-700 mt-0.5">{s.cols.net}: <b className="tabular-nums">{m.net || "0"} {m.unit}</b></p>
@@ -912,7 +1150,7 @@ function MovementsView({
                       ? <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-700 text-xs" dir="ltr"><MapPin size={11} />{m.loc}</span>
                       : "—"}
                   </td>
-                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{m.date}</td>
+                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{when(m)}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.qtyCount || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.qtyKg || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{m.loss || "0"}</td>

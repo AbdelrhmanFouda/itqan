@@ -3,7 +3,8 @@
  *
  * Pure and import-free on purpose: it is unit-tested (tests/storage-filter.test.ts)
  * and the page, the form and anything added later share ONE rule instead of each
- * re-deriving "what counts as the same location".
+ * re-deriving "what counts as the same location" or "which movements belong to
+ * this stock line".
  *
  * Three things here are not obvious:
  *
@@ -297,4 +298,127 @@ export function buildFloorPlan(stats: LocationStat[]): FloorPlan {
   });
 
   return { lines, zones: zones.sort((a, b) => compareLocKey(a.key, b.key)), named, unfiled };
+}
+
+/* ------------------------------- the stock line ------------------------------ */
+
+/**
+ * A line of «الرصيد الحالي» is keyed on FOUR exact strings — item type, item,
+ * owner client, location — and the sheet sums every movement whose four cells
+ * match exactly (`available_` in storage-setup-v3.gs compares raw values, with
+ * a blank client/location stored as «غير متاح / N/A»). So "the movements of
+ * this line" must match the same way: exact, not folded. The one concession is
+ * whitespace, which lib/storage.ts already collapses on both sides.
+ *
+ * That exactness is also why a withdrawal filed without a location goes
+ * NEGATIVE instead of drawing on the A12 pile of the same item: it is a
+ * different line. The page surfaces that pairing rather than hiding it.
+ */
+export type StockLine = { itemType: string; item: string; client: string; loc: string };
+export type Movement = StockLine & {
+  log: "إيداع" | "سحب"; num: string; date: string; net: string;
+};
+
+const sameKind = (a: string, b: string) =>
+  String(a ?? "").trim().startsWith("خام") === String(b ?? "").trim().startsWith("خام");
+const eq = (a: string | undefined, b: string | undefined) =>
+  String(a ?? "").replace(/\s+/g, " ").trim() === String(b ?? "").replace(/\s+/g, " ").trim();
+
+export function sameLine(a: StockLine, b: StockLine): boolean {
+  return sameKind(a.itemType, b.itemType) && eq(a.item, b.item) && eq(a.client, b.client) && eq(a.loc, b.loc);
+}
+
+/** Same item and owner, ANY place — what a v4 bridge draws on when a سحب names
+ *  no location. */
+export function sameOwnerItem(a: StockLine, b: StockLine): boolean {
+  return sameKind(a.itemType, b.itemType) && eq(a.item, b.item) && eq(a.client, b.client);
+}
+
+/**
+ * The storage sheet's date cell → "YYYY-MM-DD", or "" when it is not a date at
+ * all (a location code has been seen in that column — ITQ0167, 2026-09-02).
+ *
+ * Deliberately NOT lib/dates.ts normalizeDate(): that one juggles the main DB
+ * workbook's two conventions (hand-typed day-first vs Sheets-rendered
+ * month-first) with a padding heuristic. «مخزن اتقان» is built with
+ * setSpreadsheetLocale('en_US') (storage-setup-*.gs → setupAll), so every date
+ * it renders is month-first, and the only other shape is the ISO text the
+ * website itself writes. Two patterns, no guessing.
+ */
+export function storageDate(raw: string | number | undefined | null): string {
+  let s = String(raw ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+       .replace(/[‎‏؜]/g, "");
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ok = (y: number, m: number, d: number) =>
+    y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : "";
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/.exec(s);
+  if (m) return ok(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s.*)?$/.exec(s);
+  if (m) return ok(+m[3], +m[1], +m[2]);
+  return "";
+}
+
+/** The movements that make up one balance line, newest first. Ties (same day)
+ *  fall back to the invoice number, so two saves on one day keep their order. */
+export function historyFor<M extends Movement>(movements: M[], line: StockLine): M[] {
+  return movements
+    .filter((m) => sameLine(m, line))
+    .sort((a, b) =>
+      storageDate(b.date).localeCompare(storageDate(a.date)) || b.num.localeCompare(a.num, "en", { numeric: true }));
+}
+
+/**
+ * Σ deposits − Σ withdrawals of «صافي الكمية».
+ *
+ * This is ALSO what the bridge checks a withdrawal against: `available_()` in
+ * storage-setup-v3.gs re-sums the logs itself and never reads «الرصيد الحالي».
+ * So this figure, not the balance tab's column, is the one that decides whether
+ * a سحب is accepted — and on 2026-09-02 two rows of the balance tab had their
+ * SUMIFS overwritten by hand (a blank «الكمية المضافة» on a line with five
+ * deposits), which is exactly when the two disagree.
+ */
+export function sumNet(movements: Movement[]): number {
+  const t = movements.reduce((acc, m) => acc + (m.log === "سحب" ? -1 : 1) * toNumber(m.net), 0);
+  return Math.round(t * 100) / 100;
+}
+
+/** The other lines of the SAME item and owner — the ones a negative balance is
+ *  usually hiding behind. Excludes the line itself. */
+export function siblingLines<B extends StockLine>(balance: B[], line: StockLine): B[] {
+  return balance.filter((b) =>
+    sameKind(b.itemType, line.itemType) && eq(b.item, line.item) && eq(b.client, line.client) && !eq(b.loc, line.loc));
+}
+
+/** A line whose location differs from this one's only by case — the stale
+ *  `a12`/`A12` pair. The sheet counts them apart; a person should know. */
+export function caseTwin<B extends StockLine>(balance: B[], line: StockLine): B | undefined {
+  return siblingLines(balance, line).find((b) => locKey(b.loc) === locKey(line.loc));
+}
+
+/**
+ * Moving stock between two places is a withdrawal here and a deposit there —
+ * the sheet has no "move", and inventing one would break the balance formula.
+ * Both payloads carry the line's EXACT strings, because that is what the bridge
+ * checks the available balance against; the withdrawal must fail, not silently
+ * succeed against a different line, if the quantity is not really there.
+ *
+ * Products move by piece count (`qtyCount`); materials by weight (`qtyKg`).
+ * `grams` rides along for products so the sheet keeps the piece weight it
+ * already knows — `validate_` only needs it when kg are being converted.
+ */
+export function movePayloads(
+  line: StockLine, toLoc: string, qty: number, date: string, notes: string, grams?: number,
+): [Record<string, unknown>, Record<string, unknown>] {
+  const material = String(line.itemType).trim().startsWith("خام");
+  const base = {
+    action: "save", itemType: material ? "خامة" : "منتج", item: line.item, client: line.client,
+    date, notes, loss: 0,
+    ...(material ? { qtyCount: 0, qtyKg: qty, grams: 0 } : { qtyCount: qty, qtyKg: 0, grams: grams ?? 0 }),
+  };
+  return [
+    { ...base, moveType: "سحب", loc: line.loc },
+    { ...base, moveType: "إيداع", loc: toLoc },
+  ];
 }

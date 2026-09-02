@@ -582,6 +582,54 @@ just that one, and three of them contradict what the code comments used to claim
 
 ## Storage module (المخزن — SEPARATE spreadsheet)
 
+**Easy to use, and every line opens — 2026-09-02, owner's words.** The two verbs a
+storekeeper has — إيداع and سحب — are the two big buttons; the other three actions became
+icons. The four stat tiles FILTER (tap «بدون مكان» → the 67 unfiled lines; tap «بالسالب»
+→ the negatives). The filter selects fold behind a «فلاتر» button on a phone. The item
+dropdown (469 products) has a type-to-narrow box above it — the `<select>` stays strict,
+because `validate_` only checks the name is non-empty and a typo would open a new stock
+line. The room map remembers open/closed in localStorage. And **every line of the balance
+opens** (`components/dashboard/storage-item.tsx`): its movements, each editable; deposit
+here / withdraw from here / **move to another place**; the same item standing elsewhere;
+and two honesty checks — the movements summed against the sheet's figure, and a negative
+line paired with the pile it was almost certainly meant to draw from. A move is two bridge
+writes (سحب then إيداع — the sheet has no "move"); withdraw goes first because it is the
+one the sheet can refuse, and if the deposit then fails the modal shows exactly what landed
+with an undo, rather than retrying blind over an at-least-once bridge.
+
+**Three logic faults found while checking it against the live bridge, all fixed:**
+
+- **Editing a movement from the site re-dated it to TODAY.** The sheet renders dates as
+  «9/2/2026 13:56:27» (its locale is `en_US`, set by `setupAll`) or as the ISO text the site
+  writes; the edit form handed that raw cell to `<input type=date>`, which blanked it, and
+  `webUpdate_` stamps `new Date()` on a blank. `storageDate()` (lib/storage-filter.ts, two
+  patterns, no guessing — NOT `normalizeDate()`, whose padding heuristic is for the main
+  workbook's two conventions) now feeds the form, the tables and the history; an
+  unreadable cell (ITQ0167 holds «A17» where its date should be) is left empty and the save
+  asks for a date instead of inventing one.
+- **«المتوفر» in the form disagreed with what the bridge checks.** The bridge's
+  `available_()` re-sums the LOGS on four exact strings; it never reads «الرصيد الحالي».
+  The form summed the balance tab. Those differ whenever a balance row's formula has been
+  typed over — and two had been (below). `avail`, the drawer's enable/disable and the
+  move's ceiling now all come from `sumNet(historyFor(...))`, the same arithmetic.
+- **Blank location on a withdrawal meant the wrong thing for the deployed bridge.** v3's
+  exact match means «the line filed without a place»; v4's auto-allocation means «every
+  place». The form now says whichever the bridge in front of it does (`blankLocMeansAll`
+  = the v4 probe), and the hint under the field changes with it.
+
+**Live shape on 2026-09-02** (the 30-Aug numbers below are superseded): 117 balance
+lines, 162 deposits, 58 withdrawals, entries from that same day — the storekeeper is
+using it. **67 of 117 lines have no location.** Two lines are negative: «كوبوليمر» (اتقان,
+no place, −195 — while A12 holds 720 of the same; a withdrawal filed without the place) and
+«غطاء احمر بروبلين 58» (اشرف عوض, −5,100). **That second one is the sheet lying, not the
+stock:** its «الكمية المضافة» cell renders as an EMPTY STRING on a line with five deposits
+totalling 72,600, and a live SUMIFS never renders blank (zero shows as «0» on every other
+row) — the formula in F on that row, and F on the «غطاء أحمر جديد» row above it (shows
+1,500 against one 500 deposit), were overwritten by hand. The bridge, which sums the logs,
+still holds 67,500 for it. Owner item 8 in `../CLAUDE.md`. On the remaining 115 lines the
+movements sum to the sheet's figure exactly, and all 220 movements belong to a line
+(checked through the bridge, script in the 2026-09-02 session).
+
 **Finding things — 2026-08-30.** `/dashboard/storage` had one text box matching four
 fields, in a room that is 55 slots deep. The two questions a storekeeper actually asks —
 «what is standing in A12» and «where is this item» — were both unanswerable on the page.

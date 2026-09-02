@@ -13,9 +13,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, locGroup, locKey,
-  matchesTerms, normalizeText, parseSlot, pillarOf, sameLocation, searchTerms, toNumber,
-  whereIs,
+  NO_LOCATION, buildFloorPlan, caseTwin, collectLocations, compareLocKey, historyFor,
+  locGroup, locKey, matchesTerms, movePayloads, normalizeText, parseSlot, pillarOf,
+  sameLine, sameLocation, sameOwnerItem, searchTerms, siblingLines, storageDate, sumNet,
+  toNumber, whereIs,
 } from "../lib/storage-filter.ts";
 
 /* --------------------------------- search --------------------------------- */
@@ -209,4 +210,88 @@ test("floor areas, named places and the unfiled bucket sit outside the columns",
   assert.equal(plan.unfiled?.lines, 1);
   // …and none of them leaked into a column
   assert.deepEqual(plan.lines.map((l) => l.line), ["A"]);
+});
+
+/* ------------------------------- the stock line ------------------------------ */
+
+const mv = (log: "إيداع" | "سحب", num: string, date: string, net: string, loc = "A12", client = "اتقان", item = "كوبوليمر", itemType = "خامة") =>
+  ({ log, num, date, net, loc, client, item, itemType });
+
+test("the sheet's three date shapes all normalise, and a location in the date cell does not", () => {
+  assert.equal(storageDate("9/2/2026 13:56:27"), "2026-09-02");   // Sheets, en_US locale
+  assert.equal(storageDate("7/19/2026 0:00:00"), "2026-07-19");
+  assert.equal(storageDate("2026-09-02"), "2026-09-02");           // written as text
+  assert.equal(storageDate("A17"), "");                            // ITQ0167, live on 2026-09-02
+  assert.equal(storageDate(undefined), "");
+});
+
+test("a line's movements match on all four keys EXACTLY, the way the sheet sums them", () => {
+  const line = { itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "A12" };
+  assert.equal(sameLine(mv("إيداع", "ITQ0001", "2026-07-01", "720"), line), true);
+  // a blank location is a DIFFERENT line — that is how the −195 came to exist
+  assert.equal(sameLine(mv("سحب", "ITQ0002", "2026-08-01", "195", ""), line), false);
+  // and so is the lowercase twin: the sheet does not fold case, so neither may this
+  assert.equal(sameLine(mv("إيداع", "ITQ0003", "2026-08-01", "5", "a12"), line), false);
+  // whitespace is the one thing forgiven — lib/storage.ts collapses it on both sides
+  assert.equal(sameLine(mv("إيداع", "ITQ0004", "2026-08-01", "5", " A12 "), line), true);
+  // product vs material is a key too
+  assert.equal(sameLine(mv("إيداع", "ITQ0005", "2026-08-01", "5", "A12", "اتقان", "كوبوليمر", "منتج"), line), false);
+  // the "any place" variant a v4 bridge uses ignores only the location
+  assert.equal(sameOwnerItem(mv("سحب", "ITQ0002", "2026-08-01", "195", ""), line), true);
+  assert.equal(sameOwnerItem(mv("سحب", "ITQ0002", "2026-08-01", "195", "", "ميجا"), line), false);
+});
+
+test("history is newest first, with the invoice number breaking same-day ties", () => {
+  const line = { itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "A12" };
+  const rows = [
+    mv("إيداع", "ITQ0001", "7/1/2026 0:00:00", "720"),
+    mv("سحب", "ITQ0010", "2026-09-02", "40"),
+    mv("سحب", "ITQ0009", "9/2/2026 13:56:27", "10"),
+    mv("إيداع", "ITQ0002", "2026-08-01", "100", ""),   // other line — excluded
+  ];
+  assert.deepEqual(historyFor(rows, line).map((m) => m.num), ["ITQ0010", "ITQ0009", "ITQ0001"]);
+});
+
+test("sumNet is Σ deposits − Σ withdrawals of the net column, two decimals", () => {
+  assert.equal(sumNet([
+    mv("إيداع", "1", "2026-01-01", "1,120"),
+    mv("سحب", "2", "2026-01-02", "40"),
+    mv("سحب", "3", "2026-01-03", "0.5"),
+  ]), 1079.5);
+  assert.equal(sumNet([]), 0);
+});
+
+test("siblings are the same item and owner elsewhere; the case twin is the a12/A12 pair", () => {
+  const bal = [
+    { itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "A12", avail: "720" },
+    { itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "", avail: "-195" },
+    { itemType: "خامة", item: "كوبوليمر", client: "ميجا", loc: "B11", avail: "5" },    // other owner
+    { itemType: "منتج", item: "EXT 57L", client: "الكترو فود", loc: "a12", avail: "1000" },
+    { itemType: "منتج", item: "EXT 57L", client: "الكترو فود", loc: "A12", avail: "3" },
+  ];
+  const neg = bal[1];
+  assert.deepEqual(siblingLines(bal, neg).map((b) => b.loc), ["A12"]);
+  assert.equal(caseTwin(bal, neg), undefined);
+  assert.equal(caseTwin(bal, bal[3])?.loc, "A12");
+});
+
+test("a move is one withdrawal here and one deposit there, on the line's exact strings", () => {
+  const line = { itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "" };
+  const [out, inn] = movePayloads(line, "A13", 150, "2026-09-02", "نقل");
+  assert.equal(out.moveType, "سحب");
+  assert.equal(out.loc, "");          // the blank-location line, exactly — not "all"
+  assert.equal(out.qtyKg, 150);
+  assert.equal(out.qtyCount, 0);
+  assert.equal(inn.moveType, "إيداع");
+  assert.equal(inn.loc, "A13");
+  assert.equal(inn.qtyKg, 150);
+  assert.equal(inn.itemType, "خامة");
+
+  // products move by count and carry the known piece weight along
+  const p = { itemType: "منتج", item: "محقن احمر", client: "الهندي", loc: "" };
+  const [po, pi] = movePayloads(p, "F1", 200, "2026-09-02", "", 11);
+  assert.equal(po.qtyCount, 200);
+  assert.equal(po.qtyKg, 0);
+  assert.equal(pi.grams, 11);
+  assert.equal(pi.itemType, "منتج");
 });
