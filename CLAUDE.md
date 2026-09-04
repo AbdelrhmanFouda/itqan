@@ -35,11 +35,54 @@ npm run build        # production build — ALSO the type gate; Vercel runs this
 npx tsc --noEmit     # quick typecheck
 npm test             # Node's own runner, zero deps. `tests/` is excluded from
                      # tsconfig on purpose — it needs the .ts import extension
+npm run smoke        # HTTP smoke against a RUNNING site (default localhost:3000):
+                     #   --base=https://itqan-taupe.vercel.app  --token=<ID token>
+                     # pages in both languages, open reads, 401 on every guarded
+                     # read and every write, and (with a token) the signed-in half
 npm run seed         # (legacy Firestore seed — rarely needed now)
 ```
 
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
+
+## Recently landed (2026-09-04) — the mould number, the worker's register, the view tests
+
+Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves:
+
+- **The mould number has ONE rule: `lib/mold-number.ts`.** «الرئيسي»!D «كود الاسطمبة»
+  (201 rows, always a bare number, eleven of them repeated across customers), else the
+  customer's number written in Q «ملاحظات» (26 rows — `HD16713`, `QH190032`, `201907`;
+  three of them have no code at all). Read the notes conservatively — «قديم», a weight
+  derivation, a date must never read as a number. Every surface imports
+  `resolveMoldNumber()` / `moldNumberIndex()`; nobody re-derives it.
+- **`GET /api/molds` reads Master for the register** (guarded, any approved role;
+  `PATCH` any approved role too — owner's word, "editing for everyone" — row located by
+  NAME on a fresh read, name not editable). The «الاسطمبات» view has no notes column,
+  which is why the register no longer reads it. `/dashboard/molds` is
+  `components/dashboard/molds-register.tsx`, no longer the generic `SheetSection`.
+- **`worker` opens `/dashboard/molds`** and may edit rows there like every other role
+  (`canEdit` still arrives from the API, never from the client). Its pages: downtime,
+  issues, assistant, molds.
+- **Master is located by NAME ONLY — `lib/master-lookup.ts`.** `GET /api/jobs/[id]` used
+  to match "mould code OR name, first row wins" and showed the WRONG product's standard
+  for 5 of the 10 live work orders (customers number their tool sets from 1, so codes
+  repeat). The job route (read + the Master-standard write) and the register's PATCH use
+  the helper; `identity_mismatch` on a duplicated name, never a guess.
+- **Production / Quality rows are labelled by the PRODUCT NAME** + the mould number.
+  They were labelled by the run's «كود الاسطمبة», which is empty on all 963 rows — every
+  row read «—» until today.
+- **`lib/sheet-entities.ts`** now holds `ENTITIES` + the header helpers (pure, zero
+  imports; `lib/sheets.ts` re-exports, importers unchanged), so `tests/sheet-entities.
+  test.ts` can pin every field ↔ column against the REAL header rows of all nine tabs,
+  both directions. It found «تسمية الماكينة» (J, computed) being claimed by `name` on an
+  append — "Add machine" wrote the tonnage over the label formula; a `label` decoy field
+  before `name` now takes that header. Master gained `client`, `category`, `notes` fields.
+- **Seven new test files** — the view matrix (`views-matrix`), every API handler's guard
+  classification checked against its source (`api-guards`), every page fetch against the
+  guards (`page-fetches`), the header mapping (`sheet-entities`), en/ar shape
+  (`i18n-shape`), `mold-number`, `master-lookup` — 171 → 243 checks. A new route file,
+  handler, dashboard page or NAV key FAILS until it is classified: that is the point.
+- **`scripts/smoke.mjs`** — the running site from outside; see Commands.
 
 ## Recently landed (2026-08-28) — leak closures + front-door fixes
 
@@ -158,6 +201,14 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   `identity_mismatch` rather than writing when the name is missing or duplicated (one
   product, «سماعة اريون», is genuinely duplicated in Master at rows 289 and 453).
   Clearing the `#REF!` rows is still the owner's job in the sheet.
+- `lib/sheet-entities.ts` — `ENTITIES` + `normHeader`/`colIndex`/`findHeaderRow`/
+  `splitLabel`/`clean`, moved out of `lib/sheets.ts` on 2026-09-04 (pure, zero imports,
+  re-exported from sheets.ts). `tests/sheet-entities.test.ts` pins every field ↔ column
+  against the real header rows — paste a new header row there when the workbook changes.
+- `lib/mold-number.ts` — THE mould-number rule (D «كود الاسطمبة», else the notes) and
+  `moldKey()`, the product-name join key. `lib/master-lookup.ts` — the Master row for a
+  product, by NAME only (`masterRowByName` refuses duplicates for writes;
+  `masterRowForDisplay` flags them for reads). Both pure, both unit-tested on live data.
 - `lib/oee.ts` (pure) + `lib/oee-data.ts` (fetch+shape, shared by `/api/oee` and
   `/api/ai-review`) — OEE = Availability × Performance × Quality with per-run capping.
 - `lib/scrap.ts` — `resolveScrap(row)` reads a run's scrap off its OWN «الإنتاج» row:
@@ -179,7 +230,7 @@ sidebar and `canAccess()`.
 
 | Role | Pages |
 |---|---|
-| `worker` (عامل) | downtime, issues, assistant |
+| `worker` (عامل) | downtime, issues, assistant, **molds** (added 2026-09-04, owner's word; editing open to every role) |
 | `production` | overview, production, jobs, downtime, performance, assistant, issues |
 | `quality` | overview, quality, issues, performance, assistant |
 | `maintenance` | machines, downtime, issues |
@@ -841,6 +892,11 @@ own «المتوقع». It is a domain question that outlived the feature.
   follow the same pair. Operational reads (sheet molds/products/machines/runs/oee/issues
   list) stay open deliberately — **that list is exhaustive: a read not on it is either
   guarded or it is a leak**, which is exactly how jobs and storage sat open for weeks.
+  `/api/molds` (Master for the register, 2026-09-04) is GUARDED — any approved role
+  reads and writes (owner's word). `tests/api-guards.test.ts` pins every route file and
+  handler's classification against its own source, and `tests/page-fetches.test.ts`
+  pins that no page calls a guarded endpoint without a token — a new route, handler or
+  token-less fetch fails the suite until it is classified.
   `/api/public/showcase` returns the three counts ONLY — it served 30 real product names
   and the full client list until 2026-08-28, after the landing page itself had stopped
   showing names (90ab433). The Firestore-era `/api/clients*`, `/api/molds*` and

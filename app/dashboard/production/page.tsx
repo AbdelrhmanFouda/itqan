@@ -2,18 +2,23 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
+import { moldKey } from "@/lib/mold-number";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
+  // «أسم المنتج» — the join key everywhere. «كود الاسطمبة» (mold) is empty on
+  // every one of the sheet's rows, so this is what names the row.
+  product: string;
   plannedMin: number; goodUnits: number; scrapUnits: number;
   downtimeMin: number; downtimeReason: string; operator: string; note: string;
 };
-type Mold = { row: number; code?: string; name?: string };
+// From GET /api/molds (Master): `number` is the mould number — D, else the notes.
+type Mold = { row: number; code?: string; name?: string; number?: string; notesNumber?: string };
 // Physical machine from the registry — `label` ("PQPI 4 — 220") is the unique
 // identity written to the production tab's machine-code column.
 type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
@@ -48,11 +53,13 @@ export default function ProductionPage() {
   const load = useCallback(async () => {
     const [r, mo, ma] = await Promise.all([
       fetch("/api/runs").then((x) => x.json()).catch(() => []),
-      fetch("/api/sheet/molds").then((x) => x.json()).catch(() => ({ records: [] })),
+      // Master (guarded) rather than the open «الاسطمبات» view: only Master
+      // carries the notes column where 26 products keep their mould number.
+      authedFetch("/api/molds").then((x) => x.json()).catch(() => ({ molds: [] })),
       fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
     ]);
     setRuns(Array.isArray(r) ? r : []);
-    setMolds(mo.records ?? []);
+    setMolds(Array.isArray(mo.molds) ? mo.molds : []);
     setMachines(ma.machines ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -116,6 +123,16 @@ export default function ProductionPage() {
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
   const moldLabel = (key: string) =>
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
+  // Until 2026-09-04 the rows were labelled by moldLabel(r.mold) alone, and
+  // «كود الاسطمبة» is empty on every row of «الإنتاج» — so every row read «—».
+  // The product name is what the sheet actually fills in.
+  const productOf = (r: Run) => r.product || moldLabel(r.mold);
+  const numberByName = useMemo(() => {
+    const map = new Map<string, Mold>();
+    for (const m of molds) { const k = moldKey(m.name); if (k && !map.has(k)) map.set(k, m); }
+    return map;
+  }, [molds]);
+  const numberOf = (r: Run) => numberByName.get(moldKey(r.product))?.number || "";
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
 
   const scope = (runs ?? []).filter((r) => (period === "all" ? true : (r.date || "").startsWith(ym)));
@@ -167,7 +184,14 @@ export default function ProductionPage() {
           {(runs ?? []).map((r) => (
             <div key={r.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
               <div className="flex items-center justify-between gap-3 min-w-0">
-                <span className="font-medium text-gray-900 leading-snug min-w-0 truncate">{moldLabel(r.mold)}</span>
+                <span className="font-medium text-gray-900 leading-snug min-w-0 truncate">
+                  {productOf(r)}
+                  {numberOf(r) ? (
+                    <span className="ms-2 text-xs font-normal text-gray-500 whitespace-nowrap">
+                      {p.runs.moldNumber} <span dir="ltr" className="font-mono">{numberOf(r)}</span>
+                    </span>
+                  ) : null}
+                </span>
                 <button
                   onClick={() => handleDelete(r.id)}
                   aria-label={p.common.delete}
@@ -204,6 +228,7 @@ export default function ProductionPage() {
                 <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.date}</th>
                 <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.shift}</th>
                 <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.mold}</th>
+                <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.moldNumber}</th>
                 <th className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.machine}</th>
                 <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.good}</th>
                 <th className="text-end px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{p.runs.scrap}</th>
@@ -217,7 +242,8 @@ export default function ProductionPage() {
                 <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap tabular-nums" dir="ltr">{r.date}</td>
                   <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{moldLabel(r.mold)}</td>
+                  <td className="px-4 py-3 font-medium text-gray-800">{productOf(r)}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono tabular-nums whitespace-nowrap" dir="ltr">{numberOf(r) || "—"}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap" dir="ltr">{r.machineCode || r.machine || "—"}</td>
                   <td className="px-4 py-3 text-green-600 font-medium text-end tabular-nums">{fmt(r.goodUnits)}</td>
                   <td className="px-4 py-3 text-red-500 text-end tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>

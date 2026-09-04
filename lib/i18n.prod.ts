@@ -81,6 +81,11 @@ export const pd = {
       client: "Client",
       part: "Part",
       mold: "Mold",
+      // Master's mould number (D «كود الاسطمبة», else the notes) — shown
+      // beside the product since 2026-09-04. Distinct from the work order's
+      // own «كود الاسطمبة», which is the customer's number.
+      moldNumber: "Mould number",
+      moldNumberNotes: "from the notes",
       machine: "Machine",
       qtyOrdered: "Qty Ordered",
       qtyOrderedKg: "Qty Ordered (kg)",
@@ -124,6 +129,7 @@ export const pd = {
       job: "Job",
       shift: "Shift",
       mold: "Mold",
+      moldNumber: "Mould no.",
       machine: "Machine",
       planned: "Planned (min)",
       shifts: ["Day", "Night"],
@@ -284,6 +290,8 @@ export const pd = {
       client: "العميل",
       part: "القطعة",
       mold: "القالب",
+      moldNumber: "رقم الاسطمبة",
+      moldNumberNotes: "من الملاحظات",
       machine: "الماكينة",
       qtyOrdered: "الكمية المطلوبة",
       qtyOrderedKg: "الكمية المطلوبة (كجم)",
@@ -329,6 +337,7 @@ export const pd = {
       job: "الأمر",
       shift: "الوردية",
       mold: "الاسطمبة",
+      moldNumber: "رقم الاسطمبة",
       machine: "الماكينة",
       planned: "الزمن المخطط (د)",
       shifts: ["نهارية", "ليلية"],

@@ -84,7 +84,11 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/quality", key: "quality", roles: ["quality"] },
   { href: "/dashboard/sales", key: "sales", roles: ["sales"] },
   { href: "/dashboard/machines", key: "machines", roles: ["maintenance"] },
-  { href: "/dashboard/molds", key: "molds", roles: [] }, // owner + manager only
+  // The mould register is the floor's too: a worker at the press needs the
+  // mould number for the product in front of them, and may correct the row
+  // (owner's word, 2026-09-04: "allow for editing for everyone"). This entry
+  // only decides who can OPEN the page; /api/molds guards the write.
+  { href: "/dashboard/molds", key: "molds", roles: ["worker"] },
   { href: "/dashboard/products", key: "products", roles: ["sales"] },
   { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
   { href: "/dashboard/production", key: "production", roles: ["production"] },

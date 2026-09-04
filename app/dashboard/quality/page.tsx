@@ -1,6 +1,6 @@
 "use client";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
@@ -8,14 +8,18 @@ import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { Plus } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { moldKey } from "@/lib/mold-number";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
+  // «أسم المنتج» — what the sheet fills in; «كود الاسطمبة» (mold) never is.
+  product: string;
   plannedMin: number; goodUnits: number; scrapUnits: number;
   downtimeMin: number; downtimeReason: string; operator: string; note: string;
 };
 type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
-type Mold = { row: number; code?: string; name?: string };
+// From GET /api/molds (Master): `number` is the mould number — D, else the notes.
+type Mold = { row: number; code?: string; name?: string; number?: string; notesNumber?: string };
 
 export default function QualityPage() {
   const { lang } = useLang();
@@ -47,11 +51,12 @@ export default function QualityPage() {
     const [r, m, mo] = await Promise.all([
       fetch("/api/runs").then((x) => x.json()).catch(() => []),
       fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
-      fetch("/api/sheet/molds").then((x) => x.json()).catch(() => ({ records: [] })),
+      // Master (guarded) rather than the open view — see the production page.
+      authedFetch("/api/molds").then((x) => x.json()).catch(() => ({ molds: [] })),
     ]);
     setRuns(Array.isArray(r) ? r : []);
     setMachines(m.machines ?? []);
-    setMolds(mo.records ?? []);
+    setMolds(Array.isArray(mo.molds) ? mo.molds : []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -102,6 +107,15 @@ export default function QualityPage() {
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
   const moldLabel = (key: string) =>
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
+  // The product name is what the sheet fills in (mold is empty on every row,
+  // so moldLabel alone rendered «—» everywhere until 2026-09-04).
+  const productOf = (r: Run) => r.product || moldLabel(r.mold);
+  const numberByName = useMemo(() => {
+    const map = new Map<string, Mold>();
+    for (const m of molds) { const k = moldKey(m.name); if (k && !map.has(k)) map.set(k, m); }
+    return map;
+  }, [molds]);
+  const numberOf = (r: Run) => numberByName.get(moldKey(r.product))?.number || "";
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
 
   if (runs === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
@@ -151,7 +165,9 @@ export default function QualityPage() {
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  {moldLabel(r.mold)}{r.shift ? ` · ${shiftLabel(r.shift)}` : ""}
+                  {productOf(r)}
+                  {numberOf(r) ? <> · {p.runs.moldNumber} <span dir="ltr" className="font-mono">{numberOf(r)}</span></> : null}
+                  {r.shift ? ` · ${shiftLabel(r.shift)}` : ""}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
                   <span className="text-green-600 font-medium">{fmt(r.goodUnits)} ✓</span>
@@ -193,7 +209,10 @@ export default function QualityPage() {
                 return (
                   <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap" dir="ltr">{r.machineCode || r.machine || "—"}</td>
-                    <td className="px-4 py-3 text-gray-500">{moldLabel(r.mold)}</td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {productOf(r)}
+                      {numberOf(r) ? <span dir="ltr" className="ms-2 font-mono text-xs text-gray-400">{numberOf(r)}</span> : null}
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
                     <td className="px-4 py-3 text-green-600 font-medium text-end tabular-nums">{fmt(r.goodUnits)}</td>
                     <td className="px-4 py-3 text-red-500 text-end tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import SheetSection from "@/components/dashboard/SheetSection";
+import MoldsRegister from "@/components/dashboard/molds-register";
 import { LANG_COOKIE, langFromValue } from "@/lib/lang-cookie";
 
 // The one heading this page shows — reused for the tab title so they can't drift.
@@ -13,12 +13,14 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: TITLE[lang] };
 }
 
+// Since 2026-09-04 the register reads «الرئيسي» itself (GET /api/molds) rather
+// than the «الاسطمبات» view, so it can show the MOULD NUMBER even when the
+// sheet keeps it in the notes column — and the worker role can open it.
 export default function MoldsPage() {
   return (
-    <SheetSection
-      entity="molds"
+    <MoldsRegister
       title={TITLE}
-      subtitle={{ en: "Live from your molds sheet", ar: "مباشرةً من جدول الاسطمبات" }}
+      subtitle={{ en: "Every mould and its number — live from Master", ar: "كل اسطمبة ورقمها — مباشرةً من الرئيسي" }}
     />
   );
 }

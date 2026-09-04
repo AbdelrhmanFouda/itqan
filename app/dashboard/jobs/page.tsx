@@ -27,6 +27,8 @@ type Job = {
   produced: number; scrapped: number; remaining: number;
   linked: boolean; ambiguous: boolean; pieceWeightG: number; cavities: number; cycleSec: number;
   material: string; estHours: number;
+  // Master's mould number for the product ("" when Master has none).
+  masterMoldNumber: string; masterMoldNotesNumber: string;
 };
 type Data = { jobs: Job[]; writable: boolean; configured: boolean };
 type Mold = { row: number; code?: string; name?: string };
@@ -166,7 +168,13 @@ export default function JobsPage() {
                       {j.ambiguous && <Pill text={p.jobs.ambiguous} tone="amber" />}
                     </div>
                     <p className="text-xs text-gray-500 mt-1 truncate">
-                      {[j.client, j.product, j.machine].filter(Boolean).join(" · ") || "—"}
+                      {[
+                        j.client,
+                        // The product with Master's mould number beside it,
+                        // so the floor can find the tool from the job card.
+                        j.product && j.masterMoldNumber ? `${j.product} (${p.jobs.moldNumber} ${j.masterMoldNumber})` : j.product,
+                        j.machine,
+                      ].filter(Boolean).join(" · ") || "—"}
                     </p>
                     {/* Shows the kg→pieces working, so the number is never a black box. */}
                     <p className="text-[11px] text-gray-400 mt-0.5 truncate tabular-nums">

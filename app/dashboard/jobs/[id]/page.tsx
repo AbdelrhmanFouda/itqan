@@ -35,6 +35,9 @@ type Standard = {
   row: number; name: string; cavitiesRaw: string; cycleRaw: string;
   weight: string; material: string; cavities: number | null; cycleSec: number | null;
   defects: string; ratePerHour: number | null; ratePerShift12h: number | null;
+  // Master's MOULD NUMBER (D, else the notes) — lib/mold-number.ts.
+  moldNumber: string; moldNumberSource: "code" | "notes" | "none"; moldNotesNumber: string;
+  notes: string; ambiguous: boolean;
 };
 type Run = {
   id: string; date: string; machine: string;
@@ -347,6 +350,20 @@ export default function JobDetailPage() {
         <div className="grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm">
           <Detail label={p.jobs.part} value={job.product || "—"} />
           <Detail label={isAr ? "كود الاسطمبة" : "Mold code"} value={job.moldCode || "—"} />
+          {/* Master's own number for this product — not the customer's code
+              above. From the notes when that is where the sheet keeps it. */}
+          <Detail
+            label={p.jobs.moldNumber}
+            value={
+              !standard?.moldNumber
+                ? "—"
+                : standard.moldNumberSource === "notes"
+                  ? `${standard.moldNumber} (${p.jobs.moldNumberNotes})`
+                  : standard.moldNotesNumber
+                    ? `${standard.moldNumber} · ${standard.moldNotesNumber}`
+                    : standard.moldNumber
+            }
+          />
           <Detail label={p.jobs.machine} value={job.machine || "—"} />
           <Detail label={startLabel} value={job.startDate || "—"} />
           <Detail

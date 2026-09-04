@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, updateRecord, deleteRecord } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
-import { latinDigits } from "@/lib/dates";
 import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
+import { resolveMoldNumber } from "@/lib/mold-number";
+import { masterRowByName, masterRowForDisplay } from "@/lib/master-lookup";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
@@ -13,8 +14,6 @@ const num = (v: unknown) => {
   const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : 0;
 };
-const normKey = (s: string | undefined) =>
-  latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
 // Guarded like the jobs list (2026-08-28): the detail carries the client, the
 // ordered quantity and the Master standard — not an open operational read.
@@ -27,16 +26,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const job = jobs.find((j) => j.id === id);
     if (!job) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-    // Master standard for this product (matched by mold code or name).
-    const keys = new Set([normKey(job.moldCode), normKey(job.product)].filter(Boolean));
-    const m = master.records.find(
-      (r) => keys.has(normKey(r.code)) || keys.has(normKey(r.name)),
-    );
+    // Master standard for this product — matched by product NAME ONLY.
+    // Until 2026-09-04 this also matched the job's mould code against Master's
+    // code column, first row wins, and for five of the ten live work orders
+    // that returned ANOTHER customer's product: «زراير» (code 6) was shown
+    // «عدسه شفاف»'s standard, code 6 of المصرية الذكية, and the edit button
+    // would have written to that row. Customers number their own tool sets
+    // from 1, so codes repeat across Master; the name is the only identity.
+    const found = masterRowForDisplay(master.records, job.product);
+    const m = found.row;
     let standard = null;
     if (m) {
       const cycleSec = num(m.cycle), cavities = num(m.cavities);
       const perHour = cycleSec > 0 && cavities > 0 ? (3600 / cycleSec) * cavities : null;
+      const mn = resolveMoldNumber({ code: m.code, notes: m.notes });
       standard = {
+        // The MOULD NUMBER as Master holds it (D «كود الاسطمبة», else the
+        // customer's number from the notes) — distinct from the work order's
+        // own «كود الاسطمبة», which is whatever the customer wrote on it.
+        moldNumber: mn.number,
+        moldNumberSource: mn.source,
+        moldNotesNumber: mn.notesNumber,
+        notes: m.notes || "",
+        // The name matches more than one Master row: the standard shown is the
+        // first row's and may belong to a different product with that name.
+        ambiguous: found.ambiguous,
         // The Master row + raw cell text, so the page can offer an EDIT of the
         // product's standard. Master's numeric columns are free text on purpose
         // («4+4», «15جم», «تحتسب ورديات») — the edit must round-trip the raw
@@ -95,14 +109,12 @@ async function updateMasterStandard(m: { row?: unknown; name?: unknown; changes?
   if (Object.keys(changes).length === 0) return { ok: true };
 
   const master = await getRecords("master", { fresh: true });
-  const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-  let target = master.records.find((r) => r.row === row && norm(r.name) === norm(name));
-  if (!target) {
-    const hits = master.records.filter((r) => norm(r.name) === norm(name));
-    if (hits.length !== 1) return { ok: false, reason: "identity_mismatch" };
-    target = hits[0];
-  }
-  return updateRecord("master", target.row, changes);
+  // The same name-only rule the register's PATCH uses (lib/master-lookup.ts):
+  // the held row wins while it still carries the name, else exactly one row
+  // by name, else refuse.
+  const target = masterRowByName(master.records, name, row);
+  if (!target.ok) return { ok: false, reason: target.reason === "no_name" ? "no_name" : "identity_mismatch" };
+  return updateRecord("master", target.row.row, changes);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -8,6 +8,7 @@ import {
   buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
 } from "@/lib/run-join";
 import { sumCavities } from "@/lib/cavities";
+import { resolveMoldNumber } from "@/lib/mold-number";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
@@ -90,6 +91,12 @@ export type JobShaped = {
   cycleSec: number;
   material: string;
   estHours: number;      // pieces × cycle ÷ (3600 × cavities)
+  /** The MOULD NUMBER from Master (D «كود الاسطمبة», else the customer's
+   *  number in the notes — lib/mold-number.ts), "" when Master has none.
+   *  Distinct from `moldCode`, which is what the customer wrote on the work
+   *  order and repeats across customers. */
+  masterMoldNumber: string;
+  masterMoldNotesNumber: string;
 };
 
 const DONE = new Set(["Completed", "Delivered"]);
@@ -117,7 +124,7 @@ export async function loadJobs(): Promise<{
   // Product → standards, first row wins (same as the sheet's VLOOKUP) — and a
   // count per name, because "first row wins" is only honest while the name is
   // unique. Names that appear twice get flagged on the job (`ambiguous`).
-  const std = new Map<string, { w: number; cav: number; cyc: number; mat: string }>();
+  const std = new Map<string, { w: number; cav: number; cyc: number; mat: string; moldNumber: string; moldNotesNumber: string }>();
   const nameCount = new Map<string, number>();
   for (const m of masterTab.records) {
     // NOTE: the master entity calls the product column `name`, not `product`.
@@ -125,11 +132,14 @@ export async function loadJobs(): Promise<{
     if (!key) continue;
     nameCount.set(key, (nameCount.get(key) ?? 0) + 1);
     if (std.has(key)) continue;
+    const mn = resolveMoldNumber({ code: m.code, notes: m.notes });
     std.set(key, {
       w: firstNum(m.weight),
       cav: sumCavities(m.cavities),
       cyc: firstNum(m.cycle),
       mat: m.material || "",
+      moldNumber: mn.number,
+      moldNotesNumber: mn.notesNumber,
     });
   }
 
@@ -216,6 +226,8 @@ export async function loadJobs(): Promise<{
       cavities: s?.cav ?? 0,
       cycleSec: s?.cyc ?? 0,
       material: s?.mat ?? "",
+      masterMoldNumber: s?.moldNumber ?? "",
+      masterMoldNotesNumber: s?.moldNotesNumber ?? "",
       estHours:
         pieces > 0 && s && s.cyc > 0 && s.cav > 0
           ? Math.round((pieces * s.cyc * 10) / (3600 * s.cav)) / 10

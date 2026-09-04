@@ -44,16 +44,28 @@ test("worker exists, is requestable, and is the approval default", () => {
   assert.ok(!REQUESTABLE_ROLES.includes("owner"), "owner is never requestable");
 });
 
-test("worker sees exactly downtime, issues, assistant", () => {
+test("worker sees exactly downtime, issues, assistant, molds", () => {
   // Was four pages until 2026-08-27: «تسجيل الإنتاج» was removed from the
   // workbook, so /dashboard/hourly — which rendered that tab and nothing else —
   // went with it. Downtime is still the worker's landing page.
-  assert.deepEqual(keysFor("worker").sort(), ["assistant", "downtime", "issues"]);
+  // Molds was ADDED on 2026-09-04 at the owner's word: the floor reads the
+  // mould register for the number of the mould in front of them.
+  assert.deepEqual(keysFor("worker").sort(), ["assistant", "downtime", "issues", "molds"]);
+});
+
+test("worker can open the mould register — decided here; the write is guarded in /api/molds (any approved role)", () => {
+  assert.ok(canAccess("worker", "/dashboard/molds"));
+  // The register is the ONLY page the worker gained; nothing else came with it.
+  for (const role of ["production", "quality", "sales", "finance", "maintenance", "storage"] as Role[]) {
+    assert.equal(canAccess(role, "/dashboard/molds"), false, `${role} was not given the register`);
+  }
 });
 
 test("worker cannot reach the pages it was not given", () => {
   for (const href of ["/dashboard", "/dashboard/production", "/dashboard/jobs", "/dashboard/performance",
-                      "/dashboard/quality", "/dashboard/storage", "/dashboard/reports", "/dashboard/approvals"]) {
+                      "/dashboard/quality", "/dashboard/storage", "/dashboard/reports", "/dashboard/approvals",
+                      "/dashboard/machines", "/dashboard/products", "/dashboard/clients", "/dashboard/finance",
+                      "/dashboard/sales"]) {
     assert.equal(canAccess("worker", href), false, `worker should not access ${href}`);
   }
 });
