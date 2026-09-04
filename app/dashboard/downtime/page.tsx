@@ -8,6 +8,7 @@ import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
 import { hasFullAccess } from "@/lib/roles";
+import { LOCALE_AR } from "@/lib/format";
 
 /**
  * PHASE 2 — downtime capture, built for a phone on the factory floor.
@@ -296,8 +297,8 @@ export default function DowntimePage() {
       <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 max-w-sm">
-        <Stat label={t.todayMinutes} value={todayLoaded ? lostToday.toLocaleString("ar-EG") : "…"} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
-        <Stat label={t.todayEvents} value={todayLoaded ? todayList.length.toLocaleString("ar-EG") : "…"} />
+        <Stat label={t.todayMinutes} value={todayLoaded ? lostToday.toLocaleString(LOCALE_AR) : "…"} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
+        <Stat label={t.todayEvents} value={todayLoaded ? todayList.length.toLocaleString(LOCALE_AR) : "…"} />
       </div>
 
       {failed && (
@@ -447,7 +448,7 @@ export default function DowntimePage() {
                   </div>
                 </div>
                 <div className="text-lg font-bold text-gray-900 shrink-0 tabular-nums">
-                  {e.minutes.toLocaleString("ar-EG")} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
+                  {e.minutes.toLocaleString(LOCALE_AR)} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
                 </div>
               </div>
             ))}
@@ -462,7 +463,7 @@ export default function DowntimePage() {
       {isBoss && others !== null && (
         <section className="mt-10">
           <h2 className="text-sm font-semibold text-gray-500 mb-1">
-            {t.reclassTitle}{others.length > 0 ? ` (${others.length.toLocaleString("ar-EG")})` : ""}
+            {t.reclassTitle}{others.length > 0 ? ` (${others.length.toLocaleString(LOCALE_AR)})` : ""}
           </h2>
           <p className="text-sm text-gray-500 mb-3">{t.reclassBody}</p>
           {reclassErr && (
@@ -487,7 +488,7 @@ export default function DowntimePage() {
                       <div className="text-sm text-gray-500">{r.date}</div>
                     </div>
                     <div className="text-lg font-bold text-gray-900 shrink-0 tabular-nums">
-                      {r.minutes.toLocaleString("ar-EG")} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
+                      {r.minutes.toLocaleString(LOCALE_AR)} <span className="text-sm font-normal text-gray-500">{t.minutes}</span>
                     </div>
                   </button>
                   {reclassRow === r.row && (

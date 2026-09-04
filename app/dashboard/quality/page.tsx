@@ -9,6 +9,7 @@ import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/compon
 import { Plus } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { moldKey } from "@/lib/mold-number";
+import { LOCALE_AR } from "@/lib/format";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -48,15 +49,13 @@ export default function QualityPage() {
   const [form, setForm] = useState(blank());
 
   const load = useCallback(async () => {
-    const [r, m, mo] = await Promise.all([
-      fetch("/api/runs").then((x) => x.json()).catch(() => []),
-      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
-      // Master (guarded) rather than the open view — see the production page.
-      authedFetch("/api/molds").then((x) => x.json()).catch(() => ({ molds: [] })),
-    ]);
+    // The day's entries render the moment /api/runs answers; the registry and
+    // the mould numbers land on their own (see the production page).
+    fetch("/api/machines").then((x) => x.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
+    // Master (guarded) rather than the open view — see the production page.
+    authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
+    const r = await fetch("/api/runs").then((x) => x.json()).catch(() => []);
     setRuns(Array.isArray(r) ? r : []);
-    setMachines(m.machines ?? []);
-    setMolds(Array.isArray(mo.molds) ? mo.molds : []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -104,7 +103,7 @@ export default function QualityPage() {
     }
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   const moldLabel = (key: string) =>
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
   // The product name is what the sheet fills in (mold is empty on every row,

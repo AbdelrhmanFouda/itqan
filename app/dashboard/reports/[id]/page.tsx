@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { Spinner } from "@/components/dashboard/ui";
+import { LOCALE_AR } from "@/lib/format";
 
 type Report = {
   id: string;
@@ -77,7 +78,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
           </h1>
           {report.created_at && (
             <p className="text-xs text-gray-400 mt-1">
-              {new Date(report.created_at).toLocaleDateString(isAr ? "ar-EG" : "en-GB", {
+              {new Date(report.created_at).toLocaleDateString(isAr ? LOCALE_AR : "en-GB", {
                 year: "numeric", month: "long", day: "numeric",
               })}
             </p>
@@ -97,7 +98,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         {report.jobs_completed != null && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 sm:p-5 text-center">
             <p className="text-3xl sm:text-4xl font-bold text-blue-700 tabular-nums">
-              {report.jobs_completed.toLocaleString(isAr ? "ar-EG" : "en-US")}
+              {report.jobs_completed.toLocaleString(isAr ? LOCALE_AR : "en-US")}
             </p>
             <p className="text-sm text-blue-500 mt-1">{tr.dashboard.reportJobs}</p>
           </div>

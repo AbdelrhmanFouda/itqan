@@ -12,7 +12,9 @@
  */
 
 import { revalidateTag } from "next/cache";
+import { after } from "next/server";
 import { planRollback, cellRef, type WriteCell } from "@/lib/sheet-write";
+import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
 import {
   ENTITIES, clean, normHeader, colIndex, findHeaderRow, splitLabel, type EntityConfig,
 } from "@/lib/sheet-entities";
@@ -117,6 +119,9 @@ export const missingTabs = (): string[] => Array.from(MISSING_TABS);
 /** Drop cached reads everywhere — called after any successful write. */
 export function invalidateSheetCache(): void {
   sheetInflight.clear();
+  // A copy must never outlive a write: the next read finds none and waits for
+  // the sheet as it is now, exactly as before this layer existed.
+  lastGood.clear();
   try {
     // `updateTag` is the read-your-own-writes primitive, but it is Server
     // Actions only — every write here is a Route Handler, so it is unavailable.
@@ -132,17 +137,68 @@ export function invalidateSheetCache(): void {
   }
 }
 
-async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
-  if (fresh) return fetchSheetUncached(tab, true);
-  // Route handlers do not get React's per-render fetch memoization, so two
-  // routes reading the same tab in the same instant would otherwise be two
-  // trips into an Apps Script deployment that serialises them.
+/* ---------------------- stale-while-revalidate (2026-09-05) ---------------
+ * Measured on the built site AND on production: once the 45s data cache had
+ * expired, the next read of a tab took the whole bridge round trip — 3–12s
+ * for the 14-row «الماكينات», 7.6s on Vercel, 34s for the four tabs behind
+ * /api/oee. The server log showed WHY: Next's fetch cache hands the route its
+ * stale entry at once (~40ms) but then holds the response until its own
+ * background revalidation has finished. So the user waited for the bridge on
+ * every page opened after a quiet minute — "too slow" (owner, twice) was
+ * mostly this.
+ *
+ * Now each instance keeps the last GOOD read of every tab and judges it
+ * (lib/stale-copy.ts): younger than SHEET_TTL_SEC → served, no network at
+ * all; older, but within SHEET_STALE_MAX_MS → served NOW while a no-store
+ * read refreshes it in the background (`after()` keeps the function alive
+ * on Vercel; the response is not held); none/too old → read and wait, as
+ * before. Next's data cache is still used for that first blocking read, so a
+ * new instance can pick up another instance's copy when one is fresh. Writes
+ * clear the copies (invalidateSheetCache), so a row the site just wrote is
+ * never masked by a snapshot; `fresh` reads never touch this path.
+ */
+const SHEET_STALE_MAX_MS = 10 * 60 * 1000;
+const lastGood = new Map<string, StaleCopy<SheetRead>>();
+
+function remember(tab: string) {
+  return (r: SheetRead): SheetRead => {
+    if (r.values.length > 0) lastGood.set(tab, { value: r, at: Date.now() });
+    return r;
+  };
+}
+
+/** One read per tab at a time — a refresh already in flight is reused. */
+function readOnce(tab: string, fresh: boolean): Promise<SheetRead> {
   const flying = sheetInflight.get(tab);
   if (flying) return flying;
-  const p = fetchSheetUncached(tab, false)
+  const p: Promise<SheetRead> = fetchSheetUncached(tab, fresh)
+    .then(remember(tab))
     .finally(() => { if (sheetInflight.get(tab) === p) sheetInflight.delete(tab); });
   sheetInflight.set(tab, p);
   return p;
+}
+
+/** Keep a background read alive past the response (a no-op outside a request). */
+function keepAlive(p: Promise<unknown>): void {
+  const quiet = p.then(() => undefined, () => undefined);
+  try { after(quiet); } catch { /* outside a request scope — nothing to hold open */ }
+}
+
+async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
+  if (fresh) return fetchSheetUncached(tab, true).then(remember(tab));
+  const verdict = judgeCopy(lastGood.get(tab), Date.now(), SHEET_TTL_SEC * 1000, SHEET_STALE_MAX_MS);
+  if (verdict.state === "fresh") return verdict.value;
+  if (verdict.state === "stale") {
+    // A no-store read: a Next-cached one would hand back the same stale
+    // entry and hold the response for its revalidation — the very wait this
+    // layer removes.
+    keepAlive(readOnce(tab, true));
+    return verdict.value;
+  }
+  // Nothing to serve yet: read through Next's data cache and wait. Route
+  // handlers do not get React's per-render fetch memoization, so two routes
+  // reading the same tab in the same instant share one trip (readOnce).
+  return readOnce(tab, false);
 }
 
 /**

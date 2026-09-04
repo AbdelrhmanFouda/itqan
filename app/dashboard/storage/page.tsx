@@ -52,6 +52,7 @@ import {
   ListRestart, MapPin, Pencil, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import type { StorageBalance, StorageData, StorageMovement } from "@/lib/storage";
+import { LOCALE_AR } from "@/lib/format";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
 const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
@@ -88,7 +89,7 @@ export default function StoragePage() {
   const { user, profile } = useAuth();
   const role = profile?.role ?? null;
   const canWrite = role !== null && (role === "storage" || hasFullAccess(role));
-  const fmtN = useCallback((n: number) => n.toLocaleString(isAr ? "ar-EG" : "en-US"), [isAr]);
+  const fmtN = useCallback((n: number) => n.toLocaleString(isAr ? LOCALE_AR : "en-US"), [isAr]);
 
   const [data, setData] = useState<StorageData | null>(null);
   const [loadErr, setLoadErr] = useState(false);

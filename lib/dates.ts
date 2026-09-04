@@ -237,7 +237,7 @@ export function formatDate(iso: string, lang: "ar" | "en"): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return iso;
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
+  return d.toLocaleDateString(lang === "ar" ? "ar-EG-u-nu-latn" /* = lib/format.ts LOCALE_AR — Latin digits (owner, 2026-09-04) */ : "en-GB", {
     day: "numeric", month: "short", timeZone: "UTC",
   });
 }

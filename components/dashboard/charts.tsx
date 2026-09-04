@@ -6,11 +6,12 @@
  */
 
 import { ReactNode } from "react";
+import { LOCALE_AR } from "@/lib/format";
 
 export const oeeColor = (x: number) => (x >= 0.85 ? "#16a34a" : x >= 0.6 ? "#d97706" : "#dc2626");
 const AXIS = "#6b7280", GRID = "#f3f4f6";
 
-const fmtLocale = (isAr: boolean) => (isAr ? "ar-EG" : "en-US");
+const fmtLocale = (isAr: boolean) => (isAr ? LOCALE_AR : "en-US");
 export const fmtNum = (x: number, isAr: boolean) => x.toLocaleString(fmtLocale(isAr));
 export const fmtPct = (x: number, isAr: boolean, digits = 0) =>
   `${(x * 100).toLocaleString(fmtLocale(isAr), { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Plus, Circle } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
+import { LOCALE_AR } from "@/lib/format";
 
 /**
  * Machine registry — read from the sheet's `machines` tab (one row per
@@ -163,7 +164,7 @@ export default function MachinesPage() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     {[
                       m.manufacturer,
-                      m.shiftLength > 0 ? `${m.shiftLength.toLocaleString(isAr ? "ar-EG" : "en-US")} ${l.min}` : "",
+                      m.shiftLength > 0 ? `${m.shiftLength.toLocaleString(isAr ? LOCALE_AR : "en-US")} ${l.min}` : "",
                       m.product || (!m.code ? l.noCode : ""),
                     ].filter(Boolean).join(" · ")}
                   </p>

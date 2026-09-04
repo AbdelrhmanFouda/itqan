@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "node --test \"tests/*.test.ts\"",
     "smoke": "node scripts/smoke.mjs",
+    "speed": "node scripts/speed.mjs",
     "seed": "node scripts/seed.mjs",
     "clear": "node scripts/clear.mjs",
     "images": "node scripts/generate-images.mjs"

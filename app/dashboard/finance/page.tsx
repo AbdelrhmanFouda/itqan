@@ -6,6 +6,7 @@ import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
 import { authedFetch } from "@/lib/authed-fetch";
 import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { LOCALE_AR } from "@/lib/format";
 
 type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
 type Run = { machine: string; date: string; goodUnits: number; scrapUnits: number; downtimeMin: number };
@@ -21,7 +22,7 @@ function Bars({
   percent?: boolean;
   empty: string;
 }) {
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   if (data.length === 0) return <EmptyState text={empty} />;
   const max = data.reduce((m, d) => Math.max(m, d.value), 0);
   return (
@@ -63,7 +64,7 @@ export default function FinancePage() {
       .catch(() => setError(true));
   }, []);
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
 
   if (error) {
     return (
@@ -100,7 +101,7 @@ export default function FinancePage() {
   const months = Object.keys(monthMap).sort().slice(-6);
   // Presentation only: "2026-08" → "Aug 2026" / "أغسطس ٢٠٢٦"
   const monthLabel = (k: string) =>
-    new Date(k + "-01T00:00").toLocaleDateString(isAr ? "ar-EG" : "en-US", { month: "short", year: "numeric" });
+    new Date(k + "-01T00:00").toLocaleDateString(isAr ? LOCALE_AR : "en-US", { month: "short", year: "numeric" });
   const goodByMonth = months.map((k) => ({ label: monthLabel(k), value: monthMap[k].good }));
   const scrapByMonth = months.map((k) => {
     const tot = monthMap[k].good + monthMap[k].scrap;

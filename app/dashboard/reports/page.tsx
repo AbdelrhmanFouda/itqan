@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Plus, FileText, Trash2, Sparkles } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { EmptyState, inputCls } from "@/components/dashboard/ui";
+import { LOCALE_AR } from "@/lib/format";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
 type DraftMeta = {
@@ -271,7 +272,7 @@ export default function ReportsPage() {
                   </p>
                   {r.jobs_completed != null && (
                     <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
-                      {r.jobs_completed.toLocaleString(isAr ? "ar-EG" : "en-US")} {tr.dashboard.reportJobs.toLowerCase()}
+                      {r.jobs_completed.toLocaleString(isAr ? LOCALE_AR : "en-US")} {tr.dashboard.reportJobs.toLowerCase()}
                     </p>
                   )}
                 </div>

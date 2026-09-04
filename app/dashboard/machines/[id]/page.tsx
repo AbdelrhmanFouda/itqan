@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
+import { LOCALE_AR } from "@/lib/format";
 
 type Machine = { id: string; name: string; type: string; status: string };
 type Note = { id: string; note: string; note_date: string };
@@ -167,7 +168,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
           {notes.map((n) => (
             <div key={n.id} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
               <p className="text-xs text-gray-400 mb-1">
-                {new Date(n.note_date).toLocaleDateString(isAr ? "ar-EG" : "en-GB", {
+                {new Date(n.note_date).toLocaleDateString(isAr ? LOCALE_AR : "en-GB", {
                   year: "numeric", month: "long", day: "numeric",
                 })}
               </p>

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Plus, BarChart3, AlertTriangle } from "lucide-react";
 import { Stat, EmptyState, Spinner } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { LOCALE_AR } from "@/lib/format";
 
 type Machine = { name: string; status: string };
 type Job = { id: string; code: string; status: string; dueDate: string };
@@ -65,7 +66,7 @@ export default function DashboardPage() {
       .catch(() => {});
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => n.toLocaleString(isAr ? LOCALE_AR : "en-US");
 
   // Checked BEFORE the loading gate: a failed runs fetch leaves `runs` null,
   // so the spinner below would otherwise spin forever.

@@ -10,6 +10,7 @@ import {
   JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options,
 } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
+import { LOCALE_AR } from "@/lib/format";
 
 /**
  * Jobs — client work orders, stored in the sheet's `jobs` tab.
@@ -57,19 +58,20 @@ export default function JobsPage() {
   const [saveErr, setSaveErr] = useState(false);
 
   async function load() {
+    // The order book renders the moment /api/jobs answers. The two lists that
+    // only feed the add-form's datalists (Master names + codes, the machine
+    // registry) arrive on their own: a cold bridge read of «الاسطمبات» is
+    // 2–5s, and until 2026-09-04 the whole page waited for it.
+    fetch("/api/sheet/molds").then((r) => r.json()).then((mo) => setMolds(mo.records ?? [])).catch(() => {});
+    fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
     try {
-      const [j, mo, ma] = await Promise.all([
-        // A non-2xx (401 on a missing/expired token) must land in the ERROR
-        // state — parsed as data it flows into `configured: undefined` and the
-        // page tells the user to go add a `jobs` tab to the sheet, which is a
-        // lie about what went wrong.
-        authedFetch("/api/jobs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
-        fetch("/api/sheet/molds").then((r) => r.json()).catch(() => ({ records: [] })),
-        fetch("/api/machines").then((r) => r.json()).catch(() => ({ machines: [] })),
-      ]);
-      setData(j);
-      setMolds(mo.records ?? []);
-      setMachines(ma.machines ?? []);
+      // A non-2xx (401 on a missing/expired token) must land in the ERROR
+      // state — parsed as data it flows into `configured: undefined` and the
+      // page tells the user to go add a `jobs` tab to the sheet, which is a
+      // lie about what went wrong.
+      const r = await authedFetch("/api/jobs");
+      if (!r.ok) throw new Error(String(r.status));
+      setData(await r.json());
     } catch {
       setError(true);
     }
@@ -96,7 +98,7 @@ export default function JobsPage() {
     load();
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   const startLabel = isAr ? "تاريخ البدء" : "Start date";
   const jobsTabMissing = isAr
     ? "تبويب jobs غير موجود في جدول البيانات. أضِف تبويبًا باسم jobs وضَع هذه العناوين في الصف الأول، ثم أعد التحميل."

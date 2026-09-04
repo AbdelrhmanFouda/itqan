@@ -8,6 +8,7 @@ import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/compon
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { moldKey } from "@/lib/mold-number";
+import { LOCALE_AR } from "@/lib/format";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -51,16 +52,15 @@ export default function ProductionPage() {
   const [form, setForm] = useState(blank());
 
   const load = useCallback(async () => {
-    const [r, mo, ma] = await Promise.all([
-      fetch("/api/runs").then((x) => x.json()).catch(() => []),
-      // Master (guarded) rather than the open «الاسطمبات» view: only Master
-      // carries the notes column where 26 products keep their mould number.
-      authedFetch("/api/molds").then((x) => x.json()).catch(() => ({ molds: [] })),
-      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
-    ]);
+    // The log renders the moment /api/runs answers; the mould numbers and the
+    // machine list land on their own. A cold Master read is 2–4s, and until
+    // 2026-09-04 the table waited for all three.
+    // Master (guarded) rather than the open «الاسطمبات» view: only Master
+    // carries the notes column where 26 products keep their mould number.
+    authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
+    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+    const r = await fetch("/api/runs").then((x) => x.json()).catch(() => []);
     setRuns(Array.isArray(r) ? r : []);
-    setMolds(Array.isArray(mo.molds) ? mo.molds : []);
-    setMachines(ma.machines ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -120,7 +120,7 @@ export default function ProductionPage() {
     load();
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   const moldLabel = (key: string) =>
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
   // Until 2026-09-04 the rows were labelled by moldLabel(r.mold) alone, and

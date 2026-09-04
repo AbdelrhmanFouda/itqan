@@ -12,6 +12,7 @@ import {
   priorityTone, localize, options,
 } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
+import { LOCALE_AR } from "@/lib/format";
 
 /**
  * One job (sheet row in the `jobs` tab) + the production runs credited to it
@@ -86,21 +87,19 @@ export default function JobDetailPage() {
   const [form, setForm] = useState(blankRun());
 
   const load = useCallback(async () => {
-    const [jRes, ma, mo] = await Promise.all([
-      authedFetch(`/api/jobs/${id}`),
-      fetch("/api/machines").then((x) => x.json()).catch(() => ({ machines: [] })),
-      // Product/mold-code datalists for the edit form — a hand-typed product
-      // name that doesn't match Master exactly breaks the join, so offer the
-      // real names the same way the add form does.
-      fetch("/api/sheet/molds").then((x) => x.json()).catch(() => ({ records: [] })),
-    ]);
+    // The edit form's datalists load on their own, so a cold bridge read of
+    // the registry or «الاسطمبات» never holds the work order back (2026-09-04).
+    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+    // Product/mold-code datalists for the edit form — a hand-typed product
+    // name that doesn't match Master exactly breaks the join, so offer the
+    // real names the same way the add form does.
+    fetch("/api/sheet/molds").then((x) => x.json()).then((mo) => setMolds(mo.records ?? [])).catch(() => {});
+    const jRes = await authedFetch(`/api/jobs/${id}`);
     if (!jRes.ok) { setNotFound(true); return; }
     const j = await jRes.json();
     setJob(j.job);
     setRuns(j.runs ?? []);
     setStandard(j.standard ?? null);
-    setMachines(ma.machines ?? []);
-    setMolds(mo.records ?? []);
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -242,7 +241,7 @@ export default function JobDetailPage() {
     router.push("/dashboard/jobs");
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   const startLabel = isAr ? "تاريخ البدء" : "Start date";
 
   if (notFound) {

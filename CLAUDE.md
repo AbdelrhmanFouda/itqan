@@ -39,6 +39,8 @@ npm run smoke        # HTTP smoke against a RUNNING site (default localhost:3000
                      #   --base=https://itqan-taupe.vercel.app  --token=<ID token>
                      # pages in both languages, open reads, 401 on every guarded
                      # read and every write, and (with a token) the signed-in half
+npm run speed        # speed report against a RUNNING site: every page's HTML and
+                     # every API, first (cold) and warm, the JS a page ships
 npm run seed         # (legacy Firestore seed — rarely needed now)
 ```
 
@@ -83,6 +85,31 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   (`i18n-shape`), `mold-number`, `master-lookup` — 171 → 243 checks. A new route file,
   handler, dashboard page or NAV key FAILS until it is classified: that is the point.
 - **`scripts/smoke.mjs`** — the running site from outside; see Commands.
+
+## Recently landed (2026-09-05) — Latin digits, and the sheet reader no longer waits
+
+- **Numbers are Latin digits in both languages (owner's word).** Every
+  `toLocaleString`/`toLocaleDateString` takes its Arabic locale from
+  `lib/format.ts` — `LOCALE_AR = "ar-EG-u-nu-latn"` (Latin digits and separators, Arabic
+  day/month names). `tests/latin-digits.test.ts` fails on any bare `"ar-EG"` in app/,
+  components/, lib/ or context/.
+- **Stale-while-revalidate in `lib/sheets.ts`** (`lib/stale-copy.ts`, pure, tested) —
+  the biggest speed fix so far. Measured before it: once the 45s data cache had expired,
+  the next read of ANY tab took the whole bridge round trip (3–12s locally, 7.6s on
+  Vercel, 34s for the /api/oee set), because Next's fetch cache serves the stale entry
+  in ~40ms but then holds the response until its own revalidation has finished. Now each
+  instance keeps the last good read of every tab: ≤45s old → served, no network; ≤10 min
+  → served at once while a no-store read refreshes it in the background (`after()`);
+  otherwise read and wait. Writes clear the copies. Measured after: «الماكينات» 52s
+  after the last read 12s → 10ms; `/api/runs` 16s → 161ms. **Do not "simplify" this back
+  to a plain cached fetch** — the section "The sheet read path" below describes the cache
+  that is still underneath; this layer is what stops it holding the response.
+- **Pages render the moment their own API answers.** Jobs, job detail, production and
+  quality no longer `Promise.all` the table with the datalist sources (Master, the
+  registry); a cold mould-list read used to hold the table back 2–5s.
+- **`scripts/speed.mjs`** (`npm run speed`) — the report the two fixes were measured
+  with. The floor that remains is the bridge itself (2–15s per cold tab, with slow
+  spells — 58s once) plus Firebase's ~200ms session check on every page open.
 
 ## Recently landed (2026-08-28) — leak closures + front-door fixes
 
@@ -581,6 +608,12 @@ What is there now, and why each piece must stay:
 for `[sheets] every attempt failed for tab "…"` — that line distinguishes "the
 tab is empty" from "the bridge refused", which is the distinction that was
 missing for the entire life of this bug.
+
+**And since 2026-09-05 there is a layer ABOVE this cache** — the per-instance last-good
+copy with stale-while-revalidate (see "Recently landed (2026-09-05)"). The data cache
+still does what this section says for the first read on an instance; the copy is what
+answers every read after that, so a stale entry's revalidation never holds a response
+again. `invalidateSheetCache()` clears both.
 
 ## The bridge (apps-script.gs)
 

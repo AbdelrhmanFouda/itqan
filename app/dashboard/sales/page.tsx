@@ -7,6 +7,7 @@ import { pd } from "@/lib/i18n.prod";
 import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { Pill, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { LOCALE_AR } from "@/lib/format";
 
 type Inquiry = {
   id: string; name: string; company: string; phone: string;
@@ -50,8 +51,8 @@ export default function SalesPage() {
       .catch(() => setError(true));
   }, []);
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? "ar-EG" : "en-US");
-  const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? "ar-EG" : "en-US") : "—");
+  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? LOCALE_AR : "en-US") : "—");
 
   if (error) {
     return (

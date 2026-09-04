@@ -4,6 +4,7 @@ import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { ArrowRight, ChevronDown, Cog } from "lucide-react";
 import { motion } from "framer-motion";
+import { LOCALE_AR } from "@/lib/format";
 
 export default function Hero() {
   const { lang } = useLang();
@@ -110,7 +111,7 @@ export default function Hero() {
                   { v: stats.clients, l: isAr ? "عميل" : "Clients" },
                 ].map((s) => (
                   <div key={s.l}>
-                    <div className="text-2xl font-bold text-white tabular-nums">{s.v.toLocaleString(isAr ? "ar-EG" : "en-US")}</div>
+                    <div className="text-2xl font-bold text-white tabular-nums">{s.v.toLocaleString(isAr ? LOCALE_AR : "en-US")}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{s.l}</div>
                   </div>
                 ))}

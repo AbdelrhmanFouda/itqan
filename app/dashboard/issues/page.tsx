@@ -6,6 +6,7 @@ import { pd } from "@/lib/i18n.prod";
 import { Plus } from "lucide-react";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { LOCALE_AR } from "@/lib/format";
 
 type Issue = {
   row: number; date: string; machine: string; product: string; category: string;
@@ -144,8 +145,8 @@ export default function IssuesPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-5 max-w-sm">
-        <Stat label={t.open} value={openCount.toLocaleString(isAr ? "ar-EG" : "en-US")} tone={openCount > 0 ? "amber" : "green"} />
-        <Stat label={t.all} value={(issues ?? []).length.toLocaleString(isAr ? "ar-EG" : "en-US")} />
+        <Stat label={t.open} value={openCount.toLocaleString(isAr ? LOCALE_AR : "en-US")} tone={openCount > 0 ? "amber" : "green"} />
+        <Stat label={t.all} value={(issues ?? []).length.toLocaleString(isAr ? LOCALE_AR : "en-US")} />
       </div>
 
       {/* Filters */}
