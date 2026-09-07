@@ -95,7 +95,10 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   movement's own piece weight or Master's (`lists.weights`), flagged `approx` («≈» in the
   UI); no piece weight anywhere → `null`, rendered «—», never 0. A line is null when any of
   its movements is. Shown in the balance table («الوزن (كجم)»), the cards, the drawer and the
-  form's «موجود في» chips (`whereIs()` takes an optional `kgOf`).
+  form's «موجود في» chips (`whereIs()` takes an optional `kgOf`). ⚠ The balance table's item
+  cell is `whitespace-nowrap` on purpose: with eleven columns the name was the only cell that
+  could shrink, and it wrapped onto three lines at 1366 px — the wrapper's `overflow-x-auto`
+  is meant to take the overflow instead.
 - ⚠ **Weight-only products are entered by kg with «وزن الحبة» = 1** (the storekeeper's
   habit: «معلقه صغيره», «بصمه», «غطاء تيوب»), so their «قطعة» figure is grams — 392,000
   pieces is 392 kg. Do not "correct" those piece weights from Master; the weight column is
