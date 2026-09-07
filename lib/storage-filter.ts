@@ -190,12 +190,15 @@ export function collectLocations(
 /** Where an item is standing right now, biggest pile first — what a storekeeper
  *  needs before a withdrawal. Matches «الرصيد الحالي» on the balance KEY
  *  (item type + item + client), which is what the sheet sums on. */
-export function whereIs(
-  balance: { itemType: string; item: string; client: string; loc: string; avail: string; unit: string }[],
+export type WhereRow = { loc: string; qty: number; unit: string; weight?: LineWeight | null };
+export function whereIs<B extends { itemType: string; item: string; client: string; loc: string; avail: string; unit: string }>(
+  balance: B[],
   item: string,
   itemType: string,
   client?: string,
-): { loc: string; qty: number; unit: string }[] {
+  /** optional: the kg behind each pile — see lineWeightKg() */
+  kgOf?: (row: B) => LineWeight | null,
+): WhereRow[] {
   const want = normalizeText(item);
   if (!want) return [];
   return balance
@@ -203,7 +206,7 @@ export function whereIs(
       normalizeText(b.item) === want &&
       normalizeText(b.itemType) === normalizeText(itemType) &&
       (client === undefined || normalizeText(b.client) === normalizeText(client)))
-    .map((b) => ({ loc: b.loc, qty: toNumber(b.avail), unit: b.unit }))
+    .map((b) => ({ loc: b.loc, qty: toNumber(b.avail), unit: b.unit, ...(kgOf ? { weight: kgOf(b) } : {}) }))
     .filter((r) => r.qty !== 0)
     .sort((a, b) => b.qty - a.qty);
 }
@@ -439,4 +442,66 @@ export function duplicateNums(movements: { log: string; num: string }[]): Set<st
   const seen = new Map<string, number>();
   movements.forEach((m) => { const k = dupKey(m); seen.set(k, (seen.get(k) ?? 0) + 1); });
   return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+}
+
+/* ---------------------------------- weight ---------------------------------- */
+
+/**
+ * The kilograms behind a stock line — "some products rely only on the weight"
+ * (owner, 2026-09-07). «الرصيد الحالي» sums «صافي الكمية» in the line's unit,
+ * which for a product is PIECES; the kg are only in the movement logs
+ * («الكمية وزن», column H) or implied by the piece weight. So the weight is
+ * rebuilt from the movements, the way the sheet converts in the other direction:
+ *
+ *  - a material's net IS kg;
+ *  - a product movement entered by weight alone carries that weight exactly.
+ *    That is the storekeeper's habit for weight-only items: kg in, «وزن الحبة»
+ *    = 1, so the piece count reads as grams — 286,300 «قطعة» means 286.3 kg;
+ *  - otherwise net × grams ÷ 1000, using the movement's own piece weight or,
+ *    when it has none, Master's — marked `approx`, because the sheet renders
+ *    «0.63» for 0.625 and Master's weight is not what was on the scale;
+ *  - with no piece weight anywhere the kg is unknown — never a zero.
+ */
+export type WeighedMovement = Movement & {
+  qtyCount?: string; qtyKg?: string; grams?: string; loss?: string;
+};
+export type LineWeight = { kg: number; approx: boolean };
+
+const r2w = (n: number) => Math.round(n * 100) / 100;
+const isMaterialType = (t: string | undefined) => String(t ?? "").trim().startsWith("خام");
+
+export function movementKg(m: WeighedMovement, masterGrams?: number): LineWeight | null {
+  const net = toNumber(m.net);
+  if (isMaterialType(m.itemType)) return { kg: net, approx: false };
+  const qc = toNumber(m.qtyCount), qk = toNumber(m.qtyKg), loss = toNumber(m.loss);
+  const own = toNumber(m.grams);
+  const g = own > 0 ? own : (masterGrams ?? 0);
+  if (qk > 0 && qc === 0 && loss === 0) return { kg: qk, approx: false };
+  if (g > 0) return { kg: r2w(net * g / 1000), approx: true };
+  return null;
+}
+
+/** Σ deposits − Σ withdrawals of a line, in kg; null when one of its movements
+ *  cannot be weighed. A product line with no movements at all falls back to
+ *  Master's piece weight, or says nothing. */
+export function lineWeightKg(
+  line: StockLine & { avail?: string },
+  movements: WeighedMovement[],
+  masterGrams?: number,
+): LineWeight | null {
+  if (isMaterialType(line.itemType)) return { kg: toNumber(line.avail), approx: false };
+  const hist = movements.filter((m) => sameLine(m, line));
+  if (hist.length === 0) {
+    return masterGrams && masterGrams > 0
+      ? { kg: r2w(toNumber(line.avail) * masterGrams / 1000), approx: true }
+      : null;
+  }
+  let kg = 0, approx = false;
+  for (const m of hist) {
+    const w = movementKg(m, masterGrams);
+    if (!w) return null;
+    kg += (m.log === "سحب" ? -1 : 1) * w.kg;
+    approx = approx || w.approx;
+  }
+  return { kg: r2w(kg), approx };
 }

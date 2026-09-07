@@ -15,8 +15,8 @@ import assert from "node:assert/strict";
 import {
   NO_LOCATION, buildFloorPlan, caseTwin, collectLocations, compareLocKey, duplicateNums, historyFor,
   locGroup, locKey, matchesTerms, movePayloads, normalizeText, parseSlot, pillarOf,
-  sameLine, sameLocation, sameOwnerItem, searchTerms, siblingLines, storageDate, sumNet,
-  toNumber, whereIs,
+  lineWeightKg, movementKg, sameLine, sameLocation, sameOwnerItem, searchTerms, siblingLines,
+  storageDate, sumNet, toNumber, whereIs,
 } from "../lib/storage-filter.ts";
 
 /* --------------------------------- search --------------------------------- */
@@ -303,4 +303,70 @@ test("a number the sheet holds twice in one log is flagged; the same number acro
     { log: "سحب", num: "ITQ0031" },
   ]);
   assert.deepEqual([...dups], ["سحب|ITQ0030"]);
+});
+
+/* ---------------------------------- weight ---------------------------------- */
+
+const pm = (
+  log: "إيداع" | "سحب", num: string, net: string,
+  extra: { qtyCount: string; qtyKg: string; grams: string; loss: string },
+) => ({ log, num, date: "2026-09-01", net, loc: "", client: "الهندي", item: "معلقه صغيره", itemType: "منتج", ...extra });
+const byKg = (log: "إيداع" | "سحب", num: string, kg: string, net: string) =>
+  pm(log, num, net, { qtyCount: "0", qtyKg: kg, grams: "1", loss: "0" });
+
+test("a material's weight is its net; a product entered by weight keeps that weight exactly", () => {
+  assert.deepEqual(movementKg(mv("إيداع", "1", "2026-01-01", "1,120")), { kg: 1120, approx: false });
+  // the storekeeper's weight-only habit: kg in, piece weight 1 → «60,000 قطعة» is 60 kg
+  assert.deepEqual(movementKg(byKg("إيداع", "ITQ0067", "60", "60,000")), { kg: 60, approx: false });
+  // «0.63» on the sheet is 0.625 underneath — the entered kg wins over net × grams
+  assert.deepEqual(
+    movementKg(pm("إيداع", "ITQ0090", "342,400", { qtyCount: "0", qtyKg: "214", grams: "0.63", loss: "0" })),
+    { kg: 214, approx: false },
+  );
+});
+
+test("a product entered by count is weighed through its piece weight, or Master's, and marked approximate", () => {
+  assert.deepEqual(
+    movementKg(pm("إيداع", "1", "15,694.44", { qtyCount: "15,694.44", qtyKg: "0", grams: "21.6", loss: "0" })),
+    { kg: 339, approx: true },
+  );
+  assert.deepEqual(movementKg(pm("سحب", "2", "500", { qtyCount: "500", qtyKg: "0", grams: "", loss: "0" }), 20), { kg: 10, approx: true });
+  // no piece weight anywhere → unknown, never zero
+  assert.equal(movementKg(pm("إيداع", "3", "500", { qtyCount: "500", qtyKg: "0", grams: "", loss: "0" })), null);
+});
+
+test("a line's weight is Σ deposits − Σ withdrawals in kg — the «معلقه صغيره» line reads 392", () => {
+  const line = { itemType: "منتج", item: "معلقه صغيره", client: "الهندي", loc: "", avail: "392,000" };
+  // the live deposits of 24 Aug → 6 Sep 2026 (286.3 kg) plus the 7 Sep count adjustment
+  const rows = [
+    byKg("إيداع", "ITQ0067", "60", "60,000"), byKg("إيداع", "ITQ0075", "22.7", "22,700"),
+    byKg("إيداع", "ITQ0098", "53.85", "53,850"), byKg("إيداع", "ITQ0110", "31.7", "31,700"),
+    byKg("إيداع", "ITQ0120", "24.15", "24,150"), byKg("إيداع", "ITQ0183", "59.1", "59,100"),
+    byKg("إيداع", "ITQ0185", "34.8", "34,800"), byKg("إيداع", "ITQ0227", "105.7", "105,700"),
+  ];
+  assert.deepEqual(lineWeightKg(line, rows), { kg: 392, approx: false });
+  // a withdrawal comes off, and a movement of another line never counts
+  assert.deepEqual(lineWeightKg(line, [...rows, byKg("سحب", "ITQ0100", "12", "12,000")]), { kg: 380, approx: false });
+  assert.deepEqual(lineWeightKg(line, [...rows, { ...byKg("إيداع", "X", "50", "50,000"), loc: "A12" }]), { kg: 392, approx: false });
+  // one movement nobody can weigh makes the whole line unknown…
+  const unweighed = pm("سحب", "Y", "5", { qtyCount: "5", qtyKg: "0", grams: "", loss: "0" });
+  assert.equal(lineWeightKg(line, [...rows, unweighed]), null);
+  // …unless Master knows the piece weight — then the line is approximate
+  assert.deepEqual(lineWeightKg(line, [...rows, unweighed], 20), { kg: 391.9, approx: true });
+  // a material line is already in kg
+  assert.deepEqual(lineWeightKg({ itemType: "خامة", item: "كوبوليمر", client: "اتقان", loc: "A12", avail: "720" }, []), { kg: 720, approx: false });
+  // a product line with no movements falls back to Master's weight, or says nothing
+  assert.deepEqual(lineWeightKg({ itemType: "منتج", item: "x", client: "", loc: "", avail: "1,000" }, [], 20), { kg: 20, approx: true });
+  assert.equal(lineWeightKg({ itemType: "منتج", item: "x", client: "", loc: "", avail: "1,000" }, []), null);
+});
+
+test("whereIs carries the weight of each pile when asked, and nothing extra when not", () => {
+  const rows = [
+    { itemType: "منتج", item: "معلقه صغيره", client: "الهندي", loc: "", avail: "392,000", unit: "قطعة" },
+    { itemType: "منتج", item: "معلقه صغيره", client: "الهندي", loc: "F3", avail: "1,000", unit: "قطعة" },
+  ];
+  const plain = whereIs(rows, "معلقه صغيره", "منتج");
+  assert.equal("weight" in plain[0], false);
+  const weighed = whereIs(rows, "معلقه صغيره", "منتج", undefined, (b) => ({ kg: toNumber(b.avail) / 1000, approx: false }));
+  assert.deepEqual(weighed.map((w) => w.weight?.kg), [392, 1]);
 });

@@ -20,7 +20,7 @@ import { Btn, Field, inputCls, Modal } from "@/components/dashboard/ui";
 import type { sd } from "@/lib/i18n.storage";
 import type { StorageBalance, StorageMovement } from "@/lib/storage";
 import {
-  caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber,
+  caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
 } from "@/lib/storage-filter";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -32,7 +32,7 @@ const fmt = (n: number, isAr: boolean) => n.toLocaleString(isAr ? LOCALE_AR : "e
 /* ------------------------------- the drawer ------------------------------- */
 
 export function ItemDrawer({
-  line, balance, movements, canWrite, dups, isAr, s, onClose, onDeposit, onWithdraw, onMove, onEdit, onDelete, onSwitch,
+  line, balance, movements, canWrite, dups, weightOf, fmtKg, isAr, s, onClose, onDeposit, onWithdraw, onMove, onEdit, onDelete, onSwitch,
 }: {
   line: StorageBalance | null;
   balance: StorageBalance[];
@@ -40,6 +40,9 @@ export function ItemDrawer({
   canWrite: boolean;
   /** numbers the sheet holds twice — see duplicateNums(); these rows are read-only here */
   dups: Set<string>;
+  /** the kg behind a line (lineWeightKg) and how the page prints it — null = unknown */
+  weightOf: (b: StorageBalance) => LineWeight | null;
+  fmtKg: (w: LineWeight) => string;
   isAr: boolean;
   s: Strings;
   onClose: () => void;
@@ -64,6 +67,9 @@ export function ItemDrawer({
   // the bridge accepts a withdrawal against the SUMMED figure — see sumNet()
   const canTake = summed > 0;
   const locLabel = line.loc || s.filters.noLocation;
+  // a material's balance is already kg; a product's weight rides under its piece count
+  const material = String(line.itemType).trim().startsWith("خام");
+  const weight = material ? null : weightOf(line);
 
   return (
     <Modal open title={s.item.title} onClose={onClose} isAr={isAr}>
@@ -79,9 +85,16 @@ export function ItemDrawer({
             </span>
           </p>
         </div>
-        <p className={`shrink-0 text-2xl font-bold tabular-nums ${availCls}`}>
-          {fmt(sheetAvail, isAr)} <span className="text-sm font-medium">{line.unit}</span>
-        </p>
+        <div className="shrink-0 text-end">
+          <p className={`text-2xl font-bold tabular-nums ${availCls}`}>
+            {fmt(sheetAvail, isAr)} <span className="text-sm font-medium">{line.unit}</span>
+          </p>
+          {weight && (
+            <p className="text-sm text-gray-500 tabular-nums" title={weight.approx ? s.weightApprox : undefined}>
+              {fmtKg(weight)} {s.units.kg}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* the two checks */}
@@ -119,6 +132,7 @@ export function ItemDrawer({
           <div className="flex flex-wrap gap-1.5">
             {siblings.map((b, i) => {
               const v = toNumber(b.avail);
+              const kw = material ? null : weightOf(b);
               return (
                 <button
                   key={`${b.loc}-${i}`}
@@ -130,6 +144,7 @@ export function ItemDrawer({
                   <span dir={b.loc ? "ltr" : undefined}>{b.loc || s.filters.noLocation}</span>
                   <b>{fmt(v, isAr)}</b>
                   <span className="opacity-70">{b.unit}</span>
+                  {kw && <span className="opacity-70" title={kw.approx ? s.weightApprox : undefined}>· {fmtKg(kw)} {s.units.kg}</span>}
                 </button>
               );
             })}

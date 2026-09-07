@@ -86,6 +86,26 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   handler, dashboard page or NAV key FAILS until it is classified: that is the point.
 - **`scripts/smoke.mjs`** — the running site from outside; see Commands.
 
+## Recently landed (2026-09-07) — kilograms on the storage page
+
+- **A stock line's weight has ONE rule: `lineWeightKg()` in `lib/storage-filter.ts`**
+  (pure, tested). «الرصيد الحالي» sums a product in PIECES; the kg are only in the logs'
+  «الكمية وزن» or implied by «وزن الحبة». Per movement: a material's net is kg; a product
+  entered by weight alone keeps that weight exactly; otherwise net × grams ÷ 1000 with the
+  movement's own piece weight or Master's (`lists.weights`), flagged `approx` («≈» in the
+  UI); no piece weight anywhere → `null`, rendered «—», never 0. A line is null when any of
+  its movements is. Shown in the balance table («الوزن (كجم)»), the cards, the drawer and the
+  form's «موجود في» chips (`whereIs()` takes an optional `kgOf`).
+- ⚠ **Weight-only products are entered by kg with «وزن الحبة» = 1** (the storekeeper's
+  habit: «معلقه صغيره», «بصمه», «غطاء تيوب»), so their «قطعة» figure is grams — 392,000
+  pieces is 392 kg. Do not "correct" those piece weights from Master; the weight column is
+  what makes the line readable.
+- The owner's own tab **«بحث سريع»** in the storage sheet is what he calls the quick search;
+  it got the same rule as a paste-ready formula (`../storage/QUICK-SEARCH-WEIGHT-2026-09-07.md`).
+- Someone renumbered «إيداع» column A on 2026-09-07 (contiguous ITQ0001–ITQ0226, contents
+  untouched, still plain text). Numbers stay unique, so `webFindRow_` is unaffected — but
+  any «إيداع» number quoted in these docs before that date is stale.
+
 ## Recently landed (2026-09-05) — Latin digits, and the sheet reader no longer waits
 
 - **Numbers are Latin digits in both languages (owner's word).** Every

@@ -41,8 +41,8 @@ import { sd } from "@/lib/i18n.storage";
 import { hasFullAccess } from "@/lib/roles";
 import {
   NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, dupKey, duplicateNums,
-  historyFor, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
-  searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LocationStat,
+  historyFor, lineWeightKg, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
+  searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LineWeight, type LocationStat,
 } from "@/lib/storage-filter";
 import { Btn, EmptyState, Field, inputCls, Modal, Spinner } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
@@ -187,6 +187,19 @@ export default function StoragePage() {
     () => [...(data?.inLog ?? []), ...(data?.outLog ?? [])],
     [data],
   );
+  // The kg behind a line — "some products rely only on the weight" (owner,
+  // 2026-09-07). The sheet sums a product in pieces; its weight is rebuilt from
+  // the movements (lib/storage-filter.ts → lineWeightKg), Master's piece weight
+  // standing in when a movement carries none. Null = nobody knows, shown as «—».
+  const weightOf = useCallback(
+    (b: StorageBalance): LineWeight | null => lineWeightKg(b, allMovements, lists?.weights?.[b.item]),
+    [allMovements, lists],
+  );
+  // the number alone («≈ 339.5») — the unit is added where the header does not carry it
+  const fmtKg = useCallback(
+    (w: LineWeight) => `${w.approx ? "≈ " : ""}${w.kg.toLocaleString(isAr ? LOCALE_AR : "en-US", { maximumFractionDigits: 2 })}`,
+    [isAr],
+  );
 
   // Every place the room knows about: «أماكن التخزين» through the bridge, plus
   // anything only the data mentions (an older bridge sends no list at all).
@@ -301,8 +314,8 @@ export default function StoragePage() {
   // withdrawal, and the reason the location field can stay a pick rather than
   // a guess. Owner-blind on purpose: it answers "where", not "whose".
   const standingAt = useMemo(
-    () => (form.item ? whereIs(allBalance, form.item, form.itemType) : []),
-    [allBalance, form.item, form.itemType],
+    () => (form.item ? whereIs(allBalance, form.item, form.itemType, undefined, weightOf) : []),
+    [allBalance, form.item, form.itemType, weightOf],
   );
 
   // What the bridge will check a سحب against: the MOVEMENTS summed on the same
@@ -716,7 +729,7 @@ export default function StoragePage() {
       {tab === "balance" ? (
         balance.length === 0 && filtered
           ? <FilteredEmpty text={s.noMatch} label={s.filters.clear} onClear={clearFilters} />
-          : <BalanceView rows={balance} s={s} onOpen={setOpenLine} />
+          : <BalanceView rows={balance} s={s} onOpen={setOpenLine} weightOf={weightOf} fmtKg={fmtKg} />
       ) : (
         shownMovements.length === 0 && filtered
           ? <FilteredEmpty text={s.noMatch} label={s.filters.clear} onClear={clearFilters} />
@@ -730,6 +743,8 @@ export default function StoragePage() {
         movements={allMovements}
         canWrite={canWrite}
         dups={dups}
+        weightOf={weightOf}
+        fmtKg={fmtKg}
         isAr={isAr}
         s={s}
         onClose={() => setOpenLine(null)}
@@ -821,6 +836,9 @@ export default function StoragePage() {
                         }`}
                       >
                         <span dir={w.loc ? "ltr" : undefined}>{w.loc || s.filters.noLocation}</span> <b>{w.qty}</b> <span className="opacity-70">{w.unit}</span>
+                        {form.itemType === "منتج" && w.weight && (
+                          <span className="opacity-70" title={w.weight.approx ? s.weightApprox : undefined}>· {fmtKg(w.weight)} {s.units.kg}</span>
+                        )}
                       </button>
                     ))}
                   </span>
@@ -971,18 +989,36 @@ function StatTile({
 /* ------------------------------ balance view ------------------------------ */
 
 function BalanceView({
-  rows, s, onOpen,
+  rows, s, onOpen, weightOf, fmtKg,
 }: {
   rows: StorageBalance[];
   s: (typeof sd)["en"] | (typeof sd)["ar"];
   onOpen: (b: StorageBalance) => void;
+  weightOf: (b: StorageBalance) => LineWeight | null;
+  fmtKg: (w: LineWeight) => string;
 }) {
   if (rows.length === 0) return <EmptyState text={s.empty} />;
+  // the kg column: a material's figure is its balance; a product's is rebuilt
+  // from its movements, «—» when no piece weight is known anywhere
+  const kgCell = (b: StorageBalance) => {
+    const w = weightOf(b);
+    return w
+      ? <span title={w.approx ? s.weightApprox : undefined}>{fmtKg(w)}</span>
+      : <span className="text-gray-300" title={s.weightUnknown}>—</span>;
+  };
+  // on a card the unit is spelled out, and only a product needs the extra line
+  const kgLine = (b: StorageBalance) => {
+    if (isMaterial(b.itemType)) return null;
+    const w = weightOf(b);
+    return w
+      ? <p className="text-xs text-gray-500 tabular-nums" title={w.approx ? s.weightApprox : undefined}>{fmtKg(w)} {s.units.kg}</p>
+      : null;
+  };
   const availCls = (v: string) =>
     num(v) < 0 ? "text-red-600" : num(v) === 0 ? "text-gray-400" : "text-emerald-700";
   const heads: { h: string; end?: boolean }[] = [
     { h: s.cols.itemType }, { h: s.cols.item }, { h: s.cols.client }, { h: s.cols.loc },
-    { h: s.cols.avail, end: true }, { h: s.cols.inQty, end: true }, { h: s.cols.inLast },
+    { h: s.cols.avail, end: true }, { h: s.cols.weight, end: true }, { h: s.cols.inQty, end: true }, { h: s.cols.inLast },
     { h: s.cols.outQty, end: true }, { h: s.cols.outLast }, { h: s.cols.loss, end: true },
   ];
   const place = (b: StorageBalance) => b.loc
@@ -1004,7 +1040,10 @@ function BalanceView({
               <span className="shrink-0 text-xs text-gray-400 whitespace-nowrap">{b.itemType}</span>
             </div>
             <div className="flex items-end justify-between gap-3">
-              <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
+              <div className="min-w-0">
+                <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
+                {kgLine(b)}
+              </div>
               <ChevronRight size={16} className="text-gray-300 rtl:-scale-x-100" />
             </div>
             <p className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-1.5">
@@ -1040,6 +1079,7 @@ function BalanceView({
                   <td className="px-4 py-3 text-gray-600">{b.client || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{place(b)}</td>
                   <td className={`px-4 py-3 text-end tabular-nums font-bold whitespace-nowrap ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</td>
+                  <td className="px-4 py-3 text-end tabular-nums text-gray-700 whitespace-nowrap">{kgCell(b)}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.inQty || "0"}</td>
                   <td className="px-4 py-3 text-gray-400 whitespace-nowrap" dir="ltr">{storageDate(b.inLast) || b.inLast || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.outQty || "0"}</td>
