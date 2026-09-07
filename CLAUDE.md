@@ -101,7 +101,9 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   pieces is 392 kg. Do not "correct" those piece weights from Master; the weight column is
   what makes the line readable.
 - The owner's own tab **«بحث سريع»** in the storage sheet is what he calls the quick search;
-  it got the same rule as a paste-ready formula (`../storage/QUICK-SEARCH-WEIGHT-2026-09-07.md`).
+  its column J carries the same rule as one MAP/LAMBDA spill, entered through the browser
+  pane on 2026-09-07 and checked against this code on a live line
+  (`../storage/QUICK-SEARCH-WEIGHT-2026-09-07.md`).
 - Someone renumbered «إيداع» column A on 2026-09-07 (contiguous ITQ0001–ITQ0226, contents
   untouched, still plain text). Numbers stay unique, so `webFindRow_` is unaffected — but
   any «إيداع» number quoted in these docs before that date is stale.
