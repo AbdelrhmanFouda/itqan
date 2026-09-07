@@ -1004,7 +1004,7 @@ function BalanceView({
     const w = weightOf(b);
     return w
       ? <span title={w.approx ? s.weightApprox : undefined}>{fmtKg(w)}</span>
-      : <span className="text-gray-300" title={s.weightUnknown}>—</span>;
+      : <span className="text-gray-400" title={s.weightUnknown}>—</span>;  // the same shade as the date dashes
   };
   // on a card the unit is spelled out, and only a product needs the extra line
   const kgLine = (b: StorageBalance) => {
@@ -1026,7 +1026,7 @@ function BalanceView({
     : <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700 text-xs"><MapPin size={11} />{s.filters.noLocation}</span>;
   return (
     <>
-      <p className="text-[11px] text-gray-400 mb-2">{s.tapRow}</p>
+      <p className="text-[11px] text-gray-400 mb-2">{s.tapRow} · {s.weightApprox}</p>
       {/* phones: cards */}
       <div className="sm:hidden space-y-2">
         {rows.map((b, i) => (
@@ -1044,7 +1044,7 @@ function BalanceView({
                 <p className={`text-lg font-bold tabular-nums ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</p>
                 {kgLine(b)}
               </div>
-              <ChevronRight size={16} className="text-gray-300 rtl:-scale-x-100" />
+              <ChevronRight size={16} className="self-center text-gray-300 rtl:-scale-x-100" />
             </div>
             <p className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-1.5">
               {place(b)}
@@ -1075,11 +1075,13 @@ function BalanceView({
                   className="hover:bg-blue-50/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-blue-50/60"
                 >
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{b.itemType}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{b.item}</td>
+                  {/* the name is an identifier: it scrolls with the table rather than wrapping
+                      into three lines when the kg column takes its room (seen at 1366px) */}
+                  <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{b.item}</td>
                   <td className="px-4 py-3 text-gray-600">{b.client || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{place(b)}</td>
                   <td className={`px-4 py-3 text-end tabular-nums font-bold whitespace-nowrap ${availCls(b.avail)}`}>{b.avail || "0"} {b.unit}</td>
-                  <td className="px-4 py-3 text-end tabular-nums text-gray-700 whitespace-nowrap">{kgCell(b)}</td>
+                  <td className="px-3 py-3 text-end tabular-nums whitespace-nowrap">{kgCell(b)}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.inQty || "0"}</td>
                   <td className="px-4 py-3 text-gray-400 whitespace-nowrap" dir="ltr">{storageDate(b.inLast) || b.inLast || "—"}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-gray-600 whitespace-nowrap">{b.outQty || "0"}</td>
