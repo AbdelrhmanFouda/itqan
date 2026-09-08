@@ -7,6 +7,7 @@ import { pd } from "@/lib/i18n.prod";
 import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
+import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN } from "@/lib/downtime";
 import { hasFullAccess } from "@/lib/roles";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -30,6 +31,8 @@ type Event = {
   id: string; date: string; machine: string; reason: string;
   minutes: number; startedAt: number; endedAt: number | null; createdBy: string;
   estimated?: boolean;
+  /** minutes the start was pulled back with «+30 دقيقة» — see backdate() below. */
+  backdatedMin?: number;
 };
 type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string };
 type OtherRow = { row: number; date: string; machine: string; minutes: number; notes: string };
@@ -252,6 +255,26 @@ export default function DowntimePage() {
     await load();
   }
 
+  /**
+   * «+30 دقيقة» — owner's rule, 2026-09-07 meeting: the technician logged the
+   * stoppage late, so each press pulls the START back one fixed step and the
+   * running counter visibly jumps by that much — that jump IS the feedback.
+   * The step and the 12-hour cap are enforced server-side (planBackdate);
+   * the button also disables at the cap so the floor never sees a refusal.
+   */
+  async function backdate(id: string) {
+    if (busy) return;
+    setBusy(true); setFailed(false);
+    const res = await authedFetch("/api/downtime", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, backdateMin: BACKDATE_STEP_MIN }),
+    }).catch(() => null);
+    setBusy(false);
+    if (!res || !res.ok) { setFailed(true); return; }
+    await loadQuick();
+  }
+
   // Only the MACHINE LIST gates the page. If the guarded read failed we still
   // render, say why, and let the operator start a stoppage — the action that
   // matters must not be held hostage by a list that failed to load.
@@ -354,6 +377,16 @@ export default function DowntimePage() {
                       {t.staleSince} {e.date}
                     </div>
                   )}
+                  {/* Logged late? Pull the start back one step per press — the
+                      counter above jumps, which is the feedback. Disabled at
+                      the server's cap so the floor never sees a refusal. */}
+                  <button
+                    onClick={() => backdate(e.id)}
+                    disabled={busy || (e.backdatedMin ?? 0) + BACKDATE_STEP_MIN > BACKDATE_CAP_MIN}
+                    className="mt-2 inline-flex min-h-11 items-center rounded-xl border-2 border-amber-400 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 active:bg-amber-50 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
+                  >
+                    {t.backdateHint} {t.backdate}
+                  </button>
                 </div>
                 <button
                   onClick={() => stop(e.id)}

@@ -12,6 +12,7 @@ import {
   type QuerySnapshot,
   type DocumentData,
 } from "firebase/firestore";
+import { planBackdate } from "./downtime";
 
 /**
  * Firestore data layer for Itqan.
@@ -543,6 +544,13 @@ export type DowntimeEvent = {
   /** who closed it — empty for a tapped stop (that was `createdBy` at the machine). */
   closedBy: string;
   /**
+   * Minutes the START was pulled back with the «+30 دقيقة» button (owner's
+   * rule, 2026-09-07 meeting) — cumulative, capped at BACKDATE_CAP_MIN in
+   * lib/downtime.ts. Kept so the cap survives across presses and devices;
+   * absent on events that were never backdated.
+   */
+  backdatedMin?: number;
+  /**
    * Has this stoppage's row reached «التوقفات»?
    *
    * `undefined` on every pre-cutover document (those were migrated by hand and
@@ -566,6 +574,7 @@ function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
     createdBy: d.createdBy ?? "",
     estimated: d.estimated ?? false,
     closedBy: d.closedBy ?? "",
+    backdatedMin: d.backdatedMin,
     // Left undefined rather than defaulted: "this document predates the sheet"
     // and "this row has not landed yet" are different states and only one of
     // them should be retried.
@@ -689,6 +698,35 @@ export async function stopDowntimeEvent(
 export async function deleteDowntimeEvent(id: string) {
   await deleteDoc(doc(db, PCOL.downtime, id));
   return { ok: true };
+}
+
+/**
+ * Pull an OPEN stoppage's start back one fixed step («+30 دقيقة» — owner's
+ * rule, 2026-09-07 meeting). All the rules live in `planBackdate()`
+ * (lib/downtime.ts, pure, tested): open events only, fixed step, 12 h cap.
+ * The minutes are still computed from the stored start on stop, so the
+ * adjusted start flows into «التوقفات» exactly like a timely tap would have.
+ */
+export async function backdateDowntimeEvent(id: string) {
+  const ref = doc(db, PCOL.downtime, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false as const, reason: "not_found" as const };
+  const d = snap.data() as DowntimeDoc;
+  const plan = planBackdate({
+    startedAt: d.startedAt ?? 0,
+    endedAt: d.endedAt ?? null,
+    backdatedMin: d.backdatedMin,
+  });
+  if (!plan.ok) return { ok: false as const, reason: plan.reason };
+  await updateDoc(ref, { startedAt: plan.startedAt, backdatedMin: plan.backdatedMin });
+  return {
+    ok: true as const,
+    event: shapeDowntime(id, {
+      ...d,
+      startedAt: plan.startedAt,
+      backdatedMin: plan.backdatedMin,
+    }),
+  };
 }
 
 

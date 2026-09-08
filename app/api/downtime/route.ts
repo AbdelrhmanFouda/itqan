@@ -3,11 +3,12 @@ import {
   getOpenDowntimeEvents,
   addDowntimeEvent,
   stopDowntimeEvent,
+  backdateDowntimeEvent,
   markDowntimeSynced,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
 import { factoryDay } from "@/lib/dates";
-import { isStaleOpen } from "@/lib/downtime";
+import { isStaleOpen, BACKDATE_STEP_MIN } from "@/lib/downtime";
 import {
   loadDowntimeRecords, appendDowntimeRow, flushPendingDowntime,
 } from "@/lib/downtime-data";
@@ -140,6 +141,29 @@ export async function PATCH(req: NextRequest) {
     const id = String(b.id ?? "").trim();
     if (!id) return NextResponse.json({ ok: false, reason: "no_id" }, { status: 400 });
     const actor = g.user.email || g.user.uid;
+
+    /**
+     * «+30 دقيقة» — owner's rule, 2026-09-07 meeting: a technician who logged a
+     * stoppage LATE pulls its start back in fixed 30-minute steps, so the
+     * minutes written on stop match when the machine really stopped.
+     *
+     * The step is fixed SERVER-side (a client cannot send 500), it works only
+     * on a still-open event (a written «التوقفات» row is never edited from
+     * here), and `planBackdate()` caps the total at 12 hours — beyond that it
+     * is a stale-open review for the owner, not a late tap. This is the one
+     * sanctioned exception to "the server stamps the start": bounded, stepped,
+     * and recorded on the event as `backdatedMin`.
+     */
+    if (typeof b.backdateMin !== "undefined") {
+      if (b.backdateMin !== BACKDATE_STEP_MIN) {
+        return NextResponse.json({ ok: false, reason: "bad_backdate" }, { status: 400 });
+      }
+      const bd = await backdateDowntimeEvent(id);
+      if (!bd.ok) {
+        return NextResponse.json(bd, { status: bd.reason === "not_found" ? 404 : 400 });
+      }
+      return NextResponse.json({ ok: true, event: bd.event });
+    }
 
     let res: Awaited<ReturnType<typeof stopDowntimeEvent>>;
     if (b.estimate === true) {

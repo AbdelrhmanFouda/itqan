@@ -184,6 +184,10 @@ export const pd = {
       stop: "Stop",
       running: "Stopped now",
       runningSince: "since",
+      // «+30 دقيقة» — owner's rule, 2026-09-07 meeting: logged late → pull the
+      // start back one fixed step per press.
+      backdateHint: "Started earlier?",
+      backdate: "+30 min",
       noneRunning: "Every machine is running.",
       today: "Stopped today",
       todayMinutes: "Minutes lost today",
@@ -390,6 +394,8 @@ export const pd = {
       stop: "رجعت تشتغل",
       running: "واقفة دلوقتي",
       runningSince: "من",
+      backdateHint: "بدأت قبل ما تسجّل؟",
+      backdate: "+30 دقيقة",
       noneRunning: "كل الماكينات شغالة.",
       today: "توقفات النهاردة",
       todayMinutes: "دقائق ضايعة النهاردة",

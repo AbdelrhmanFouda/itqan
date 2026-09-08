@@ -111,6 +111,22 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   untouched, still plain text). Numbers stay unique, so `webFindRow_` is unaffected — but
   any «إيداع» number quoted in these docs before that date is stale.
 
+## Recently landed (2026-09-08) — «+30 دقيقة»: a late-logged stoppage can pull its start back
+
+Owner's rule from the 2026-09-07 meeting, built in another chat and shipped from this one.
+A technician who tapped START late presses «بدأت قبل ما تسجّل؟ +30 دقيقة» on the running
+card; each press pulls the stoppage's START back one fixed step and the counter jumps —
+that jump is the feedback. The rules are in `planBackdate()` (`lib/downtime.ts`, pure,
+`tests/backdate.test.ts`): **open events only** (a written «التوقفات» row is never edited
+from here), the step is **fixed server-side** (`PATCH /api/downtime {id, backdateMin: 30}`
+— anything else is `bad_backdate`), the total is **capped at 12 h** (`BACKDATE_CAP_MIN`;
+further back is a stale-open review for the owner, not a late tap), and the cumulative
+`backdatedMin` lives on the Firestore event so the cap survives presses and devices. The
+minutes are still computed from the stored start on stop, so the moved start flows into
+«التوقفات» exactly like a timely tap. This is the one sanctioned exception to "the server
+stamps the start" — bounded, stepped, recorded. The four-tap flow itself is unchanged; the
+button sits on the running card, not in the start flow.
+
 ## Recently landed (2026-09-05) — Latin digits, and the sheet reader no longer waits
 
 - **Numbers are Latin digits in both languages (owner's word).** Every

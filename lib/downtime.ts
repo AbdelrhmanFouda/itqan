@@ -346,3 +346,41 @@ export function downtimeCsv(
   }
   return "﻿" + lines.join("\r\n") + "\r\n";
 }
+
+/* ------------------------- Backdating a start ------------------------ */
+
+/**
+ * «+30 دقيقة» — owner's rule from the 2026-09-07 meeting: a technician who
+ * logged a stoppage late can pull its START back in fixed 30-minute steps
+ * (the stoppage really began at 10:00, he tapped at 10:30 → one press).
+ *
+ * The step is FIXED and the total is CAPPED here, in code, because the server
+ * stamps `startedAt` precisely so a phone cannot invent downtime — this is the
+ * one sanctioned way to move it, and it must stay bounded:
+ *   - only an OPEN event (a written «التوقفات» row is never edited from here);
+ *   - only whole steps of BACKDATE_STEP_MIN;
+ *   - at most BACKDATE_CAP_MIN in total (12 h — one full shift). A stoppage
+ *     that began further back than that is a stale-open review for the owner,
+ *     not a late tap.
+ */
+export const BACKDATE_STEP_MIN = 30;
+export const BACKDATE_CAP_MIN = 720;
+
+export function planBackdate(ev: {
+  startedAt: number;
+  endedAt: number | null;
+  backdatedMin?: number;
+}):
+  | { ok: true; startedAt: number; backdatedMin: number }
+  | { ok: false; reason: "not_open" | "backdate_limit" } {
+  if (ev.endedAt != null) return { ok: false, reason: "not_open" };
+  const already = Math.max(0, ev.backdatedMin ?? 0);
+  if (already + BACKDATE_STEP_MIN > BACKDATE_CAP_MIN) {
+    return { ok: false, reason: "backdate_limit" };
+  }
+  return {
+    ok: true,
+    startedAt: ev.startedAt - BACKDATE_STEP_MIN * 60_000,
+    backdatedMin: already + BACKDATE_STEP_MIN,
+  };
+}
