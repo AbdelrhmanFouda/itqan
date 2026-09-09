@@ -91,8 +91,9 @@ problems: 401 machine-hours of «لا يوجد أمر شغل», and no reserved 
 - Tests: `views-matrix` (stock row, closed to the floor), `api-guards` (+stock),
   `page-fetches` (+/api/stock), `roles` (production's eight pages), `i18n-shape` (+`st`),
   `work-orders`, `stock` — 302 checks. `npm run smoke`/`speed` list the new page/route.
-- **Committed together with the eight voice-note fix files** the previous chat left
-  uncommitted (below). Not deployed until the owner pushes.
+- **Commit `5779218`, together with the eight voice-note fix files** the previous chat
+  left uncommitted (below) — **pushed and live the same evening** (owner's word); the
+  guarded `/api/stock` answered 401 on production within a minute of the push.
 
 ## Recently landed (2026-09-09) — the issues log speaks (voice notes)
 
