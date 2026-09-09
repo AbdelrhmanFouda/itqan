@@ -96,6 +96,10 @@ const TAB_ALIASES: Record<string, string[]> = {
  */
 const SHEET_TTL_SEC = 45;
 export const SHEET_CACHE_TAG = "sheet-read";
+/** The most one bridge GET may take. The bridge has answered in 58 s during a
+ *  slow spell, so this is generous — but finite: a hung answer used to hold
+ *  the instance's whole read queue until the platform killed the function. */
+const BRIDGE_READ_MS = 40_000;
 /** `at` — when the bridge answered; set by remember(), carried by every copy,
  *  so a route can tell the page how old the numbers it shows are. */
 type SheetRead = { title: string; values: string[][]; at?: number };
@@ -331,16 +335,19 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
       const name = step;
       try {
         const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
-        // `revalidate` and `cache: "no-store"` conflict — Next ignores BOTH if
-        // they are set together, which would silently disable the cache. Pick
-        // exactly one.
+        // A PLAIN fetch, bounded — no Next data cache on the read path since
+        // 2026-09-10. The night before, every sheet-backed route on production
+        // hung until the platform killed it (504 after 300 s) while the
+        // token-only routes answered in 200 ms: the reads had a dependency on
+        // Vercel's cache service that never resolved, and this fetch carried
+        // no timeout at all. The per-instance copy above (and the bounded,
+        // optional shared copy) is the cache now; the bridge is the only
+        // thing this call waits for, and never for more than BRIDGE_READ_MS.
+        // `fresh` is kept as a parameter (the semantics of who asks for it
+        // matter above), but both paths read the bridge the same way.
+        void fresh;
         const res = await queued(() =>
-          fetch(u, {
-            redirect: "follow",
-            ...(fresh
-              ? { cache: "no-store" as const }
-              : { next: { revalidate: SHEET_TTL_SEC, tags: [SHEET_CACHE_TAG] } }),
-          }),
+          fetch(u, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(BRIDGE_READ_MS) }),
         );
         if (res.ok) {
           // Under load the bridge answers with an HTML error page, not JSON.

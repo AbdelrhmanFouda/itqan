@@ -25,9 +25,9 @@
  * only routes answered in 200 ms. Measured the next morning, not inferred.
  * So: a read waits at most GET_TIMEOUT_MS, a write or an expiry at most
  * SET_TIMEOUT_MS, a timeout opens the breaker (every call answers "no copy"
- * at once until it closes), and SHEET_SHARED_COPY=off in the environment
- * turns the layer off entirely without a deploy. The bridge path underneath
- * is exactly what it was before this file existed.
+ * at once until it closes), and the layer is OFF unless SHEET_SHARED_COPY=on
+ * is set in the environment — switched on and off without a deploy. The
+ * bridge path underneath is exactly what it was before this file existed.
  *
  * Rules the callers keep:
  *  - the copy carries the time it was READ (`at`); the reader judges it with
@@ -44,7 +44,11 @@ import { getCache } from "@vercel/functions";
 import type { StaleCopy } from "@/lib/stale-copy";
 
 const NAMESPACE = "itqan";
-const ENABLED = process.env.SHEET_SHARED_COPY !== "off";
+/** OFF unless the environment says `SHEET_SHARED_COPY=on`. Opt-in, because the
+ *  first deploy (below) hung production; turn it on in Vercel's environment
+ *  variables once /api/health shows the build live and the reads answer, then
+ *  watch the numbers — and turn it off again the same way if they do not. */
+const ENABLED = process.env.SHEET_SHARED_COPY === "on";
 const GET_TIMEOUT_MS = 700;
 const SET_TIMEOUT_MS = 1500;
 const BREAK_MS = 5 * 60 * 1000;
