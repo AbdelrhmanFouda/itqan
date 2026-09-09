@@ -72,11 +72,15 @@ test("worker cannot reach the pages it was not given", () => {
 
 /* -------------------- production and quality have diverged ---------------- */
 
-test("production sees exactly its seven pages", () => {
+test("production sees exactly its eight pages", () => {
+  // `stock` added 2026-09-09: the read-only warehouse view for «can I promise
+  // this?» — production's, not quality's and not the storekeeper's.
   assert.deepEqual(
     keysFor("production").sort(),
-    ["assistant", "downtime", "issues", "jobs", "overview", "performance", "production"],
+    ["assistant", "downtime", "issues", "jobs", "overview", "performance", "production", "stock"],
   );
+  assert.equal(canAccess("quality", "/dashboard/stock"), false, "quality was not given stock");
+  assert.equal(canAccess("storage", "/dashboard/stock"), false, "the storekeeper has the full storage page instead");
 });
 
 test("quality sees exactly its five pages", () => {

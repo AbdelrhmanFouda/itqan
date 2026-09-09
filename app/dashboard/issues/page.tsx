@@ -134,6 +134,9 @@ export default function IssuesPage() {
   const errorText = useCallback((reason: string) =>
     reason === "row_changed" ? t.rowChanged
     : reason === "audio_unsupported" ? t.audioNeedsBridge
+    // The bridge is deployed but Drive has not been authorized yet (seen
+    // 2026-09-09 on the very first save) — a different action for the owner.
+    : reason === "drive_error" ? t.audioDriveError
     : reason === "audio_too_large" ? t.audioTooLong
     : reason === "description_required" ? t.descRequired
     : t.saveFailed, [t]);
@@ -388,6 +391,7 @@ export default function IssuesPage() {
           open
           onClose={() => setAdding(false)}
           onSaved={() => { notify("ok", t.logged); load(); }}
+          onRefresh={load}
           machines={machines}
           products={products}
           audioOk={audioOk}
@@ -492,9 +496,9 @@ function CategoryChips({ value, onChange, t }: { value: string; onChange: (c: st
 /* ------------------------------ new issue -------------------------------- */
 
 function NewIssueSheet({
-  open, onClose, onSaved, machines, products, audioOk, t, c, isAr, errorText,
+  open, onClose, onSaved, onRefresh, machines, products, audioOk, t, c, isAr, errorText,
 }: {
-  open: boolean; onClose: () => void; onSaved: () => void;
+  open: boolean; onClose: () => void; onSaved: () => void; onRefresh: () => void;
   machines: Machine[]; products: string[]; audioOk: boolean;
   t: Strings; c: Common; isAr: boolean; errorText: (reason: string) => string;
 }) {
@@ -529,7 +533,14 @@ function NewIssueSheet({
       if (files.solution) fd.set("solutionAudio", files.solution.blob, `solution.${extFor(files.solution.mime)}`);
       const res = await authedFetch("/api/issues", { method: "POST", body: fd });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; reason?: string };
-      if (!res.ok || !j.ok) { setErr(errorText(j.reason || `http_${res.status}`)); setSaving(false); return; }
+      if (!res.ok || !j.ok) {
+        setErr(errorText(j.reason || `http_${res.status}`)); setSaving(false);
+        // The bridge is at-least-once: a "failed" save may have landed (seen
+        // 2026-09-09). Refresh the list behind the sheet so the row shows up
+        // and nobody saves it twice.
+        onRefresh();
+        return;
+      }
       setSaving(false);
       onSaved();
       onClose();

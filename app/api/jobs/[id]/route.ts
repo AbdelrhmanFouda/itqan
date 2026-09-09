@@ -5,6 +5,8 @@ import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 import { resolveMoldNumber } from "@/lib/mold-number";
 import { masterRowByName, masterRowForDisplay } from "@/lib/master-lookup";
+import { codeKey, machineMatch, parseQuantity } from "@/lib/work-orders";
+import { latinDigits } from "@/lib/dates";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
@@ -131,6 +133,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json(res, { status: res.ok ? 200 : 400 });
     }
 
+    const bad = (reason: string, status = 400) => NextResponse.json({ ok: false, reason }, { status });
+
+    // Optional identity check (the list page's one-tap status change sends
+    // it): the row number the phone holds came from an earlier read and a
+    // colleague edits this tab too. On a FRESH read the row must still carry
+    // the same job code, or nothing is written — 409, same shape as
+    // PATCH /api/issues/[row].
+    const expect = body.expect;
+    if (expect && typeof expect === "object") {
+      const fresh = await getRecords("jobs", { fresh: true });
+      const rec = fresh.records.find((r) => r.row === Number(id));
+      const want = codeKey(String((expect as { code?: unknown }).code ?? ""));
+      if (!rec || !want || codeKey(rec.code) !== want) return bad("row_changed", 409);
+    }
+
     const changes: Record<string, string> = {};
     for (const [k, v] of Object.entries(body)) {
       const key = k === "qtyOrdered" ? "qty" : k;
@@ -140,8 +157,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // !K accepts EXACTLY four values; an unknown one would be rejected by the
       // sheet mid-batch and trip the rollback machinery, so refuse it here with
       // a clean validation error before it can reach a write.
-      if (key === "status" && !isJobStatus(val)) {
-        return NextResponse.json({ ok: false, reason: "invalid_status" }, { status: 400 });
+      if (key === "status" && !isJobStatus(val)) return bad("invalid_status");
+      // The same three rules a new order obeys (app/api/jobs/route.ts): a
+      // quantity is a plain number of kilograms, material issued too, and a
+      // machine is a registry label — written in the registry's own spelling.
+      if (key === "qty" && val.trim()) {
+        const q = parseQuantity(val);
+        if (q.value === null || !(q.value > 0)) return bad("bad_qty");
+        changes[key] = String(q.value);
+        continue;
+      }
+      if (key === "materialIssued" && val.trim() && parseQuantity(val).unreadable) return bad("bad_material_issued");
+      if (key === "dueDate" && val.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return bad("missing_due");
+      if (key === "machine" && val.trim()) {
+        const machines = await getRecords("machines");
+        const labels = machines.records
+          .map((m) => (m.label || "").trim() || (m.code && m.name ? `${m.code.trim()} — ${latinDigits(m.name.trim())}` : ""))
+          .filter(Boolean);
+        const mm = machineMatch(latinDigits(val.trim()), labels);
+        if (!mm.matched) return bad("bad_machine");
+        changes[key] = mm.label;
+        continue;
       }
       changes[key] =
         key === "status" ? jobStatusToSheet(val) : key === "priority" ? jobPriorityToSheet(val) : val;

@@ -32,7 +32,7 @@ const TIMEOUT_MS = 60000;
 const PAGES = [
   "/", "/login", "/dashboard", "/dashboard/finance", "/dashboard/quality", "/dashboard/sales",
   "/dashboard/machines", "/dashboard/molds", "/dashboard/products", "/dashboard/jobs",
-  "/dashboard/production", "/dashboard/downtime", "/dashboard/storage", "/dashboard/issues",
+  "/dashboard/production", "/dashboard/downtime", "/dashboard/storage", "/dashboard/stock", "/dashboard/issues",
   "/dashboard/performance", "/dashboard/assistant", "/dashboard/reports", "/dashboard/clients",
   "/dashboard/approvals",
 ];

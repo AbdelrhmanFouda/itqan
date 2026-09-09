@@ -47,10 +47,66 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-09, second chat) — the order flow: «المتاح في المخزن» + «أوامر الشغل»
+
+Brief from the management chat (`../website-brief-order-flow-2026-09-09.md`); full
+story and the owner's steps in `../CHANGES-2026-09-09-order-flow.md`. Two measured
+problems: 401 machine-hours of «لا يوجد أمر شغل», and no reserved quantity anywhere.
+
+- **`/dashboard/stock` — «المتاح في المخزن», READ-ONLY, production role** (NAV key
+  `stock`; owner/manager too; not `storage`, whose page records movements). Per item:
+  المتوفر (Σ «الرصيد الحالي» lines) · المحجوز (Σ «الكمية المطلوبة» on OPEN work orders,
+  kg → pieces via Master's piece weight) · **المتاح** = المتوفر − المحجوز. `GET /api/stock`
+  is the only route and has no POST. Rules in **`lib/stock.ts`** (pure, tested): never
+  add two units — a product whose order cannot become pieces, or which the warehouse
+  counts at a different piece weight than Master (the weight-only «وزن الحبة» = 1
+  products, detected from the deposit log by `dominantGrams`), reads «الوحدة مختلفة»;
+  a blank/unreadable order quantity reads «الكمية غير معروفة»; **materials are not
+  reserved** (an order names a product, not a grade) and the row says so. Default sort
+  المتاح ascending. Rows open into their lines and the orders behind the reservation.
+- **«الحد الأدنى» from «كتالوج الخامات» is a PROBE** (`supportsCatalog` in
+  `lib/storage.ts`): the deployed v4.1 storage bridge answers no `catalog` key
+  (measured 2026-09-09), so the column/tile stay hidden and the legend says why. The
+  owner adds three lines to `webData_()` and redeploys (CHANGES doc §2); nothing on the
+  site changes.
+- **`/dashboard/jobs` rebuilt** around **`lib/work-orders.ts`** (pure, 28 tests): open
+  orders first, grouped by status (running → not started → on hold → typed words →
+  done, collapsed), due date ascending with undated LAST and amber; late is red with
+  the day count; tiles filter. **One-tap «ابدأ التشغيل»** (status IS the go-ahead) →
+  `PATCH /api/jobs/[id]` with `expect: {code}` — 409 `row_changed` on a fresh-read
+  mismatch, the same shape as the issues route. Every target is one of «أوامر العمل»!K's
+  four values.
+- **Four live defects are refused on write and flagged on read:** a duplicated code
+  (`Pro/tec 01`, rows 15+16 — banner + pill, POST 409 `duplicate_code` on a fresh read);
+  a machine that is not a registry label (all 10 rows: «ماكينة 100», «220», «280» —
+  amber «غير مطابق للسجل», POST/PATCH `bad_machine`; **the value written is the
+  registry's spelling, and the three forms that wrote the bare tonnage now write the
+  label**); a non-numeric quantity («3.1طن» in H16 — `parseQuantity` says UNREADABLE and
+  nothing is parsed out of it; the old `num()` read 3.1 kg); no due date (7 of 10 rows —
+  required on POST, `missing_due`). The product must be a Master name (Master's spelling
+  is written, so the sheet's «حالة الربط» links).
+- ⚠ `loadJobs()` now returns `duplicates` and `registryLabels`, and every job carries
+  `qtyUnreadable`/`qtyRaw`, `materialIssuedUnreadable`, `machineMatched`, `codeDuplicate`,
+  `open`. `machine` is the registry label when matched.
+- Tests: `views-matrix` (stock row, closed to the floor), `api-guards` (+stock),
+  `page-fetches` (+/api/stock), `roles` (production's eight pages), `i18n-shape` (+`st`),
+  `work-orders`, `stock` — 302 checks. `npm run smoke`/`speed` list the new page/route.
+- **Committed together with the eight voice-note fix files** the previous chat left
+  uncommitted (below). Not deployed until the owner pushes.
+
 ## Recently landed (2026-09-09) — the issues log speaks (voice notes)
 
 Owner's ask: the worker records Arabic audio of the issue and of the solution.
 Full story and the owner's deploy steps in `../CHANGES-2026-09-09.md`.
+
+**Repo state at the end of that night:** the feature is commit `e1e4010`, pushed, and
+production serves it (`/api/issues` answers `audio.supported: true`). The fixes from the
+live run — `authorizeDrive` in `apps-script.gs`, bridge timeouts and the cache drop on
+non-ok answers in `lib/sheets.ts`, the fresh-read fallback in `lib/issues-data.ts`, the
+WebM-first MIME order in `lib/issues.ts` (+ its test), the `drive_error` string and the
+refresh-after-failure in the page, this file — are **UNCOMMITTED** (8 files, `git status`
+shows them). Commit them with whatever the next chat changes; they are tested
+(274/274) and typecheck clean.
 
 - **Where a recording lives:** the owner's Drive, folder «تسجيلات الأعطال» beside the
   workbook, written by a new bridge action `saveAudio` and read back by `?audio=<id>`
@@ -90,6 +146,16 @@ Full story and the owner's deploy steps in `../CHANGES-2026-09-09.md`.
   empty diff → `unchanged`, bad status → 400, unknown clip → 404, no text and no
   recording → 400, a recording against the old bridge → 409 `audio_unsupported`.
   `npm test` 274/274, `npm run build` clean.
+- **Then LIVE, the same evening** (bridge v5 + `authorizeDrive`): a test issue (row 15)
+  with a WAV clip in I and a Chrome-recorded Opus clip in J, both played back through
+  `/api/issues/audio` byte-for-byte and heard on the page. Three things the run
+  taught, all fixed: (1) **the bridge wrote the row and its redirect hop answered
+  404** — `postAction` now drops the cached copy on ANY non-ok answer and the sheet
+  refreshes the list after a failed save, `readIssueAudio` does one fresh read
+  before a 404; (2) **Chrome's `audio/mp4` is `audio/mp4;codecs=opus`** — WebM/Opus
+  is asked for first, mp4 is Safari's; (3) the bridge file calls had no timeout on a
+  serial queue — 20 s / 90 s / 60 s now. Deploying a new version did NOT grant the
+  new Drive scope; the page shows `drive_error` as its own message.
 - **Not built:** transcription (Gemini could fill «الوصف» from the clip, with the
   worker confirming the words first — a separate decision) and deleting an issue from
   the site.

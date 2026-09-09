@@ -45,6 +45,19 @@ export type StorageLists = {
   weights: Record<string, number>;
 };
 
+// One row of «كتالوج الخامات» (A..F: الخامة · اللون · النوع (بكر / كسر) ·
+// الوحدة · الحد الأدنى (كجم) · ملاحظات). Served only by a bridge whose
+// webData_() includes `catalog` — the v4.1 deployment measured on 2026-09-09
+// does NOT, so this arrives empty until the owner adds it (see CLAUDE.md →
+// Storage module). «الحد الأدنى» was filled on 0 of 64 rows that day; the
+// owner is filling it from the safety-stock sheet he was sent.
+export type StorageCatalogRow = {
+  item: string; colour: string; kind: string; unit: string;
+  /** «الحد الأدنى (كجم)» as a number, null when blank. */
+  min: number | null;
+  notes: string;
+};
+
 export type StorageData = {
   configured: boolean;
   ok: boolean;
@@ -52,6 +65,11 @@ export type StorageData = {
   inLog: StorageMovement[];
   outLog: StorageMovement[];
   lists: StorageLists;
+  /** «كتالوج الخامات», [] on a bridge that does not serve it. */
+  catalog: StorageCatalogRow[];
+  /** The deployed bridge answered a `catalog` key at all (a probe, like
+   *  supportsForClient — the site never assumes the deployment's version). */
+  supportsCatalog: boolean;
   /**
    * Whether the DEPLOYED bridge knows «صرف لصالح» — measured from the width of
    * a log row (15 columns since sheet v4), not assumed. Verified 2026-08-30: the
@@ -90,7 +108,19 @@ const EMPTY: StorageData = {
   balance: [], inLog: [], outLog: [],
   lists: { products: [], materials: [], clients: [], locations: [], weights: {} },
   supportsForClient: false,
+  catalog: [], supportsCatalog: false,
 };
+
+function mapCatalog(rows: string[][]): StorageCatalogRow[] {
+  return rows.map((r) => {
+    const minText = clean(r[4]).replace(/,/g, "");
+    const min = /^\d+(\.\d+)?$/.test(minText) ? Number(minText) : null;
+    return {
+      item: clean(r[0]), colour: clean(r[1]), kind: clean(r[2]), unit: clean(r[3]) || "كجم",
+      min, notes: clean(r[5]),
+    };
+  }).filter((c) => c.item);
+}
 
 function mapBalance(rows: string[][]): StorageBalance[] {
   return rows.map((r) => ({
@@ -125,12 +155,15 @@ export async function getStorageData(): Promise<StorageData> {
         products?: string[]; materials?: string[]; clients?: string[];
         locations?: string[]; weights?: Record<string, number>;
       };
+      catalog?: string[][];
     };
     if (!json.ok) return EMPTY;
     const width = Math.max(json.inLog?.[0]?.length ?? 0, json.outLog?.[0]?.length ?? 0);
     return {
       configured: true, ok: true,
       supportsForClient: width >= 15,
+      supportsCatalog: Array.isArray(json.catalog),
+      catalog: mapCatalog(json.catalog ?? []),
       balance: mapBalance(json.balance ?? []),
       inLog: mapLog(json.inLog ?? [], "إيداع"),
       outLog: mapLog(json.outLog ?? [], "سحب"),

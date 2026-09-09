@@ -9,6 +9,9 @@ import {
 } from "@/lib/run-join";
 import { sumCavities } from "@/lib/cavities";
 import { resolveMoldNumber } from "@/lib/mold-number";
+import {
+  codeKey, duplicateCodes, isOpenOrder, machineMatch, parseQuantity, type DuplicateCode,
+} from "@/lib/work-orders";
 
 /**
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
@@ -97,15 +100,33 @@ export type JobShaped = {
    *  order and repeats across customers. */
   masterMoldNumber: string;
   masterMoldNotesNumber: string;
+  // --- the order-flow facts (2026-09-09, lib/work-orders.ts) ---
+  /** «الكمية المطلوبة (كجم)» is not a plain number («3.1طن» is live in the
+   *  tab). qtyOrderedKg is 0 then and qtyRaw carries the cell — nothing is
+   *  parsed out of it. */
+  qtyUnreadable: boolean;
+  qtyRaw: string;
+  /** Same for «الخامة المصروفة (كجم)», which is kept as text for display. */
+  materialIssuedUnreadable: boolean;
+  /** The machine cell matches a registry label («PQ 7 — 100»); `machine`
+   *  then carries the registry's own spelling. False for the legacy
+   *  «ماكينة 100» / «220» / «280» rows, which are shown as unmatched. */
+  machineMatched: boolean;
+  /** The job code appears on another row too (`Pro/tec 01`, twice). */
+  codeDuplicate: boolean;
+  /** Still open — reserves its quantity and sits at the top of the list. */
+  open: boolean;
 };
-
-const DONE = new Set(["Completed", "Delivered"]);
 
 export async function loadJobs(): Promise<{
   jobs: JobShaped[];
   runsFor: (job: JobShaped) => JobRun[];
   writable: boolean;
   configured: boolean;
+  /** Every code held by more than one row. */
+  duplicates: DuplicateCode[];
+  /** «الماكينات»!J as read — the labels a work order may name. */
+  registryLabels: string[];
 }> {
   const [jobsTab, prodTab, masterTab, machinesTab, captured] = await Promise.all([
     getRecords("jobs"),
@@ -120,6 +141,19 @@ export async function loadJobs(): Promise<{
     getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
     loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
   ]);
+
+  // The registry's labels — «الماكينات»!J («PQ 7 — 100»), the machine's
+  // identity everywhere; built from code + tonnage when J is blank, the same
+  // way /api/machines builds it. Never hardcoded: the registry has been
+  // renumbered four times.
+  const registryLabels = machinesTab.records
+    .map((m) => {
+      const label = (m.label || "").trim();
+      if (label) return label;
+      const code = (m.code || "").trim(), ton = latinDigits((m.name || "").trim());
+      return code && ton ? `${code} — ${ton}` : "";
+    })
+    .filter(Boolean);
 
   // Product → standards, first row wins (same as the sheet's VLOOKUP) — and a
   // count per name, because "first row wins" is only honest while the name is
@@ -206,8 +240,14 @@ export async function loadJobs(): Promise<{
   };
 
   const jobs: JobShaped[] = jobsTab.records.map((r) => {
-    const kg = num(r.qty);
+    // «الكمية المطلوبة (كجم)» is a plain number of kilograms or it is
+    // UNREADABLE — a unit is never parsed out of the cell (3.1 is not 3,100).
+    const q = parseQuantity(r.qty);
+    const kg = q.value ?? 0;
     const s = std.get(normKey(r.product));
+    // The sheet stores these in Arabic; the app speaks English internally.
+    const status = r.status ? jobStatusFromSheet(r.status) : "Not Started";
+    const mm = machineMatch(latinDigits((r.machine || "").trim()), registryLabels);
     // No piece weight in Master ⇒ we cannot state a piece count. Report 0 and
     // let the UI fall back to showing the kilograms, rather than inventing one.
     const pieces = s && s.w > 0 ? Math.round((kg * 1000) / s.w) : 0;
@@ -235,11 +275,16 @@ export async function loadJobs(): Promise<{
       remaining: 0,
       startDate: normalizeDate(r.startDate),
       dueDate: normalizeDate(r.dueDate),
-      // The sheet stores these in Arabic; the app speaks English internally.
-      status: r.status ? jobStatusFromSheet(r.status) : "Not Started",
+      status,
       priority: r.priority ? jobPriorityFromSheet(r.priority) : "Normal",
-      machine: latinDigits((r.machine || "").trim()),
+      machine: mm.label,
+      machineMatched: mm.matched,
       materialIssued: r.materialIssued || "",
+      materialIssuedUnreadable: !!(r.materialIssued || "").trim() && parseQuantity(r.materialIssued).unreadable,
+      qtyUnreadable: q.unreadable,
+      qtyRaw: q.raw,
+      codeDuplicate: false, // set below, once every row is known
+      open: isOpenOrder(status),
       masterbatch: r.masterbatch || "",
       instructions: r.instructions || "",
       notes: r.notes || "",
@@ -253,9 +298,16 @@ export async function loadJobs(): Promise<{
     return job;
   });
 
-  // Active jobs first (soonest due first), finished ones last.
+  // A code held by more than one row — `Pro/tec 01` on rows 15 and 16 as of
+  // 2026-09-09. Flagged on every row that carries it and listed once at the
+  // top; POST /api/jobs refuses to add a third.
+  const duplicates = duplicateCodes(jobs);
+  const dupKeys = new Set(duplicates.map((d) => d.key));
+  for (const j of jobs) j.codeDuplicate = dupKeys.has(codeKey(j.code));
+
+  // Open jobs first (soonest due first), finished ones last.
   jobs.sort((a, b) => {
-    const ad = DONE.has(a.status) ? 1 : 0, bd = DONE.has(b.status) ? 1 : 0;
+    const ad = a.open ? 0 : 1, bd = b.open ? 0 : 1;
     if (ad !== bd) return ad - bd;
     const adate = a.dueDate || "9999", bdate = b.dueDate || "9999";
     if (adate !== bdate) return adate < bdate ? -1 : 1;
@@ -267,5 +319,7 @@ export async function loadJobs(): Promise<{
     runsFor: (job) => matches(job).sort((a, b) => (a.date > b.date ? -1 : 1)),
     writable: jobsTab.writable,
     configured: jobsTab.fields.length > 0,
+    duplicates,
+    registryLabels,
   };
 }

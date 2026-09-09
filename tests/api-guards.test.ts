@@ -64,6 +64,10 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "runs":                { GET: "open", POST: "guard" },
   "runs/[id]":           { DELETE: "guard" },
   "sheet/[entity]":      { GET: "conditional", PATCH: "guard" },
+  // The production side's warehouse view (2026-09-09): stocks, clients and
+  // order quantities — guarded like /api/storage and /api/jobs. Read-only by
+  // construction: the file has no POST, and adding one here is a decision.
+  "stock":               { GET: "guard" },
   "storage":             { GET: "guard", POST: "token" },
 };
 

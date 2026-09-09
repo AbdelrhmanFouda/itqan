@@ -19,13 +19,14 @@ import { ad } from "../lib/i18n.auth.ts";
 import { ag } from "../lib/i18n.agent.ts";
 import { sd } from "../lib/i18n.storage.ts";
 import { mr } from "../lib/i18n.register.ts";
+import { st } from "../lib/i18n.stock.ts";
 import { ALL_ROLES } from "../lib/roles.ts";
 import {
   MACHINE_STATUSES, MOLD_STATUSES, JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
 } from "../lib/prod-meta.ts";
 
 type Table = { en: unknown; ar: unknown };
-const TABLES: Record<string, Table> = { t, pd, ad, ag, sd, mr };
+const TABLES: Record<string, Table> = { t, pd, ad, ag, sd, mr, st };
 
 /** Every leaf of a value as "path = kind" lines; arrays contribute their length. */
 function shape(v: unknown, at = ""): string[] {
@@ -64,7 +65,7 @@ test("no translation is an empty string", () => {
 test("the Arabic half is actually Arabic where it is prose (spot-check the page titles)", () => {
   // Product codes and brand names are allowed to be Latin; the titles are not.
   const arabic = /[؀-ۿ]/;
-  for (const s of [pd.ar.overview.title, pd.ar.jobs.title, pd.ar.runs.title, mr.ar.title, mr.ar.number, sd.ar.title, ad.ar.auth.signOut]) {
+  for (const s of [pd.ar.overview.title, pd.ar.jobs.title, pd.ar.runs.title, mr.ar.title, mr.ar.number, sd.ar.title, st.ar.title, st.ar.cols.net, pd.ar.jobs.start, ad.ar.auth.signOut]) {
     assert.ok(arabic.test(s), `«${s}» is not Arabic`);
   }
   for (const s of [pd.en.overview.title, pd.en.jobs.title, mr.en.title, mr.en.number]) {

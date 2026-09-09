@@ -295,6 +295,23 @@ function _ensureTab(name, headers) {
 const AUDIO_FOLDER = "تسجيلات الأعطال";
 const AUDIO_MAX_BYTES = 5 * 1024 * 1024;
 
+/**
+ * RUN THIS ONCE from the editor (toolbar → pick `authorizeDrive` → Run) after
+ * deploying version 5. Deploying alone did NOT grant the Drive permission —
+ * measured 2026-09-09: the web app answered
+ * «ليس لديك إذن لاستدعاء DriveApp.getRootFolder» on the first save. Running
+ * any function that touches DriveApp from the editor opens the permission
+ * prompt; allow it, and the deployed web app (which runs as you) is covered
+ * too — no redeploy needed. Logs the folder it will use.
+ */
+function authorizeDrive() {
+  const folder = _audioFolder();
+  const msg = "✔ Drive OK — recordings folder: " + folder.getName() + " (" + folder.getUrl() + ")";
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
+}
+
 /** The recordings folder, created on first use next to this workbook. */
 function _audioFolder() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();

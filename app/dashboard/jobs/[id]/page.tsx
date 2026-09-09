@@ -45,7 +45,8 @@ type Run = {
   goodUnits: number; scrapUnits: number; downtimeMin: number;
   downtimeReason: string; operator: string; note: string;
 };
-type MachineAgg = { name: string };
+// `label` is the registry identity («PQ 7 — 100»); `name` is the bare tonnage.
+type MachineAgg = { name: string; label: string };
 type Mold = { row: number; code?: string; name?: string };
 
 export default function JobDetailPage() {
@@ -119,7 +120,7 @@ export default function JobDetailPage() {
     await authedFetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, product: job.product }),
+      body: JSON.stringify({ ...form, machineCode: form.machine, product: job.product }),
     });
     setOpen(false);
     setSaving(false);
@@ -543,10 +544,12 @@ export default function JobDetailPage() {
               </select>
             </Field>
             <Field label={p.runs.machine}>
+              {/* The registry LABEL, same as the production page's run form —
+                  «الإنتاج»!C joins on it; a bare tonnage cannot be joined. */}
               <select className={inputCls} value={form.machine} onChange={(e) => set("machine", e.target.value)}>
                 <option value="">{p.common.select}</option>
                 {machines.map((m) => (
-                  <option key={m.name} value={m.name}>{m.name}</option>
+                  <option key={m.label} value={m.label}>{m.label}</option>
                 ))}
               </select>
             </Field>
@@ -623,11 +626,14 @@ export default function JobDetailPage() {
                 <option value="">{p.common.select}</option>
                 {/* Keep the current value selectable even if the registry was
                     renumbered since the job was created. */}
-                {editForm.machine && !machines.some((m) => m.name === editForm.machine) && (
+                {/* The value written is the registry LABEL («PQ 7 — 100»), the
+                    machine's identity everywhere — the tonnage alone («220»)
+                    is what the legacy rows hold and cannot be joined. */}
+                {editForm.machine && !machines.some((m) => m.label === editForm.machine) && (
                   <option value={editForm.machine}>{editForm.machine}</option>
                 )}
                 {machines.map((m) => (
-                  <option key={m.name} value={m.name}>{m.name}</option>
+                  <option key={m.label} value={m.label}>{m.label}</option>
                 ))}
               </select>
             </Field>

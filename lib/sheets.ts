@@ -685,12 +685,20 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
       body: JSON.stringify({ token: SCRIPT_SECRET, ...payload }),
       redirect: "follow",
     });
-    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
-    const json = (await res.json().catch(() => ({}))) as {
+    // The bridge is AT-LEAST-ONCE: an answer that is not a clean JSON `ok`
+    // (an HTTP error, an HTML page) may still sit on top of a row that DID
+    // land — measured 2026-09-09: an append wrote row 15 of «الأعطال» and the
+    // redirect hop then answered 404. Drop the cached copy on every such
+    // answer, so the next read shows the sheet as it is rather than tempting
+    // the user into a second, duplicate write.
+    if (!res.ok) { invalidateSheetCache(); return { ok: false, reason: `http_${res.status}` }; }
+    const text = await res.text();
+    let json: {
       ok?: boolean; error?: string;
       // Only from a bridge new enough to roll a rejected batch back itself.
       at?: string | null; message?: string; rolledBack?: number; notRolledBack?: string[];
     };
+    try { json = JSON.parse(text); } catch { invalidateSheetCache(); return { ok: false, reason: "unparseable" }; }
     // A stale copy after a successful write would show the crew their own
     // edit missing for the rest of the TTL.
     if (json.ok) invalidateSheetCache();
@@ -833,7 +841,9 @@ export async function bridgeFeatures(): Promise<BridgeFeatures> {
   let audio = false;
   try {
     const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
-    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow" }));
+    // Every file call below is bounded: the bridge is ONE serial queue, and a
+    // call that never returns would hold every sheet read behind it.
+    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000) }));
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; features?: unknown };
     audio = json.ok === true && Array.isArray(json.features) && json.features.includes("audio");
   } catch {
@@ -857,11 +867,13 @@ export async function bridgeSaveFile(file: { name: string; mime: string; base64:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: SCRIPT_SECRET, saveAudio: { name: file.name, mime: file.mime, data: file.base64 } }),
         redirect: "follow",
+        // A 3.5 MB clip as base64 is ~4.7 MB up to Apps Script — generous, but finite.
+        signal: AbortSignal.timeout(90_000),
       }),
     );
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
     const text = await res.text();
-    let json: { ok?: boolean; id?: string; url?: string; error?: string };
+    let json: { ok?: boolean; id?: string; url?: string; error?: string; message?: string };
     try {
       json = JSON.parse(text);
     } catch {
@@ -870,6 +882,10 @@ export async function bridgeSaveFile(file: { name: string; mime: string; base64:
       return { ok: false, reason: text.trim().startsWith("<") ? "audio_unsupported" : "unparseable" };
     }
     if (json.ok && json.id) return { ok: true, id: json.id, url: json.url || "" };
+    // The bridge's own words are the useful part: on 2026-09-09 the first save
+    // failed with «ليس لديك إذن لاستدعاء DriveApp» — the deployment was live but
+    // the Drive permission had not been granted (run authorizeDrive once).
+    if (json.message) console.error(`[sheets] saveAudio refused (${json.error}): ${json.message}`);
     return { ok: false, reason: json.error === "no_tab" ? "audio_unsupported" : json.error || "script_error" };
   } catch {
     return { ok: false, reason: "request_failed" };
@@ -885,10 +901,10 @@ export async function bridgeReadFile(id: string): Promise<ReadFile> {
   if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_configured" };
   try {
     const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&audio=${encodeURIComponent(id)}`;
-    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow" }));
+    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(60_000) }));
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
     const text = await res.text();
-    let json: { ok?: boolean; mime?: string; name?: string; data?: string; error?: string };
+    let json: { ok?: boolean; mime?: string; name?: string; data?: string; error?: string; message?: string };
     try {
       json = JSON.parse(text);
     } catch {
@@ -897,6 +913,7 @@ export async function bridgeReadFile(id: string): Promise<ReadFile> {
     if (json.ok && json.data) {
       return { ok: true, mime: json.mime || "application/octet-stream", name: json.name || "", base64: json.data };
     }
+    if (json.message) console.error(`[sheets] audio read refused (${json.error}): ${json.message}`);
     return { ok: false, reason: json.error === "no_tab" ? "audio_unsupported" : json.error || "script_error" };
   } catch {
     return { ok: false, reason: "request_failed" };

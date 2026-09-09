@@ -62,7 +62,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
-  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage";
+  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock";
 
 /**
  * Sidebar entries with the (non-full-access) roles allowed to see/visit them.
@@ -91,6 +91,12 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/molds", key: "molds", roles: ["worker"] },
   { href: "/dashboard/products", key: "products", roles: ["sales"] },
   { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
+  // «المتاح في المخزن» (2026-09-09 brief): the production side reads the
+  // warehouse to answer «can I promise this?» — المتوفر, المحجوز on open work
+  // orders, المتاح — and writes NOTHING there. Not the storekeeper's page
+  // (`storage`, which records movements); the two are deliberately separate
+  // so a production account never holds a warehouse write button.
+  { href: "/dashboard/stock", key: "stock", roles: ["production"] },
   { href: "/dashboard/production", key: "production", roles: ["production"] },
   // Downtime capture is the shop floor's own surface: the worker who stops the
   // machine, the supervisor who runs it, and maintenance who fix it.

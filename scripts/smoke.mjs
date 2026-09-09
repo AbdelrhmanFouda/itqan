@@ -112,7 +112,7 @@ for (const [p, ar, en] of [
     return `${a.ms}ms / ${e.ms}ms`;
   });
 }
-for (const p of ["/dashboard/downtime", "/dashboard/jobs", "/dashboard/storage", "/dashboard/performance", "/dashboard/issues", "/dashboard/assistant", "/dashboard/machines", "/dashboard/reports", "/dashboard/approvals", "/dashboard/production", "/dashboard/quality", "/dashboard/finance", "/dashboard/sales"]) {
+for (const p of ["/dashboard/downtime", "/dashboard/jobs", "/dashboard/storage", "/dashboard/stock", "/dashboard/performance", "/dashboard/issues", "/dashboard/assistant", "/dashboard/machines", "/dashboard/reports", "/dashboard/approvals", "/dashboard/production", "/dashboard/quality", "/dashboard/finance", "/dashboard/sales"]) {
   await check(`${p} answers 200`, async () => { const r = await req(p); expect(r.status === 200, `HTTP ${r.status}`); return `${r.ms}ms`; });
 }
 await check("/robots.txt keeps the dashboard, the API and login out of search", async () => {
@@ -177,7 +177,7 @@ await check("GET /api/contact → 405 (no read; the form only POSTs)", async () 
 
 group("guarded");
 const GUARDED = [
-  "/api/jobs", "/api/jobs/2", "/api/storage", "/api/downtime", "/api/downtime?quick=1",
+  "/api/jobs", "/api/jobs/2", "/api/storage", "/api/stock", "/api/downtime", "/api/downtime?quick=1",
   "/api/downtime/export", "/api/downtime/reclassify", "/api/reports", "/api/reports/some-id",
   "/api/reports/draft?month=2026-08", "/api/ai-review", "/api/inquiries", "/api/agent", "/api/molds",
   "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production", "/api/sheet/downtime",

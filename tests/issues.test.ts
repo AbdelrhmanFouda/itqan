@@ -15,9 +15,12 @@ import {
 
 /* ------------------------------- recording ------------------------------- */
 
-test("the recorder prefers mp4 (plays on an iPhone) and falls back to WebM/Opus (Chrome)", () => {
-  assert.equal(pickRecordingMime(() => true), "audio/mp4");
-  assert.equal(pickRecordingMime((m) => m.startsWith("audio/webm")), "audio/webm;codecs=opus");
+test("the recorder prefers WebM/Opus (Chrome's native) and falls back to mp4 (Safari, AAC)", () => {
+  // Chrome supports both; its "audio/mp4" is Opus in an MP4 box (measured
+  // 2026-09-09), so WebM/Opus must win there.
+  assert.equal(pickRecordingMime(() => true), "audio/webm;codecs=opus");
+  // Safari: no WebM at all → mp4, recorded as AAC.
+  assert.equal(pickRecordingMime((m) => m === "audio/mp4"), "audio/mp4");
   assert.equal(pickRecordingMime((m) => m === "audio/webm"), "audio/webm");
   assert.equal(pickRecordingMime((m) => m === "audio/ogg;codecs=opus"), "audio/ogg;codecs=opus");
   assert.equal(pickRecordingMime(() => false), "");

@@ -225,9 +225,15 @@ export async function readIssueAudio(id: string): Promise<ReadAudio> {
   if (!isDriveId(id)) return { ok: false, reason: "bad_id", status: 400 };
   const hit = clips.get(id);
   if (hit) return { ok: true, ...hit };
-  const { issues } = await loadIssues();
-  if (!issues.some((i) => i.issueAudio?.id === id || i.solutionAudio?.id === id)) {
-    return { ok: false, reason: "not_found", status: 404 };
+  const links = (list: Issue[]) => list.some((i) => i.issueAudio?.id === id || i.solutionAudio?.id === id);
+  let { issues } = await loadIssues();
+  if (!links(issues)) {
+    // The cached copy can predate the row that links this clip — measured
+    // 2026-09-09: the bridge wrote row 15 and then its redirect hop answered
+    // 404, so the site never invalidated its copy. One fresh read before
+    // saying no; a genuinely unknown id costs one bridge trip, no more.
+    issues = (await loadIssues({ fresh: true })).issues;
+    if (!links(issues)) return { ok: false, reason: "not_found", status: 404 };
   }
   const f = await bridgeReadFile(id);
   if (!f.ok) {

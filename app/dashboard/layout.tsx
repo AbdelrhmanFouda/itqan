@@ -13,7 +13,7 @@ import { Spinner } from "@/components/dashboard/ui";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
   BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Clock, Warehouse,
-  TimerOff,
+  TimerOff, Boxes,
 } from "lucide-react";
 
 const ICON: Record<NavKey, React.ElementType> = {
@@ -29,6 +29,7 @@ const ICON: Record<NavKey, React.ElementType> = {
   downtime: TimerOff,
   issues: AlertTriangle,
   storage: Warehouse,
+  stock: Boxes,
   performance: Gauge,
   assistant: Sparkles,
   reports: FileText,
@@ -76,6 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "downtime": return isAr ? "التوقفات" : "Downtime";
       case "issues": return isAr ? "الأعطال" : "Issues";
       case "storage": return isAr ? "المخزن" : "Storage";
+      case "stock": return isAr ? "المتاح في المخزن" : "Available stock";
       case "performance": return isAr ? "الأداء" : "Performance";
       case "assistant": return isAr ? "المساعد الذكي" : "Assistant";
       case "finance": return a.roles.finance;

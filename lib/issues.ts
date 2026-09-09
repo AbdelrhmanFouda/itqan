@@ -44,13 +44,18 @@ export const MAX_REQUEST_BYTES = 4_200_000;
 export const AUDIO_BITS_PER_SECOND = 32_000;
 
 /**
- * Formats to try, best first. mp4/AAC plays on EVERY phone the owner or a
- * worker might hold, including an iPhone, so it wins whenever the recording
- * browser can produce it; WebM/Opus is Chrome's native format and the fallback.
+ * Formats to try, best first.
+ *
+ * WebM/Opus first: it is Chrome's native recording format (Android, Windows)
+ * and the one every player handles. `audio/mp4` is NOT "the iPhone-friendly
+ * one" when Chrome records it — measured 2026-09-09: Chrome answered
+ * `audio/mp4;codecs=opus`, Opus in an MP4 box, which an iPhone does not play
+ * any better and fewer players open at all. Safari cannot record WebM, so on
+ * an iPhone the list falls through to `audio/mp4`, where Safari records AAC.
  */
 export const RECORDING_MIMES = [
-  "audio/mp4",
   "audio/webm;codecs=opus",
+  "audio/mp4",
   "audio/webm",
   "audio/ogg;codecs=opus",
   "audio/ogg",

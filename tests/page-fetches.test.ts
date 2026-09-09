@@ -34,7 +34,7 @@ const OPEN_PREFIXES = [
 const GUARDED_PREFIXES = [
   "/api/jobs", "/api/storage", "/api/downtime", "/api/reports", "/api/ai-review", "/api/inquiries",
   "/api/molds", "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production",
-  "/api/sheet/downtime", "/api/agent",
+  "/api/sheet/downtime", "/api/agent", "/api/stock",
   // A recording's bytes (2026-09-09) — the list under /api/issues stays open,
   // the voice behind it does not.
   "/api/issues/audio",
