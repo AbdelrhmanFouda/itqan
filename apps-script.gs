@@ -19,8 +19,22 @@
  */
 const TOKEN = "itqan_bridge_8fK2pXq9Lm4Rv7Tz1Wn6Bd";
 
+// Bumped whenever an action is added. The website asks `?ping=1` and reads the
+// feature list, so an OLD deployment degrades (no microphone on the issues
+// page) instead of failing saves. An old deployment answers `no_tab` to the
+// ping — measured 2026-09-09 — which the site reads as "no features".
+const BRIDGE_VERSION = 5;
+
 function doGet(e) {
   if (!e || !e.parameter || e.parameter.token !== TOKEN) return _json({ error: "unauthorized" });
+  // ?ping=1 → what this deployment can do (see BRIDGE_VERSION).
+  if (e.parameter.ping) {
+    return _json({ ok: true, version: BRIDGE_VERSION, features: ["audio", "formulas", "createTab"] });
+  }
+  // ?audio=<Drive file id> → one voice note from «الأعطال», base64. Only files
+  // inside the recordings folder are served: the id is the caller's only
+  // input, and this script runs as the owner over the owner's whole Drive.
+  if (e.parameter.audio) return _readAudio(e.parameter.audio);
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(e.parameter.tab);
   if (!sheet) return _json({ error: "no_tab", values: [] });
   // ?mode=formulas → the formula text of every cell ("" where a cell holds a plain
@@ -47,6 +61,12 @@ function doPost(e) {
     _ensureTab(body.createTab, body.headers || null);
     return _json({ ok: true, existed: existed });
   }
+
+  // Save a voice note (2026-09-09): {saveAudio:{name, mime, data(base64)}} →
+  // a file in the «تسجيلات الأعطال» folder next to this workbook, and its id.
+  // The website then writes the Drive link into the issue's row. Handled
+  // BEFORE the sheet lookup — a recording is not a tab.
+  if (body.saveAudio) return _saveAudio(body.saveAudio);
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(body.tab);
   if (!sheet) return _json({ ok: false, error: "no_tab" });
@@ -158,6 +178,10 @@ const ISSUES_HEADERS = [
   "الإجراء\nAction",
   "الحالة\nStatus",
   "ملاحظات\nNotes",
+  // Voice notes (2026-09-09): a Drive link to the worker's recording of the
+  // problem / the fix. Written by the website; the cell is clickable here.
+  "تسجيل العطل\nIssue audio",
+  "تسجيل الحل\nSolution audio",
 ];
 
 /**
@@ -222,7 +246,7 @@ function setupIssuesTab() {
   sheet.setRowHeight(1, 44);
   sheet.setRightToLeft(true);
 
-  const widths = [95, 135, 175, 105, 380, 300, 110, 220];
+  const widths = [95, 135, 175, 105, 380, 300, 110, 220, 160, 160];
   for (var i = 0; i < n; i++) sheet.setColumnWidth(i + 1, widths[i]);
 
   // Linked dropdowns (allowInvalid → unusual values get a warning, not a block).
@@ -254,4 +278,67 @@ function _ensureTab(name, headers) {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+/* ------------------------- voice notes (2026-09-09) ------------------------- */
+// A worker records what broke (and later what fixed it) on the issues page.
+// The recording is a small audio file; it lives HERE, in the owner's Drive, in
+// a folder beside this workbook — not in Firebase (auth and roles only), and
+// not in a cell (a cell holds 50,000 characters). The row in «الأعطال» keeps
+// the Drive link, so the sheet stays the truth and the owner can click it.
+//
+// ⚠ Deploying this version asks for the Drive permission once (DriveApp is a
+// new scope): Deploy → Manage deployments → edit → New version → Deploy, then
+// "Authorize access" when prompted. Until then the website's ?ping=1 sees no
+// "audio" feature and hides the microphone.
+
+const AUDIO_FOLDER = "تسجيلات الأعطال";
+const AUDIO_MAX_BYTES = 5 * 1024 * 1024;
+
+/** The recordings folder, created on first use next to this workbook. */
+function _audioFolder() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let parent = null;
+  try {
+    const parents = DriveApp.getFileById(ss.getId()).getParents();
+    if (parents.hasNext()) parent = parents.next();
+  } catch (err) { /* a shared-drive or odd placement — fall back to My Drive */ }
+  if (!parent) parent = DriveApp.getRootFolder();
+  const found = parent.getFoldersByName(AUDIO_FOLDER);
+  return found.hasNext() ? found.next() : parent.createFolder(AUDIO_FOLDER);
+}
+
+function _saveAudio(a) {
+  if (!a || typeof a.data !== "string" || !a.data) return _json({ ok: false, error: "bad_audio" });
+  const mime = String(a.mime || "");
+  if (mime.indexOf("audio/") !== 0) return _json({ ok: false, error: "bad_mime" });
+  let bytes;
+  try { bytes = Utilities.base64Decode(a.data); } catch (err) { return _json({ ok: false, error: "bad_base64" }); }
+  if (bytes.length > AUDIO_MAX_BYTES) return _json({ ok: false, error: "audio_too_large" });
+  try {
+    const name = String(a.name || ("recording " + new Date().toISOString().slice(0, 19).replace(/[T:]/g, " ")));
+    const file = _audioFolder().createFile(Utilities.newBlob(bytes, mime, name));
+    return _json({ ok: true, id: file.getId(), url: file.getUrl(), size: bytes.length });
+  } catch (err) {
+    return _json({ ok: false, error: "drive_error", message: String(err && err.message ? err.message : err) });
+  }
+}
+
+function _readAudio(id) {
+  let file;
+  try { file = DriveApp.getFileById(String(id)); } catch (err) { return _json({ ok: false, error: "audio_not_found" }); }
+  // Only a file that sits in the recordings folder — never anything else the
+  // owner's Drive holds, whatever id the caller brings.
+  try {
+    const folderId = _audioFolder().getId();
+    let inside = false;
+    const parents = file.getParents();
+    while (parents.hasNext()) { if (parents.next().getId() === folderId) { inside = true; break; } }
+    if (!inside) return _json({ ok: false, error: "forbidden" });
+    const blob = file.getBlob();
+    const bytes = blob.getBytes();
+    return _json({ ok: true, mime: blob.getContentType(), name: file.getName(), size: bytes.length, data: Utilities.base64Encode(bytes) });
+  } catch (err) {
+    return _json({ ok: false, error: "drive_error", message: String(err && err.message ? err.message : err) });
+  }
 }

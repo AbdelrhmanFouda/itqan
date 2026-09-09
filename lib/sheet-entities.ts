@@ -201,6 +201,16 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "machine", keywords: ["machine", "الماكينة", "الماكينه"] },
       { key: "product", keywords: ["المنتج", "product"] },
       { key: "category", keywords: ["category", "type", "النوع", "التصنيف", "الفئة", "فئة"] },
+      // The two recording columns (I:J, added 2026-09-09: a Drive link to the
+      // worker's voice note). Declared BEFORE `description` and `action` on
+      // purpose — their headers «تسجيل العطل» / «تسجيل الحل» CONTAIN «العطل»
+      // and «الحل», which are description/action keywords, and appendRecord
+      // hands each header to the FIRST field whose keyword it contains.
+      // Declared after, a new issue's text would be written into column I as
+      // well and the link would never land. Same trap as «تسمية الماكينة»
+      // (tests/sheet-entities.test.ts pins the order).
+      { key: "issueAudio", keywords: ["تسجيل العطل", "issue audio"] },
+      { key: "solutionAudio", keywords: ["تسجيل الحل", "solution audio"] },
       { key: "description", keywords: ["description", "الوصف", "البيان", "المشكلة", "العطل", "وصف"], long: true },
       { key: "action", keywords: ["action", "الإجراء", "الاجراء", "المعالجة", "الحل", "إجراء"], long: true },
       { key: "status", keywords: ["status", "الحالة", "الحاله"] },

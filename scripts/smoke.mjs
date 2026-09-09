@@ -181,6 +181,7 @@ const GUARDED = [
   "/api/downtime/export", "/api/downtime/reclassify", "/api/reports", "/api/reports/some-id",
   "/api/reports/draft?month=2026-08", "/api/ai-review", "/api/inquiries", "/api/agent", "/api/molds",
   "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production", "/api/sheet/downtime",
+  "/api/issues/audio?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
 ];
 for (const p of GUARDED) {
   await check(`GET ${p} without a token → 401`, async () => {
@@ -202,7 +203,7 @@ group("mutating");
 const MUTATING = [
   ["POST", "/api/runs"], ["DELETE", "/api/runs/999999"],
   ["POST", "/api/jobs"], ["PATCH", "/api/jobs/2"], ["DELETE", "/api/jobs/999999"],
-  ["POST", "/api/issues"], ["PATCH", "/api/sheet/issues"], ["PATCH", "/api/sheet/molds"], ["PATCH", "/api/sheet/master"],
+  ["POST", "/api/issues"], ["PATCH", "/api/issues/2"], ["PATCH", "/api/sheet/issues"], ["PATCH", "/api/sheet/molds"], ["PATCH", "/api/sheet/master"],
   ["POST", "/api/machines"], ["PATCH", "/api/machines/x"], ["DELETE", "/api/machines/x"], ["POST", "/api/machines/x/notes"],
   ["POST", "/api/downtime"], ["PATCH", "/api/downtime"], ["POST", "/api/downtime/reclassify"],
   ["POST", "/api/reports"], ["DELETE", "/api/reports/x"],

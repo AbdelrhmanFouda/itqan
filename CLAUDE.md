@@ -47,6 +47,53 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-09) — the issues log speaks (voice notes)
+
+Owner's ask: the worker records Arabic audio of the issue and of the solution.
+Full story and the owner's deploy steps in `../CHANGES-2026-09-09.md`.
+
+- **Where a recording lives:** the owner's Drive, folder «تسجيلات الأعطال» beside the
+  workbook, written by a new bridge action `saveAudio` and read back by `?audio=<id>`
+  (both `apps-script.gs`, `BRIDGE_VERSION = 5`). The row in «الأعطال» holds the Drive
+  link in **I «تسجيل العطل»** / **J «تسجيل الحل»**. Not Firebase (auth/roles only —
+  and a bucket would need billing), not a cell (50k chars). The sheet stays the truth.
+- **Capability probe:** `bridgeFeatures()` (`lib/sheets.ts`) asks `?ping=1`; an OLD
+  deployment answers `{"error":"no_tab"}` (measured) = no features. `GET /api/issues`
+  carries `audio.supported`; the page hides the microphone and says why until the
+  owner deploys. Cached 30 min on yes, 5 min on no.
+- **Rules** in `lib/issues.ts` (pure, 13 tests): formats (mp4 first — plays on an
+  iPhone — then WebM/Opus), Drive-link parsing, file naming, «a description OR a
+  recording», `sameIssue()` row identity, filters. Server glue in `lib/issues-data.ts`:
+  multipart/JSON input with size caps (120 s, 3.5 MB per clip, 4.2 MB per request —
+  Vercel's body limit is 4.5 MB), `saveIssueAudio` (feature → columns → Drive),
+  `readIssueAudio` (only ids some row links to; 40 MB per-instance cache).
+- **Routes:** `POST /api/issues` takes multipart (recordings saved BEFORE the row is
+  appended, so a row never links to a failed upload); **new** `PATCH /api/issues/[row]`
+  with `changes` + `expect` — the row is re-located on a FRESH read and must still be
+  the same issue (409 `row_changed`), diff-only write; **new** `GET /api/issues/audio`
+  (guarded — a worker's voice is not an open read). The page fetches clips with a
+  token into an object URL because `<audio src>` cannot carry a header.
+- ⚠ **`ENTITIES.issues` declares `issueAudio` / `solutionAudio` BEFORE `description` /
+  `action`** — their headers contain «العطل» and «الحل», which are description/action
+  keywords, and `appendRecord` hands a header to the FIRST field whose keyword it
+  contains. Declared after, the text would be appended into column I and the link
+  lost. Pinned in `tests/sheet-entities.test.ts` (the 10-column row).
+- `ensureHeaders(entity, headers)` in `lib/sheets.ts` adds missing header cells at the
+  first free columns — `appendRecord`/`updateRecord` DROP a field with no header,
+  silently. Trusted for 10 min per instance after one success.
+- Page (`app/dashboard/issues/page.tsx`): tiles that filter, machine/category filters,
+  Arabic-folded search, cards/rows that open into a drawer (players, three-button
+  status, full edit, «إضافة الحل» later). The status pill still writes on one tap, now
+  through the identity-checked route. `components/dashboard/audio-recorder.tsx` holds
+  `useAudioRecorder`, `RecordControl`, `Player`, `SavedClip`.
+- Verified locally against the live sheet with nothing written: wrong identity → 409,
+  empty diff → `unchanged`, bad status → 400, unknown clip → 404, no text and no
+  recording → 400, a recording against the old bridge → 409 `audio_unsupported`.
+  `npm test` 274/274, `npm run build` clean.
+- **Not built:** transcription (Gemini could fill «الوصف» from the clip, with the
+  worker confirming the words first — a separate decision) and deleting an issue from
+  the site.
+
 ## Recently landed (2026-09-04) — the mould number, the worker's register, the view tests
 
 Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves:
@@ -659,10 +706,14 @@ again. `invalidateSheetCache()` clears both.
 ## The bridge (apps-script.gs)
 
 - Bound to the sheet, deployed as web app (Execute as owner / access Anyone), token-gated.
-- Actions: `doGet(tab)` → displayValues; `doPost` → `updates[{row,col,value}]` (setValue —
-  a "=..." string becomes a live formula), `append`, `deleteRow`, `createTab`. **It cannot
-  set data-validation, number formats or conditional formatting** — those need one of the
-  standalone `.gs` files run from the sheet's script editor.
+- Actions: `doGet(tab)` → displayValues; `doGet(ping=1)` → `{ok, version, features}`
+  (version 5, 2026-09-09 — an older deployment answers `no_tab`); `doGet(audio=<id>)` →
+  one recording from the «تسجيلات الأعطال» Drive folder, base64; `doPost` →
+  `updates[{row,col,value}]` (setValue — a "=..." string becomes a live formula),
+  `append`, `deleteRow`, `createTab`, `saveAudio{name,mime,data}` (a file into that
+  folder; needs the Drive scope authorized on deploy). **It cannot set data-validation,
+  number formats or conditional formatting** — those need one of the standalone `.gs`
+  files run from the sheet's script editor.
 - ⚠️ **Editing apps-script.gs is NOT live until Deploy → Manage deployments → New version.**
   Editor "Run" works without redeploy; the web app serves the last deployed snapshot.
   Diagnostic symptom: editing rows works but adding rows silently does nothing.

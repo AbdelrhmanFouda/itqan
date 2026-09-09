@@ -165,8 +165,12 @@ test("«الاسطمبات» / «المنتجات» views and «العملاء»
   assert.deepEqual(readMap("clients"), {
     name: 1, products: 2, lastOrder: 3, contact: 4, phone: 5, email: 6, address: 7, type: 8, status: 9, payment: 10, notes: 11,
   });
+  // The live tab held A:H on 2026-09-09; the two recording columns (−1 here)
+  // appear when the first voice note is saved (ensureHeaders) or the owner
+  // runs setupIssuesTab() — see the «الأعطال» + recordings test below.
   assert.deepEqual(readMap("issues"), {
-    date: 0, machine: 1, product: 2, category: 3, description: 4, action: 5, status: 6, note: 7,
+    date: 0, machine: 1, product: 2, category: 3, issueAudio: -1, solutionAudio: -1,
+    description: 4, action: 5, status: 6, note: 7,
   });
 });
 
@@ -223,6 +227,40 @@ test("«الأعطال»: the assistant's log_issue append fills every column", 
   assert.deepEqual(appendMap("issues"), [
     "date", "machine", "product", "category", "description", "action", "status", "note",
   ]);
+});
+
+// The tab once the recording columns exist (ISSUES_HEADERS in apps-script.gs
+// and lib/agent-tools.ts, 2026-09-09). Kept OUTSIDE the fixture table because
+// that table is pinned to one row per entity — this is the same entity, later.
+const ISSUES_WITH_AUDIO = [
+  ...HEADERS.issues[0],
+  "تسجيل العطل\nIssue audio", "تسجيل الحل\nSolution audio",
+];
+
+test("«الأعطال» + recordings: the audio columns read and append as themselves, not as the text", () => {
+  const cfg = ENTITIES.issues;
+  const read: Record<string, number> = {};
+  for (const f of cfg.fields) read[f.key] = colIndex(ISSUES_WITH_AUDIO, f.keywords);
+  assert.deepEqual(read, {
+    date: 0, machine: 1, product: 2, category: 3, issueAudio: 8, solutionAudio: 9,
+    description: 4, action: 5, status: 6, note: 7,
+  });
+  // «تسجيل العطل» contains «العطل» (a description keyword) and «تسجيل الحل»
+  // contains «الحل» (an action keyword). On an append the header goes to the
+  // FIRST field that matches, so the audio fields must be declared first —
+  // otherwise the issue's text is written into column I and the link is lost.
+  const append = ISSUES_WITH_AUDIO.map((hd) => {
+    const h = normHeader(hd);
+    const f = cfg.fields.find((x) => x.keywords.some((k) => h.includes(k)));
+    return f ? f.key : "";
+  });
+  assert.deepEqual(append, [
+    "date", "machine", "product", "category", "description", "action", "status", "note",
+    "issueAudio", "solutionAudio",
+  ]);
+  const at = (k: string) => cfg.fields.findIndex((f) => f.key === k);
+  assert.ok(at("issueAudio") < at("description"), "`issueAudio` must be declared before `description`");
+  assert.ok(at("solutionAudio") < at("action"), "`solutionAudio` must be declared before `action`");
 });
 
 test("«العملاء»: «نوع العميل» would be claimed by `name` on an append — so nothing may append to clients", () => {

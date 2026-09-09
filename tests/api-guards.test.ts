@@ -43,6 +43,10 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "downtime/reclassify": { GET: "owner", POST: "owner" },
   "inquiries":           { GET: "sales" },
   "issues":              { GET: "open", POST: "guard" },
+  // Voice notes (2026-09-09): editing a row verifies its identity first;
+  // the bytes of a recording are a worker's voice — signed-in staff only.
+  "issues/[row]":        { PATCH: "guard" },
+  "issues/audio":        { GET: "guard" },
   "jobs":                { GET: "guard", POST: "guard" },
   "jobs/[id]":           { GET: "guard", PATCH: "guard", DELETE: "guard" },
   "machines":            { GET: "open", POST: "guard" },

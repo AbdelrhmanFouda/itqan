@@ -772,3 +772,133 @@ export async function deleteRecord(entity: string, row: number): Promise<UpdateR
   const { title } = await fetchSheet(cfg.tab, true); // resolve the tab's real casing
   return postAction({ tab: title, deleteRow: row });
 }
+
+/* ------------------ headers, and files through the bridge -------------------
+ * Added 2026-09-09 for the voice notes on «الأعطال» (lib/issues-data.ts).
+ * A recording is a Drive file, saved and read back through the same bridge —
+ * it runs as the owner, so the file lands in the owner's own Drive next to
+ * the workbook — and the row holds the link. The sheet stays the truth.
+ */
+
+/**
+ * Make sure a tab's header row carries these headers, adding the missing
+ * ones at the first free columns to the right. A header counts as present
+ * when some column's header already contains its Arabic first line — the
+ * same containment test getRecords uses to find the column. Writes nothing
+ * when every header is there.
+ *
+ * Exists because `appendRecord` and `updateRecord` both DROP a field whose
+ * header the tab does not have, silently — a recording saved to Drive with
+ * no cell to hold its link would be an orphan nobody could find.
+ */
+export async function ensureHeaders(entity: string, headers: string[]): Promise<UpdateResult> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  const cfg = ENTITIES[entity];
+  if (!cfg) return { ok: false, reason: "bad_entity" };
+  const { values, title } = await fetchSheet(cfg.tab, true);
+  if (values.length === 0) return { ok: false, reason: "no_tab" };
+  const hr = findHeaderRow(values, cfg.fields);
+  const row = values[hr] ?? [];
+  // The row can carry empty trailing cells when some data row is wider than
+  // the header row — count the real headers, not the data range.
+  let width = row.length;
+  while (width > 0 && !(row[width - 1] || "").trim()) width--;
+  const updates: Cell[] = [];
+  for (const h of headers) {
+    const key = normHeader(splitLabel(h).ar);
+    if (!key) continue;
+    if (row.some((c) => normHeader(c).includes(key))) continue;
+    width++;
+    updates.push({ row: hr + 1, col: width, value: h });
+  }
+  if (updates.length === 0) return { ok: true };
+  return postUpdates(title, updates);
+}
+
+/** What the DEPLOYED bridge can do — an older deployment answers no_tab to
+ *  `?ping=1` (measured 2026-09-09) and simply has no features. */
+export type BridgeFeatures = { audio: boolean };
+let featuresSeen: { value: BridgeFeatures; at: number } | null = null;
+// A deployment does not lose a feature, so a yes can stand for a while; a no
+// must expire quickly so the site lights up minutes after the owner deploys.
+const FEATURES_YES_MS = 30 * 60 * 1000;
+const FEATURES_NO_MS = 2 * 60 * 1000;
+
+export async function bridgeFeatures(): Promise<BridgeFeatures> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false };
+  const now = Date.now();
+  if (featuresSeen && now - featuresSeen.at < (featuresSeen.value.audio ? FEATURES_YES_MS : FEATURES_NO_MS)) {
+    return featuresSeen.value;
+  }
+  let audio = false;
+  try {
+    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
+    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow" }));
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; features?: unknown };
+    audio = json.ok === true && Array.isArray(json.features) && json.features.includes("audio");
+  } catch {
+    audio = false;
+  }
+  featuresSeen = { value: { audio }, at: now };
+  return featuresSeen.value;
+}
+
+export type SavedFile = { ok: true; id: string; url: string } | { ok: false; reason: string };
+
+/** Save one file into the recordings folder in the owner's Drive. Bytes go as
+ *  base64 inside the JSON the bridge already speaks. Not through postAction:
+ *  a saved file changes no cell, so the sheet cache must NOT be dropped. */
+export async function bridgeSaveFile(file: { name: string; mime: string; base64: string }): Promise<SavedFile> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  try {
+    const res = await queued(() =>
+      fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: SCRIPT_SECRET, saveAudio: { name: file.name, mime: file.mime, data: file.base64 } }),
+        redirect: "follow",
+      }),
+    );
+    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
+    const text = await res.text();
+    let json: { ok?: boolean; id?: string; url?: string; error?: string };
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // An old deployment throws on the missing `tab` and answers with an HTML
+      // page; a busy one does the same. Neither saved anything.
+      return { ok: false, reason: text.trim().startsWith("<") ? "audio_unsupported" : "unparseable" };
+    }
+    if (json.ok && json.id) return { ok: true, id: json.id, url: json.url || "" };
+    return { ok: false, reason: json.error === "no_tab" ? "audio_unsupported" : json.error || "script_error" };
+  } catch {
+    return { ok: false, reason: "request_failed" };
+  }
+}
+
+export type ReadFile = { ok: true; mime: string; name: string; base64: string } | { ok: false; reason: string };
+
+/** Read one recording back (base64). The bridge serves only files inside the
+ *  recordings folder — the id is the caller's only input, and the script can
+ *  see the owner's whole Drive. */
+export async function bridgeReadFile(id: string): Promise<ReadFile> {
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_configured" };
+  try {
+    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&audio=${encodeURIComponent(id)}`;
+    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow" }));
+    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
+    const text = await res.text();
+    let json: { ok?: boolean; mime?: string; name?: string; data?: string; error?: string };
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return { ok: false, reason: "unparseable" };
+    }
+    if (json.ok && json.data) {
+      return { ok: true, mime: json.mime || "application/octet-stream", name: json.name || "", base64: json.data };
+    }
+    return { ok: false, reason: json.error === "no_tab" ? "audio_unsupported" : json.error || "script_error" };
+  } catch {
+    return { ok: false, reason: "request_failed" };
+  }
+}

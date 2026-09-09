@@ -18,6 +18,7 @@ import {
 import { buildOEEData } from "@/lib/oee-data";
 import { buildDigest, cairoDay } from "@/lib/ai-review";
 import { latinDigits, normalizeDate } from "@/lib/dates";
+import { hasProblem } from "@/lib/issues";
 
 /* ------------------------------ per-request cache ------------------------- */
 // A cache lives for ONE HTTP request (one chat turn or one confirm), so the same
@@ -223,7 +224,13 @@ export type ValidatedIssue = {
   warnings: string[];
 };
 
-export async function validateIssue(issue: ProposedIssue, ctx: ToolCtx): Promise<ValidatedIssue> {
+export async function validateIssue(
+  issue: ProposedIssue, ctx: ToolCtx,
+  // `audio: true` — the caller holds a voice note of the problem (the issues
+  // page, 2026-09-09), so the text may be empty. The assistant never sets it:
+  // it has no microphone, and its log_issue keeps needing words.
+  opts: { audio?: boolean } = {},
+): Promise<ValidatedIssue> {
   const machines = await cachedRecords("machines", ctx);
   const labels = new Set<string>();
   for (const m of machines.records) {
@@ -233,7 +240,7 @@ export async function validateIssue(issue: ProposedIssue, ctx: ToolCtx): Promise
   }
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (!issue.description || !issue.description.trim()) errors.push("An issue needs a description.");
+  if (!hasProblem(issue.description, Boolean(opts.audio))) errors.push("An issue needs a description.");
   const machine = (issue.machine || "").trim();
   if (machine && !labels.has(normKey(machine))) warnings.push(`Machine "${machine}" is not in the registry.`);
   // Floor reports get machine codes wrong more often than product names — when a
@@ -287,10 +294,13 @@ export async function appendProductionRows(
 }
 
 // Header row for «الأعطال», mirrors apps-script.gs ISSUES_HEADERS. Used to
-// self-provision the tab the first time an issue is logged.
+// self-provision the tab the first time an issue is logged. The last two are
+// the voice-note columns (2026-09-09) — lib/issues-data.ts adds them to a tab
+// that predates them.
 const ISSUES_HEADERS = [
   "التاريخ\nDate", "الماكينة\nMachine", "المنتج\nProduct", "التصنيف\nCategory",
   "الوصف\nDescription", "الإجراء\nAction", "الحالة\nStatus", "ملاحظات\nNotes",
+  "تسجيل العطل\nIssue audio", "تسجيل الحل\nSolution audio",
 ];
 
 export async function logIssue(values: Record<string, string>): Promise<UpdateResult> {
