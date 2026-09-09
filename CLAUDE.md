@@ -49,6 +49,19 @@ Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
 ## Recently landed (2026-09-09, evening) — "the website is now very slow": the region-shared copy
 
+> ⚠ **The first deploy of this (7ae0856) took every sheet-backed route on production
+> down for the night** — 504 after 300 s on `/api/machines`, `/api/runs`, everything that
+> reads a tab, while the token-only routes answered in 200 ms; both Apps Script bridges
+> answered in 2.5 s when called directly. The reads had gained a dependency on Vercel's
+> cache service that never resolved, awaited with no timeout. Fixed the next morning in
+> `c0c53b9` + `4d43e6e`: **the bridge read is a plain `no-store` fetch with a 40 s
+> timeout (no Next data cache on the read path any more), the shared copy is OFF unless
+> `SHEET_SHARED_COPY=on`, every runtime-cache call is bounded (700 ms / 1.5 s) with a
+> 5-minute breaker, and `GET /api/health` (open, no dependencies) reports the commit that
+> is serving.** The rule it left: a new dependency on the read path is bounded before it
+> is awaited, always. Read the paragraphs below with that in mind — the shared copy is
+> opt-in, not the default.
+
 Measured on production first (`../CHANGES-2026-09-09-speed.md` has the table): page HTML
 ~100 ms; every sheet-backed route 100–300 ms on an instance that holds a copy; **2.2–11.5 s
 per tab on one that does not** (and `/api/jobs` reads four); **`/api/storage` and
@@ -740,6 +753,14 @@ What it means for the numbers:
   There is no row and no cell any more; «الإنتاج» carries a shift per row and always did.
 
 ## The sheet read path — fixed 2026-08-12, and easy to undo by accident
+
+> **Superseded in part, 2026-09-10.** The bridge GET is a plain `cache: "no-store"` fetch
+> with a 40 s timeout now — Next's data cache is no longer on the read path at all, after
+> a night in which every sheet read hung on Vercel's cache service (see "Recently landed
+> (2026-09-09, evening)"). What still stands from this section: the one-at-a-time queue,
+> "never cache an empty result", the `no_tab` short-circuit, and `fresh` for writes. The
+> cache is the per-instance last-good copy (2026-09-05) plus the opt-in shared copy;
+> `revalidateTag(SHEET_CACHE_TAG)` in `invalidateSheetCache` is inert and harmless.
 
 **Symptom reported:** "the app loads for too long and it is fetching nothing."
 Measured against production while the bridge itself answered every tab in ~2.5s:
