@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
       lists: { products: [], materials: [], clients: [], locations: [], weights: {} },
       supportsForClient: false,
       catalog: [], supportsCatalog: false,
+      readAt: 0, stale: false,
     });
   }
 }

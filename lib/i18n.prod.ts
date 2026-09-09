@@ -154,6 +154,7 @@ export const pd = {
       piecesUnknown: "Master has no piece weight for this product — the piece count will read as unavailable.",
       saveCheckList: "Saving failed — check the list before trying again: the sheet may already hold the order.",
       actionFailed: "Could not update the order. The list was refreshed — check its status before tapping again.",
+      dataAge: "Numbers from {age} ago — refreshing…",
       errors: {
         missing_fields: "Code and product are required.",
         missing_due: "A due date is required.",
@@ -454,6 +455,7 @@ export const pd = {
       piecesUnknown: "لا يوجد وزن حبة في الرئيسي لهذا المنتج — سيظهر عدد القطع كغير متاح.",
       saveCheckList: "فشل الحفظ — راجع القائمة قبل إعادة المحاولة: قد يكون الأمر وصل إلى الجدول فعلًا.",
       actionFailed: "تعذّر تحديث الأمر. تم تحديث القائمة — راجع حالته قبل الضغط مرة أخرى.",
+      dataAge: "الأرقام من قبل {age} — جارٍ التحديث…",
       errors: {
         missing_fields: "الكود والمنتج مطلوبان.",
         missing_due: "تاريخ التسليم مطلوب.",

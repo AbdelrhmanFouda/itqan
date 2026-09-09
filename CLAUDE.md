@@ -47,6 +47,39 @@ npm run seed         # (legacy Firestore seed — rarely needed now)
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-09, evening) — "the website is now very slow": the region-shared copy
+
+Measured on production first (`../CHANGES-2026-09-09-speed.md` has the table): page HTML
+~100 ms; every sheet-backed route 100–300 ms on an instance that holds a copy; **2.2–11.5 s
+per tab on one that does not** (and `/api/jobs` reads four); **`/api/storage` and
+`/api/stock` 3–6 s on EVERY call** — the storage bridge had no cache at all. Five changes:
+
+- **`lib/shared-copy.ts` — the last-good copy of every tab, shared by every instance in
+  the region** (Vercel Runtime Cache via `@vercel/functions`; in-memory fallback in dev).
+  `fetchSheet` consults it whenever the local copy is missing, adopts it, and judges it
+  with the same `judgeCopy` rule; `remember()` writes every bridge answer back
+  (best-effort, off the response). **Writes drop the tab's shared copy by tag and AWAIT
+  it** (`invalidateSheetCache(tab)` is async now; `postAction` passes the written tab),
+  and `writtenAt` fences any copy read before the write on this instance. The stale
+  window is 30 min (was 10): a stale copy is served once and refreshed behind; every
+  `RecordsResult` carries `readAt`, `/api/jobs` and `/api/stock` report `meta.dataAgeMs`,
+  and the two pages print «الأرقام من قبل X» past a minute and refetch on their own
+  (at most twice). **Do not remove the await on the drop** — the page reloads the moment
+  a write answers, possibly on another instance.
+- **`FRESH_REUSE_MS = 1500`**: a `fresh` read within 1.5 s of the last bridge answer for
+  that tab reuses it (the bridge cannot answer faster than that), so a guarded write's
+  identity read + its own header/snapshot read are one round trip.
+- **`lib/storage.ts` has the same two layers** (fresh ≤30 s, stale ≤30 min, shared copy,
+  30 s read timeout). `getStorageData({ fresh })` exists; `StorageData` gained `readAt`
+  and `stale` (the bridge did not answer and the last good copy is shown — the storage
+  page shows its «couldn't reach» line, the stock page names the age). Site writes drop
+  both copies before answering.
+- **`loadJobs(opts)`**: `/api/jobs` skips downtime (four tabs, no Firestore query);
+  `/api/stock` reads jobs + master only. The detail route is unchanged.
+- **`roleFor` remembers a GRANTED role per token for 5 min** per instance (null never
+  cached). **The jobs and stock pages render the last answer this device saw at once**
+  (`components/dashboard/last-seen.ts`, localStorage `itqan.jobs.last` / `itqan.stock.last`).
+
 ## Recently landed (2026-09-09, second chat) — the order flow: «المتاح في المخزن» + «أوامر الشغل»
 
 Brief from the management chat (`../website-brief-order-flow-2026-09-09.md`); full

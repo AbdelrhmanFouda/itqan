@@ -32,3 +32,14 @@ export const fmtInt = (n: number, isAr: boolean): string =>
 
 /** True when a string still carries Arabic-Indic or Persian digits. */
 export const hasArabicDigits = (s: string): boolean => /[٠-٩۰-۹]/.test(s);
+
+/** An age for «البيانات من قبل …» — seconds under a minute, then minutes,
+ *  then hours; Latin digits by construction. */
+export const ageLabel = (ms: number, isAr: boolean): string => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return isAr ? `${s} ثانية` : `${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return isAr ? `${m} دقيقة` : `${m} min`;
+  const h = Math.round(m / 60);
+  return isAr ? `${h} ساعة` : `${h} h`;
+};

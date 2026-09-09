@@ -15,6 +15,7 @@ import { revalidateTag } from "next/cache";
 import { after } from "next/server";
 import { planRollback, cellRef, type WriteCell } from "@/lib/sheet-write";
 import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
+import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-copy";
 import {
   ENTITIES, clean, normHeader, colIndex, findHeaderRow, splitLabel, type EntityConfig,
 } from "@/lib/sheet-entities";
@@ -95,7 +96,9 @@ const TAB_ALIASES: Record<string, string[]> = {
  */
 const SHEET_TTL_SEC = 45;
 export const SHEET_CACHE_TAG = "sheet-read";
-type SheetRead = { title: string; values: string[][] };
+/** `at` — when the bridge answered; set by remember(), carried by every copy,
+ *  so a route can tell the page how old the numbers it shows are. */
+type SheetRead = { title: string; values: string[][]; at?: number };
 /** Per-instance only, and only to coalesce simultaneous callers. The real
  *  cache is Next's data cache, which is shared across serverless instances —
  *  an in-memory Map is not, which is why a second request that lands on a cold
@@ -116,12 +119,24 @@ const MISSING_TABS = new Set<string>();
 /** Tab names the bridge has refused as non-existent on this instance. */
 export const missingTabs = (): string[] => Array.from(MISSING_TABS);
 
-/** Drop cached reads everywhere — called after any successful write. */
-export function invalidateSheetCache(): void {
+/**
+ * Drop cached reads everywhere — called after any write, successful or not
+ * (the bridge is at-least-once: a failed-looking write may have landed).
+ *
+ * `tab` is the tab that was written, when known: its region-wide copy is
+ * expired by tag, AWAITED so the page's reload right after the save cannot
+ * find the pre-write copy on another instance, and this instance fences any
+ * copy read before the write (`writtenAt`). Without a tab — createTab, or a
+ * caller that does not know — every tab is treated as written.
+ */
+export async function invalidateSheetCache(tab?: string): Promise<void> {
   sheetInflight.clear();
   // A copy must never outlive a write: the next read finds none and waits for
   // the sheet as it is now, exactly as before this layer existed.
   lastGood.clear();
+  const now = Date.now();
+  const tabs = tab ? tabsNamed(tab) : Object.values(ENTITIES).map((e) => e.tab);
+  for (const t of tabs) writtenAt.set(t, now);
   try {
     // `updateTag` is the read-your-own-writes primitive, but it is Server
     // Actions only — every write here is a Route Handler, so it is unavailable.
@@ -135,6 +150,15 @@ export function invalidateSheetCache(): void {
     // the 45s TTL bounds the staleness, and callers that must not be stale
     // ask for `fresh` anyway.
   }
+  await dropSharedCopies(tabs.map(sharedTag));
+}
+
+/** The requested-name keys a written tab title can stand for: the title
+ *  itself, plus any Arabic tab whose English alias it is. */
+function tabsNamed(title: string): string[] {
+  const out = new Set<string>([title]);
+  for (const [tab, aliases] of Object.entries(TAB_ALIASES)) if (aliases.includes(title)) out.add(tab);
+  return Array.from(out);
 }
 
 /* ---------------------- stale-while-revalidate (2026-09-05) ---------------
@@ -157,12 +181,48 @@ export function invalidateSheetCache(): void {
  * clear the copies (invalidateSheetCache), so a row the site just wrote is
  * never masked by a snapshot; `fresh` reads never touch this path.
  */
-const SHEET_STALE_MAX_MS = 10 * 60 * 1000;
+/* ------------------------ the region-shared copy (2026-09-09) --------------
+ * "The website is now very slow" — measured on production: a route on an
+ * instance that already held a copy answered in 100–300 ms; one on an
+ * instance that did not paid the bridge for every tab it reads (2.2–11.5 s
+ * each, serialised — /api/jobs reads four). Vercel spreads requests over
+ * instances and every deploy starts new ones, so the per-instance copy above
+ * left the cold path as the COMMON one on a phone. lib/shared-copy.ts keeps
+ * the same copy in the Vercel Runtime Cache for the whole region: an
+ * instance with no local copy asks there before it asks the bridge, adopts
+ * what it finds, and judges it with the same fresh/stale rule. Every bridge
+ * answer is written back for the others (best-effort, off the response).
+ *
+ * The stale window grew from 10 to 30 minutes with it. What makes that safe:
+ * a stale copy is served ONCE and refreshed in the background, every route
+ * now reports `readAt`, the two floor pages show «البيانات من قبل X» and
+ * refetch on their own when the server said the copy was old, and writes
+ * still read `fresh` and drop the copies (awaited) — see invalidateSheetCache.
+ *
+ * FRESH_REUSE_MS: a `fresh` read within 1.5 s of the last bridge answer for
+ * the same tab reuses it. The bridge itself takes longer than that to answer,
+ * so nothing newer can exist; and it turns the two back-to-back fresh reads
+ * every guarded write makes (the identity check, then the write's own
+ * header/snapshot read) into one bridge round trip.
+ */
+const SHEET_STALE_MAX_MS = 30 * 60 * 1000;
+const FRESH_REUSE_MS = 1500;
 const lastGood = new Map<string, StaleCopy<SheetRead>>();
+/** Per tab: the moment this instance last wrote it. A copy read before that
+ *  moment — local or shared — is never served again here. */
+const writtenAt = new Map<string, number>();
+const sharedKey = (tab: string) => `sheet:${tab}`;
+const sharedTag = (tab: string) => `sheet:${tab}`;
 
 function remember(tab: string) {
   return (r: SheetRead): SheetRead => {
-    if (r.values.length > 0) lastGood.set(tab, { value: r, at: Date.now() });
+    if (r.values.length > 0) {
+      const at = Date.now();
+      r.at = at;
+      const copy = { value: r, at };
+      lastGood.set(tab, copy);
+      keepAlive(writeSharedCopy(sharedKey(tab), copy, SHEET_STALE_MAX_MS / 1000, ["sheet", sharedTag(tab)]));
+    }
     return r;
   };
 }
@@ -185,8 +245,23 @@ function keepAlive(p: Promise<unknown>): void {
 }
 
 async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
-  if (fresh) return fetchSheetUncached(tab, true).then(remember(tab));
-  const verdict = judgeCopy(lastGood.get(tab), Date.now(), SHEET_TTL_SEC * 1000, SHEET_STALE_MAX_MS);
+  const now = Date.now();
+  const fence = writtenAt.get(tab) ?? 0;
+  if (fresh) {
+    const c = lastGood.get(tab);
+    if (c && now - c.at <= FRESH_REUSE_MS && c.at > fence) return c.value;
+    return fetchSheetUncached(tab, true).then(remember(tab));
+  }
+  let verdict = judgeCopy(lastGood.get(tab), now, SHEET_TTL_SEC * 1000, SHEET_STALE_MAX_MS);
+  if (verdict.state === "none") {
+    // Another instance in the region may have read it a moment ago.
+    const shared = await readSharedCopy<SheetRead>(sharedKey(tab), SHEET_STALE_MAX_MS);
+    if (shared && shared.at > fence && Array.isArray(shared.value.values) && shared.value.values.length > 0) {
+      shared.value.at = shared.at;
+      lastGood.set(tab, shared);
+      verdict = judgeCopy(shared, now, SHEET_TTL_SEC * 1000, SHEET_STALE_MAX_MS);
+    }
+  }
   if (verdict.state === "fresh") return verdict.value;
   if (verdict.state === "stale") {
     // A no-store read: a Next-cached one would hand back the same stale
@@ -324,6 +399,9 @@ export type RecordsResult = {
   longFields: string[];
   labels: Record<string, { en: string; ar: string }>;
   writable: boolean;
+  /** When the bridge answered with these rows (a served copy keeps its own
+   *  time), so a route can report how old the numbers are. */
+  readAt: number;
 };
 
 export async function getRecords(
@@ -331,10 +409,12 @@ export async function getRecords(
   opts: { fresh?: boolean } = {},
 ): Promise<RecordsResult> {
   const cfg = ENTITIES[entity];
-  const empty: RecordsResult = { records: [], fields: [], longFields: [], labels: {}, writable: sheetsWritable() };
+  const empty: RecordsResult = { records: [], fields: [], longFields: [], labels: {}, writable: sheetsWritable(), readAt: Date.now() };
   if (!cfg) return empty;
 
-  const { values } = await fetchSheet(cfg.tab, opts.fresh);
+  const read = await fetchSheet(cfg.tab, opts.fresh);
+  const values = read.values;
+  const readAt = read.at ?? Date.now();
   if (values.length < 2) return empty;
 
   const h = findHeaderRow(values, cfg.fields);
@@ -366,7 +446,7 @@ export async function getRecords(
     records.push(rec);
   }
 
-  return { records, fields, longFields, labels, writable: sheetsWritable() };
+  return { records, fields, longFields, labels, writable: sheetsWritable(), readAt };
 }
 
 /* --------------------------- public showcase -------------------------- */
@@ -658,7 +738,7 @@ async function postUpdates(tab: string, updates: Cell[], before?: string[]): Pro
     }
   }
   // The tab changed even though the write "failed", so a cached copy is a lie.
-  invalidateSheetCache();
+  await invalidateSheetCache(tab);
 
   const stranded = plan.stranded.map(cellRef);
   console.error(
@@ -678,6 +758,9 @@ async function postUpdates(tab: string, updates: Cell[], before?: string[]): Pro
 
 // One POST helper for every write action (updates / append / deleteRow).
 async function postAction(payload: Record<string, unknown>): Promise<UpdateResult> {
+  // The tab this write touches (updates / append / deleteRow carry it;
+  // createTab does not) — what the cache drop below is scoped to.
+  const written = typeof payload.tab === "string" ? payload.tab : undefined;
   try {
     const res = await fetch(SCRIPT_URL!, {
       method: "POST",
@@ -691,17 +774,18 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
     // redirect hop then answered 404. Drop the cached copy on every such
     // answer, so the next read shows the sheet as it is rather than tempting
     // the user into a second, duplicate write.
-    if (!res.ok) { invalidateSheetCache(); return { ok: false, reason: `http_${res.status}` }; }
+    if (!res.ok) { await invalidateSheetCache(written); return { ok: false, reason: `http_${res.status}` }; }
     const text = await res.text();
     let json: {
       ok?: boolean; error?: string;
       // Only from a bridge new enough to roll a rejected batch back itself.
       at?: string | null; message?: string; rolledBack?: number; notRolledBack?: string[];
     };
-    try { json = JSON.parse(text); } catch { invalidateSheetCache(); return { ok: false, reason: "unparseable" }; }
+    try { json = JSON.parse(text); } catch { await invalidateSheetCache(written); return { ok: false, reason: "unparseable" }; }
     // A stale copy after a successful write would show the crew their own
-    // edit missing for the rest of the TTL.
-    if (json.ok) invalidateSheetCache();
+    // edit missing for the rest of the TTL — on this instance AND on the
+    // region's shared copy (awaited: the page reloads the moment we answer).
+    if (json.ok) await invalidateSheetCache(written);
     if (json.ok) return { ok: true };
 
     // A deployed-since-2026-08-14 bridge tells us which cell it refused and

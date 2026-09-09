@@ -14,6 +14,8 @@ export const st = {
     loadError: "Couldn't reach the data.",
     storageDown: "The storage sheet did not answer — the balance is missing. Try refreshing.",
     jobsDown: "«أوامر العمل» could not be read, so NOTHING is shown as reserved here.",
+    storageStale: "The storage sheet did not answer — showing the balance from {age} ago.",
+    dataAge: "Numbers from {age} ago — refreshing…",
     refresh: "Refresh",
     asOf: "as of",
     cols: {
@@ -69,6 +71,8 @@ export const st = {
     loadError: "تعذّر الوصول إلى البيانات.",
     storageDown: "جدول المخزن لم يستجب — الرصيد غير موجود. جرّب التحديث.",
     jobsDown: "تعذّر قراءة «أوامر العمل»، فلا يُعرض أي محجوز هنا.",
+    storageStale: "جدول المخزن لم يستجب — يُعرض الرصيد من قبل {age}.",
+    dataAge: "الأرقام من قبل {age} — جارٍ التحديث…",
     refresh: "تحديث",
     asOf: "حتى",
     cols: {

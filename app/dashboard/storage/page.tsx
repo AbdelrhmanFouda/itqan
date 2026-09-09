@@ -132,7 +132,9 @@ export default function StoragePage() {
       const json = (await res.json()) as StorageData;
       // never blank a filled table on a transient empty fetch
       setData((prev) => (json.ok || !prev ? json : prev));
-      setLoadErr(!json.ok && json.configured);
+      // `stale`: the bridge did not answer and the server served its last good
+      // copy — the same "couldn't reach the storage sheet" line applies.
+      setLoadErr(json.stale || (!json.ok && json.configured));
     } catch {
       setLoadErr(true);
     }

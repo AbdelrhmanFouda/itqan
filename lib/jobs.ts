@@ -118,7 +118,19 @@ export type JobShaped = {
   open: boolean;
 };
 
-export async function loadJobs(): Promise<{
+export type LoadJobsOptions = {
+  /** Join «الإنتاج» for produced / scrapped / remaining. Default true. The
+   *  stock screen only needs the ordered quantities and skips it. */
+  production?: boolean;
+  /** Join «التوقفات» (+ the running stoppage in Firestore) onto the runs.
+   *  Default true; needs `production`. The LIST shows no downtime, so
+   *  /api/jobs skips it — one bridge tab and a Firestore query fewer. */
+  downtime?: boolean;
+  /** Read «الماكينات» for the registry labels (`machineMatched`). Default true. */
+  machines?: boolean;
+};
+
+export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   jobs: JobShaped[];
   runsFor: (job: JobShaped) => JobRun[];
   writable: boolean;
@@ -127,10 +139,16 @@ export async function loadJobs(): Promise<{
   duplicates: DuplicateCode[];
   /** «الماكينات»!J as read — the labels a work order may name. */
   registryLabels: string[];
+  /** The OLDEST bridge answer behind these numbers (ms since epoch). */
+  readAt: number;
 }> {
+  const production = opts.production ?? true;
+  const downtime = (opts.downtime ?? true) && production;
+  const machines = (opts.machines ?? true) || downtime;
+  const none = () => ({ records: [] as SheetRecord[], readAt: Date.now() });
   const [jobsTab, prodTab, masterTab, machinesTab, captured] = await Promise.all([
     getRecords("jobs"),
-    getRecords("production"),
+    production ? getRecords("production") : Promise.resolve(none()),
     getRecords("master"),
     // Downtime is not on the production row — «الإنتاج»!J has never been
     // filled. It lives in «التوقفات» and is joined on below, the same way
@@ -138,9 +156,10 @@ export async function loadJobs(): Promise<{
     // the Overview and /performance report for the same runs. Best-effort: if
     // either source is unreachable the page degrades to "no downtime measured"
     // instead of failing.
-    getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
-    loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
+    machines ? getRecords("machines").catch(none) : Promise.resolve(none()),
+    downtime ? loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME) : Promise.resolve(EMPTY_DOWNTIME),
   ]);
+  const readAt = Math.min(jobsTab.readAt, prodTab.readAt, masterTab.readAt, machinesTab.readAt);
 
   // The registry's labels — «الماكينات»!J («PQ 7 — 100»), the machine's
   // identity everywhere; built from code + tonnage when J is blank, the same
@@ -321,5 +340,6 @@ export async function loadJobs(): Promise<{
     configured: jobsTab.fields.length > 0,
     duplicates,
     registryLabels,
+    readAt,
   };
 }

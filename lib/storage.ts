@@ -9,6 +9,10 @@
  *   STORAGE_APPS_SCRIPT_URL, STORAGE_APPS_SCRIPT_SECRET
  */
 
+import { after } from "next/server";
+import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
+import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-copy";
+
 const URL = process.env.STORAGE_APPS_SCRIPT_URL;
 const SECRET = process.env.STORAGE_APPS_SCRIPT_SECRET;
 
@@ -70,6 +74,12 @@ export type StorageData = {
   /** The deployed bridge answered a `catalog` key at all (a probe, like
    *  supportsForClient — the site never assumes the deployment's version). */
   supportsCatalog: boolean;
+  /** When the bridge answered with this balance (0 = never). */
+  readAt: number;
+  /** The bridge did NOT answer this time and this is the last good copy —
+   *  the page must say so rather than present it as current. A copy served
+   *  inside its normal fresh/stale window is NOT stale in this sense. */
+  stale: boolean;
   /**
    * Whether the DEPLOYED bridge knows «صرف لصالح» — measured from the width of
    * a log row (15 columns since sheet v4), not assumed. Verified 2026-08-30: the
@@ -109,6 +119,7 @@ const EMPTY: StorageData = {
   lists: { products: [], materials: [], clients: [], locations: [], weights: {} },
   supportsForClient: false,
   catalog: [], supportsCatalog: false,
+  readAt: 0, stale: false,
 };
 
 function mapCatalog(rows: string[][]): StorageCatalogRow[] {
@@ -142,13 +153,55 @@ function mapLog(rows: string[][], log: "إيداع" | "سحب"): StorageMovement
 
 /* -------------------------------- reads -------------------------------- */
 
-export async function getStorageData(): Promise<StorageData> {
-  if (!URL || !SECRET) return { ...EMPTY, configured: false };
+/* ------------------------- the copies (2026-09-09) --------------------------
+ * The storage bridge had NO cache at all: every /api/storage and /api/stock
+ * call went to Apps Script — measured on production, 2.8–6.1 s per call while
+ * every sheet-backed route answered in 100–300 ms, and 17 s once when the
+ * bridge was throttled. Same two layers as lib/sheets.ts now: this instance's
+ * last good answer, judged fresh (≤30 s: served, no network) / stale (≤30
+ * min: served at once, refreshed in the background) / none; and the same copy
+ * in the region-shared runtime cache (lib/shared-copy.ts) for instances that
+ * have none. A write through this module drops both BEFORE it answers, and
+ * fences older copies on this instance, so the storekeeper's reload after a
+ * save reads the sheet as it is. When the bridge does not answer and a copy
+ * exists, the copy is served with `stale: true` — the page says so.
+ */
+const STORAGE_FRESH_MS = 30_000;
+const STORAGE_STALE_MAX_MS = 30 * 60 * 1000;
+const STORAGE_READ_TIMEOUT_MS = 30_000;
+const STORAGE_KEY = "storage:data";
+const STORAGE_TAG = "storage";
+let lastGoodStorage: StaleCopy<StorageData> | undefined;
+let storageWrittenAt = 0;
+let storageInflight: Promise<StorageData | null> | null = null;
+
+/** Keep a background read alive past the response (a no-op outside a request). */
+function keepAlive(p: Promise<unknown>): void {
+  const quiet = p.then(() => undefined, () => undefined);
+  try { after(quiet); } catch { /* outside a request scope — nothing to hold open */ }
+}
+
+function rememberStorage(d: StorageData): void {
+  const copy = { value: d, at: d.readAt };
+  lastGoodStorage = copy;
+  keepAlive(writeSharedCopy(STORAGE_KEY, copy, STORAGE_STALE_MAX_MS / 1000, [STORAGE_TAG]));
+}
+
+/** Forget every copy — this instance's and the region's — and fence what
+ *  was read before now. Awaited by the writers before they answer. */
+async function forgetStorageCopies(): Promise<void> {
+  storageWrittenAt = Date.now();
+  lastGoodStorage = undefined;
+  await dropSharedCopies([STORAGE_TAG]);
+}
+
+/** One bridge round trip → the shaped data, or null when it did not answer. */
+async function readStorageBridge(): Promise<StorageData | null> {
   try {
-    const res = await fetch(`${URL}?token=${encodeURIComponent(SECRET)}`, {
-      cache: "no-store", redirect: "follow",
+    const res = await fetch(`${URL}?token=${encodeURIComponent(SECRET!)}`, {
+      cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(STORAGE_READ_TIMEOUT_MS),
     });
-    if (!res.ok) return EMPTY;
+    if (!res.ok) return null;
     const json = (await res.json()) as {
       ok?: boolean; balance?: string[][]; inLog?: string[][]; outLog?: string[][];
       lists?: {
@@ -157,7 +210,7 @@ export async function getStorageData(): Promise<StorageData> {
       };
       catalog?: string[][];
     };
-    if (!json.ok) return EMPTY;
+    if (!json.ok) return null;
     const width = Math.max(json.inLog?.[0]?.length ?? 0, json.outLog?.[0]?.length ?? 0);
     return {
       configured: true, ok: true,
@@ -174,10 +227,49 @@ export async function getStorageData(): Promise<StorageData> {
         locations: json.lists?.locations ?? [],
         weights: json.lists?.weights ?? {},
       },
+      readAt: Date.now(),
+      stale: false,
     };
   } catch {
-    return EMPTY;
+    return null;
   }
+}
+
+/** One bridge read at a time per instance — a refresh in flight is reused. */
+function readStorageOnce(): Promise<StorageData | null> {
+  if (storageInflight) return storageInflight;
+  const p = readStorageBridge()
+    .then((d) => { if (d) rememberStorage(d); return d; })
+    .finally(() => { if (storageInflight === p) storageInflight = null; });
+  storageInflight = p;
+  return p;
+}
+
+export async function getStorageData(opts: { fresh?: boolean } = {}): Promise<StorageData> {
+  if (!URL || !SECRET) return { ...EMPTY, configured: false };
+  const now = Date.now();
+  const usable = (c: StaleCopy<StorageData> | undefined) => (c && c.at > storageWrittenAt ? c : undefined);
+  if (!opts.fresh) {
+    let verdict = judgeCopy(usable(lastGoodStorage), now, STORAGE_FRESH_MS, STORAGE_STALE_MAX_MS);
+    if (verdict.state === "none") {
+      const shared = await readSharedCopy<StorageData>(STORAGE_KEY, STORAGE_STALE_MAX_MS);
+      if (shared && shared.at > storageWrittenAt && Array.isArray(shared.value.balance)) {
+        lastGoodStorage = shared;
+        verdict = judgeCopy(shared, now, STORAGE_FRESH_MS, STORAGE_STALE_MAX_MS);
+      }
+    }
+    if (verdict.state === "fresh") return { ...verdict.value, stale: false };
+    if (verdict.state === "stale") {
+      keepAlive(readStorageOnce());
+      return { ...verdict.value, stale: false };
+    }
+  }
+  const fresh = await readStorageOnce();
+  if (fresh) return fresh;
+  // The bridge did not answer: the last good copy, if there is one, said so.
+  const fallback = usable(lastGoodStorage);
+  if (fallback && now - fallback.at <= STORAGE_STALE_MAX_MS) return { ...fallback.value, stale: true };
+  return EMPTY;
 }
 
 /* -------------------------------- writes ------------------------------- */
@@ -191,10 +283,14 @@ async function post(payload: Record<string, unknown>): Promise<StorageWriteResul
       body: JSON.stringify({ token: SECRET, ...payload }),
       redirect: "follow",
     });
+    // The sheet changed — or may have, the bridge is at-least-once — so every
+    // copy is dropped BEFORE answering: the page reloads the moment we do.
+    await forgetStorageCopies();
     if (!res.ok) return { ok: false, error: `http_${res.status}` };
     const json = (await res.json().catch(() => ({}))) as StorageWriteResult;
     return json.ok ? json : { ok: false, error: json.error || "script_error" };
   } catch {
+    await forgetStorageCopies();
     return { ok: false, error: "request_failed" };
   }
 }

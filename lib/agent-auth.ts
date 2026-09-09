@@ -91,7 +91,31 @@ export async function verifyIdToken(token: string): Promise<VerifiedUser> {
  */
 export async function roleFor(user: VerifiedUser, idToken?: string): Promise<Role | null> {
   if (isOwnerEmail(user.email)) return "owner";
+  // Every guarded call used to cost a Firestore REST round trip for the
+  // caller's profile (~60–100 ms in fra1, more from a cold instance), and a
+  // page open makes two or three. A GRANTED role is remembered per token for
+  // five minutes on this instance (2026-09-09, speed); a null — no profile,
+  // not approved — is never cached, so an approval takes effect on the next
+  // call. A revocation therefore lasts up to five minutes on the API; the
+  // page itself redirects the moment the live profile snapshot changes.
+  const key = idToken ? `${user.uid}|${idToken}` : "";
+  if (key) {
+    const hit = ROLE_CACHE.get(key);
+    if (hit && Date.now() - hit.at < ROLE_CACHE_MS) return hit.role;
+  }
+  const role = await lookupRole(user, idToken);
+  if (key && role) {
+    if (ROLE_CACHE.size >= ROLE_CACHE_MAX) ROLE_CACHE.clear();
+    ROLE_CACHE.set(key, { role, at: Date.now() });
+  }
+  return role;
+}
 
+const ROLE_CACHE = new Map<string, { role: Role; at: number }>();
+const ROLE_CACHE_MS = 5 * 60 * 1000;
+const ROLE_CACHE_MAX = 500;
+
+async function lookupRole(user: VerifiedUser, idToken?: string): Promise<Role | null> {
   if (idToken) {
     try {
       const res = await fetch(

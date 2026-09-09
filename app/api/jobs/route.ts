@@ -19,11 +19,21 @@ export async function GET(req: NextRequest) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
   try {
-    const { jobs, writable, configured, duplicates, registryLabels } = await loadJobs();
-    return NextResponse.json({ jobs, writable, configured, duplicates, registryLabels });
+    // The list shows produced / remaining but no downtime, so «التوقفات» and
+    // the Firestore open-event query are skipped here (2026-09-09, speed):
+    // four bridge tabs instead of five on a cold instance. The detail route
+    // still joins downtime for its runs table.
+    const { jobs, writable, configured, duplicates, registryLabels, readAt } = await loadJobs({ downtime: false });
+    return NextResponse.json({
+      jobs, writable, configured, duplicates, registryLabels,
+      // How old the numbers are: a served copy keeps its read time. The page
+      // says «البيانات من قبل X» past a minute and refetches once on its own,
+      // because the server has already started refreshing the copy.
+      meta: { dataAgeMs: Math.max(0, Date.now() - readAt) },
+    });
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ jobs: [], writable: false, configured: false, duplicates: [], registryLabels: [] });
+    return NextResponse.json({ jobs: [], writable: false, configured: false, duplicates: [], registryLabels: [], meta: { dataAgeMs: 0 } });
   }
 }
 

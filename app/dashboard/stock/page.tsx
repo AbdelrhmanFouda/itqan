@@ -15,7 +15,7 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  * filters and draws. Default order: المتاح ascending, so what is nearly gone
  * is at the top.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { authedFetch } from "@/lib/authed-fetch";
 import { st } from "@/lib/i18n.stock";
@@ -24,14 +24,21 @@ import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { compareByNet, isMaterialType, type StockRow } from "@/lib/stock";
 import { codeKey } from "@/lib/work-orders";
-import { numLocale } from "@/lib/format";
+import { ageLabel, numLocale } from "@/lib/format";
+import { readLastSeen, writeLastSeen } from "@/components/dashboard/last-seen";
 import { EmptyState, Pill, Spinner } from "@/components/dashboard/ui";
 import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
 type Resp = {
   ok: boolean; configured: boolean; jobsOk: boolean; rows: StockRow[];
-  meta: { catalog: boolean; catalogRows: number; openOrders: number; asOf: string };
+  meta: {
+    catalog: boolean; catalogRows: number; openOrders: number; asOf: string;
+    dataAgeMs: number; storageAgeMs: number; storageStale: boolean;
+  };
 };
+const LAST_KEY = "itqan.stock.last";
+/** Past this the page says «الأرقام من قبل …» and refetches once on its own. */
+const STALE_AFTER_MS = 60_000;
 type Tile = "" | "negative" | "belowMin" | "unit" | "withOrders";
 type TypeFilter = "" | "منتج" | "خامة";
 type Sort = "net" | "item" | "available";
@@ -57,6 +64,9 @@ export default function StockPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
 
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const staleRefetches = useRef(0);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -69,13 +79,32 @@ export default function StockPage() {
       // balance a moment ago — keep the rows, show the notice.
       setData((prev) => (!next.ok && prev && prev.rows.length > 0 ? { ...prev, ok: false, meta: next.meta } : next));
       setError(false);
+      if (next.ok) writeLastSeen(LAST_KEY, next);
+      // An old copy was served (and is being refreshed server-side): ask once
+      // more in a few seconds. Bounded — a bridge that stays down must not
+      // turn this into a poll.
+      const age = Math.max(next.meta?.dataAgeMs ?? 0, next.meta?.storageAgeMs ?? 0);
+      if (age <= STALE_AFTER_MS) staleRefetches.current = 0;
+      else if (!refetchTimer.current && staleRefetches.current < 2) {
+        staleRefetches.current += 1;
+        refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadRef.current(); }, 8000);
+      }
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  loadRef.current = load;
+  useEffect(() => {
+    // Last answer seen on this device, at once; the live one replaces it.
+    const snap = readLastSeen<Resp>(LAST_KEY);
+    if (snap && Array.isArray(snap.rows) && snap.meta) {
+      setData({ ...snap, meta: { ...snap.meta, dataAgeMs: 0, storageAgeMs: 0, storageStale: false } });
+    }
+    load();
+    return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); };
+  }, [load]);
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const hasMin = !!data?.meta.catalog;
@@ -139,7 +168,7 @@ export default function StockPage() {
 
   /* --------------------------------- states --------------------------------- */
 
-  if (error) {
+  if (error && !data) {
     return (
       <div dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{s.title}</h1>
@@ -148,6 +177,7 @@ export default function StockPage() {
     );
   }
   if (!data) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
+  const dataAge = Math.max(data.meta?.dataAgeMs ?? 0, data.meta?.storageAgeMs ?? 0);
   if (!data.configured) {
     return (
       <div dir={isAr ? "rtl" : "ltr"}>
@@ -180,8 +210,17 @@ export default function StockPage() {
         </p>
       </div>
 
+      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{s.loadError}</p>}
       {!data.ok && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">{s.storageDown}</p>}
+      {data.ok && data.meta?.storageStale && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+          {fill(s.storageStale, { age: ageLabel(data.meta.storageAgeMs, isAr) })}
+        </p>
+      )}
       {!data.jobsOk && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">{s.jobsDown}</p>}
+      {data.ok && !data.meta?.storageStale && dataAge > STALE_AFTER_MS && (
+        <p className="text-xs text-amber-700 mb-3">{fill(s.dataAge, { age: ageLabel(dataAge, isAr) })}</p>
+      )}
 
       {/* tiles — each one filters */}
       <div className={`grid grid-cols-2 ${hasMin ? "sm:grid-cols-5" : "sm:grid-cols-4"} gap-2 sm:gap-3 mb-1`}>

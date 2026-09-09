@@ -30,6 +30,12 @@ export type StockResponse = {
     catalogRows: number;
     openOrders: number;
     asOf: string;
+    /** Age of the oldest sheet copy behind the orders (ms). */
+    dataAgeMs: number;
+    /** Age of the storage balance shown (ms; 0 when none). */
+    storageAgeMs: number;
+    /** The storage bridge did not answer and its last good copy is shown. */
+    storageStale: boolean;
   };
 };
 
@@ -39,7 +45,10 @@ export async function GET(req: NextRequest) {
   try {
     const [storage, jobsRes] = await Promise.all([
       getStorageData(),
-      loadJobs().catch((err) => { console.error(err); return null; }),
+      // Only the ordered quantities matter here: «أوامر العمل» + «الرئيسي»
+      // (kg → pieces). No production join, no downtime, no registry — two
+      // bridge tabs instead of five (2026-09-09, speed).
+      loadJobs({ production: false, downtime: false, machines: false }).catch((err) => { console.error(err); return null; }),
     ]);
     const orders: StockOrder[] = (jobsRes?.jobs ?? []).map((j) => ({
       id: j.id, code: j.code, client: j.client, product: j.product, status: j.status, dueDate: j.dueDate,
@@ -67,11 +76,17 @@ export async function GET(req: NextRequest) {
         catalogRows: storage.catalog.length,
         openOrders: orders.filter((o) => isOpenOrder(o.status)).length,
         asOf: new Date().toISOString(),
+        dataAgeMs: jobsRes ? Math.max(0, Date.now() - jobsRes.readAt) : 0,
+        storageAgeMs: storage.readAt ? Math.max(0, Date.now() - storage.readAt) : 0,
+        storageStale: storage.stale,
       },
     };
     return NextResponse.json(body);
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ ok: false, configured: false, jobsOk: false, rows: [], meta: { catalog: false, catalogRows: 0, openOrders: 0, asOf: new Date().toISOString() } });
+    return NextResponse.json({
+      ok: false, configured: false, jobsOk: false, rows: [],
+      meta: { catalog: false, catalogRows: 0, openOrders: 0, asOf: new Date().toISOString(), dataAgeMs: 0, storageAgeMs: 0, storageStale: false },
+    });
   }
 }

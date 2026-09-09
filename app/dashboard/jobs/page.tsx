@@ -20,7 +20,7 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  * after the start date (lib/jobs.ts). The rules the list draws — open, late,
  * grouping, the one-tap transitions — are lib/work-orders.ts, unit-tested.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
@@ -28,7 +28,8 @@ import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lu
 import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
-import { numLocale } from "@/lib/format";
+import { ageLabel, numLocale } from "@/lib/format";
+import { readLastSeen, writeLastSeen } from "@/components/dashboard/last-seen";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { nameKey } from "@/lib/master-lookup";
 import {
@@ -50,7 +51,14 @@ type Job = {
   machineMatched: boolean; codeDuplicate: boolean; open: boolean;
 };
 type Duplicate = { key: string; code: string; ids: string[] };
-type Data = { jobs: Job[]; writable: boolean; configured: boolean; duplicates: Duplicate[]; registryLabels: string[] };
+type Data = {
+  jobs: Job[]; writable: boolean; configured: boolean; duplicates: Duplicate[]; registryLabels: string[];
+  /** Age of the sheet copy behind the numbers; absent on a device snapshot. */
+  meta?: { dataAgeMs: number };
+};
+const LAST_KEY = "itqan.jobs.last";
+/** Past this the page says «الأرقام من قبل …» and refetches once on its own. */
+const STALE_AFTER_MS = 60_000;
 type MasterRow = { row: number; name: string; client: string; weight: string; ambiguous: boolean };
 type MachineAgg = { name: string; label: string; status: string };
 type Tile = "" | "late" | "noDue" | "dup";
@@ -90,6 +98,9 @@ export default function JobsPage() {
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
 
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const staleRefetches = useRef(0);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -99,21 +110,40 @@ export default function JobsPage() {
       // lie about what went wrong.
       const r = await authedFetch("/api/jobs");
       if (!r.ok) throw new Error(String(r.status));
-      setData(await r.json());
+      const json = (await r.json()) as Data;
+      setData(json);
       setError(false);
+      writeLastSeen(LAST_KEY, json);
+      // The server served a copy older than a minute and has already begun
+      // refreshing it in the background (lib/sheets.ts): ask once more in a
+      // few seconds so the page catches up without anyone pressing anything.
+      // Bounded, so a bridge that stays down does not turn this into a poll.
+      const age = json.meta?.dataAgeMs ?? 0;
+      if (age <= STALE_AFTER_MS) staleRefetches.current = 0;
+      else if (!refetchTimer.current && staleRefetches.current < 2) {
+        staleRefetches.current += 1;
+        refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadRef.current(); }, 8000);
+      }
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
   }, []);
+  loadRef.current = load;
   useEffect(() => {
+    // What this device saw last time renders AT ONCE (the refresh icon spins);
+    // the live answer replaces it. A phone opening the page after lunch used
+    // to look at a spinner for the whole sheet round trip.
+    const snap = readLastSeen<Data>(LAST_KEY);
+    if (snap && Array.isArray(snap.jobs)) setData({ ...snap, meta: undefined });
     load();
     // The order book renders the moment /api/jobs answers; the two lists that
     // feed the new-order form (Master names + clients, the registry) arrive on
     // their own — a cold bridge read of «الرئيسي» is 2–5s.
     fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
     authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
+    return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); };
   }, [load]);
 
   /* ------------------------------- the list -------------------------------- */
@@ -230,7 +260,7 @@ export default function JobsPage() {
     ? "تبويب «أوامر العمل» غير موجود في جدول البيانات. أضِفه بعناوينه في الصف الأول، ثم أعد التحميل."
     : "The sheet has no «أوامر العمل» tab yet. Add it with its headers in row 1, then reload.";
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{p.jobs.title}</h1>
@@ -239,6 +269,7 @@ export default function JobsPage() {
     );
   }
   if (!data) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
+  const dataAge = data.meta?.dataAgeMs ?? 0;
 
   const iconBtn =
     "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 " +
@@ -259,6 +290,11 @@ export default function JobsPage() {
           </div>
         </div>
         <p className="text-sm text-gray-500 mt-1">{p.jobs.subtitle} · {p.jobs.listedBy}</p>
+        {/* A snapshot is showing and the live read failed: say so, keep the snapshot. */}
+        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2">{p.common.loadError}</p>}
+        {dataAge > STALE_AFTER_MS && (
+          <p className="text-xs text-amber-700 mt-2">{fill(p.jobs.dataAge, { age: ageLabel(dataAge, isAr) })}</p>
+        )}
       </div>
 
       {!data.configured ? (

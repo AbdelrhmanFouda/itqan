@@ -15,6 +15,7 @@
     "images": "node scripts/generate-images.mjs"
   },
   "dependencies": {
+    "@vercel/functions": "^3.9.6",
     "firebase": "^11.0.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
