@@ -19,7 +19,18 @@ import { loadIssues, readIssueInput, saveIssueAudio } from "@/lib/issues-data";
 
 export async function GET() {
   try {
-    const [{ issues, writable }, features] = await Promise.all([loadIssues(), bridgeFeatures()]);
+    // The feature probe is an Apps Script ping (measured 0.9–20 s). The list
+    // now comes through the Sheets API in well under a second, so the probe
+    // gets 1.5 s and then the answer says «not supported» until its cached
+    // result is in (bridgeFeatures caches; the next call is instant). The
+    // page re-probes on its own, and a recording is refused server-side
+    // anyway when the bridge lacks audio — nothing is lost, only a button
+    // appears a moment later on a cold instance.
+    const probe = bridgeFeatures();
+    const [{ issues, writable }, features] = await Promise.all([
+      loadIssues(),
+      Promise.race([probe, new Promise<{ audio: boolean }>((r) => setTimeout(() => r({ audio: false }), 1500))]),
+    ]);
     // Newest first (rows append chronologically; date text can be mixed shapes).
     issues.reverse();
     // `audio.supported` tells the page whether the DEPLOYED bridge can take a

@@ -124,13 +124,13 @@ async function call<T>(path: string, init: RequestInit = {}, retry = true): Prom
 /* ---------------------------------- helpers -------------------------------- */
 
 /** A whole-tab range, quoted for A1 notation («'أوامر العمل'»). */
-const tabRange = (tab: string) => `'${tab.replace(/'/g, "''")}'`;
+export const tabRange = (tab: string) => `'${tab.replace(/'/g, "''")}'`;
 export function colLetter(col: number): string {
   let s = "";
   for (let n = col; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
   return s;
 }
-const cellA1 = (tab: string, row: number, col: number) => `${tabRange(tab)}!${colLetter(col)}${row}`;
+export const cellA1 = (tab: string, row: number, col: number) => `${tabRange(tab)}!${colLetter(col)}${row}`;
 const isRangeError = (e: unknown) => e instanceof SheetsApiError && e.status === 400 && /Unable to parse range|not found/i.test(e.message);
 
 /* ----------------------------------- reads --------------------------------- */
