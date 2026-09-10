@@ -25,7 +25,7 @@ import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { compareByNet, isMaterialType, type StockRow } from "@/lib/stock";
 import { codeKey } from "@/lib/work-orders";
 import { ageLabel, numLocale } from "@/lib/format";
-import { readLastSeen, writeLastSeen } from "@/components/dashboard/last-seen";
+import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { EmptyState, Pill, Spinner } from "@/components/dashboard/ui";
 import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
@@ -70,9 +70,9 @@ export default function StockPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await authedFetch("/api/stock");
+      const r = await timedJson<Resp>(authedFetch, "/api/stock");
       if (!r.ok) throw new Error(String(r.status));
-      const next = (await r.json()) as Resp;
+      const next = r.data;
       // The storage bridge answers with nothing when throttled (measured: a
       // 17s read returning ok:false minutes after a 5s one returned 151 rows).
       // A refresh that fails must not blank a page that was showing the

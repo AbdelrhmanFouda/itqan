@@ -2,11 +2,13 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { useEffect, useState, use } from "react";
+import { pd } from "@/lib/i18n.prod";
+import { useCallback, useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { timedJson } from "@/components/dashboard/last-seen";
 import { Spinner } from "@/components/dashboard/ui";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -35,16 +37,22 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   const router = useRouter();
   const { lang } = useLang();
   const tr = t[lang];
+  const p = pd[lang];
   const isAr = lang === "ar";
   const [report, setReport] = useState<Report | null>(null);
+  // A failed read used to leave the page spinning for ever: the response was
+  // never checked for `ok` and the fetch had no timeout, so a 401 or a stalled
+  // sheet both rendered as «جارٍ التحميل…» until the function was killed.
+  const [err, setErr] = useState<null | { timedOut: boolean }>(null);
   usePageTitle(report ? `${tr.dashboard.reportFor} ${(isAr ? monthNamesAr : monthNames)[report.month - 1]} ${report.year}` : tr.dashboard.reports);
 
-  useEffect(() => {
-    authedFetch(`/api/reports/${id}`)
-      .then((r) => r.json())
-      .then(setReport)
-      .catch(() => {});
+  const load = useCallback(async () => {
+    setErr(null);
+    const r = await timedJson<Report>(authedFetch, `/api/reports/${id}`);
+    if (!r.ok) { setErr({ timedOut: r.timedOut }); return; }
+    setReport(r.data);
   }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   async function handleDelete() {
     if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
@@ -53,6 +61,27 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   }
 
   if (!report) {
+    if (err) {
+      return (
+        <div className="max-w-2xl" dir={isAr ? "rtl" : "ltr"}>
+          <Link
+            href="/dashboard/reports"
+            className="inline-flex items-center min-h-11 sm:min-h-0 mb-4 sm:mb-6 rounded-lg text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
+          >
+            {isAr ? "→ التقارير" : "← Reports"}
+          </Link>
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
+            <span>{err.timedOut ? p.common.timedOut : p.common.loadError}</span>
+            <button
+              onClick={load}
+              className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+            >
+              {p.common.retry}
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex justify-center py-16">
         <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />

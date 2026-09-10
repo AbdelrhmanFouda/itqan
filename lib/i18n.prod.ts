@@ -34,6 +34,11 @@ export const pd = {
       // it is the only way into the navigation on a phone.
       openMenu: "Open menu",
       closeMenu: "Close menu",
+      // A stalled sheet read (2026-09-10): the page keeps what it showed and says so.
+      retry: "Retry",
+      slowSheet: "The sheet is slow right now — showing the last data seen on this device.",
+      timedOut: "The sheet did not answer in time.",
+      stillLoading: "Still reading the sheet…",
     },
     overview: {
       title: "Production Overview",
@@ -338,6 +343,10 @@ export const pd = {
       confirmDelete: "حذف هذا السجل؟ لا يمكن التراجع.",
       openMenu: "فتح القائمة",
       closeMenu: "إغلاق القائمة",
+      retry: "إعادة المحاولة",
+      slowSheet: "الجدول بطيء الآن — تُعرض آخر بيانات ظهرت على هذا الجهاز.",
+      timedOut: "الجدول لم يستجب في الوقت المحدد.",
+      stillLoading: "ما زال يقرأ من الجدول…",
     },
     overview: {
       title: "نظرة عامة على الإنتاج",

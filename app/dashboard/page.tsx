@@ -2,11 +2,12 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, BarChart3, AlertTriangle } from "lucide-react";
-import { Stat, EmptyState, Spinner } from "@/components/dashboard/ui";
+import { Stat, EmptyState, Spinner, Btn } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
 type Machine = { name: string; status: string };
@@ -25,6 +26,16 @@ type Run = {
 
 type StaleEvent = { id: string; date: string; machine: string; reason: string; startedAt: number };
 
+/**
+ * Everything this page paints, as this device last saw it. One key rather than
+ * four: the pieces are only meaningful together (the tiles are read as one
+ * picture), and one localStorage write is cheaper than four.
+ */
+type Snap = { runs: Run[]; jobs: Job[]; machines: Machine[]; stale: StaleEvent[]; lastDowntimeLog: string };
+const LAST_KEY = "itqan.overview.last";
+/** Why the live read is not moving. Kept as a KIND, so the message follows the language. */
+type Issue = "" | "timeout" | "error";
+
 const OPERATIONAL = ["Operational", "تعمل", "Active"];
 const DONE = ["Completed", "Delivered"];
 
@@ -34,8 +45,10 @@ export default function DashboardPage() {
   const isAr = lang === "ar";
   usePageTitle(p.overview.title);
 
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  // null = not answered yet. A tile reads «…» rather than a zero it cannot
+  // stand behind — "0 machines operational" is a statement, not a placeholder.
+  const [machines, setMachines] = useState<Machine[] | null>(null);
+  const [jobs, setJobs] = useState<Job[] | null>(null);
   const [runs, setRuns] = useState<Run[] | null>(null);
   // Stoppages started on the floor and never stopped. They carry no minutes, so
   // they are absent from Availability — the owner has to see that here, not
@@ -43,34 +56,95 @@ export default function DashboardPage() {
   const [stale, setStale] = useState<StaleEvent[]>([]);
   // "" until the guarded fetch answers; the tile only renders on a real date.
   const [lastDowntimeLog, setLastDowntimeLog] = useState("");
-  const [error, setError] = useState(false);
+  const [issue, setIssue] = useState<Issue>("");
+  const [loading, setLoading] = useState(false);
+
+  // The snapshot is written from here, not from render: the pieces land at
+  // different times and only the ones that really came back should be kept.
+  const snap = useRef<Snap>({ runs: [], jobs: [], machines: [], stale: [], lastDowntimeLog: "" });
+  const remember = useCallback(() => writeLastSeen(LAST_KEY, snap.current), []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    /* ---- the main read: the numbers this page is about --------------------
+     * Both are bounded (90s — there was no client timeout at all, so a stalled
+     * bridge meant a spinner until the platform killed the function at 300s),
+     * and a failure NEVER replaces what is on screen: the device snapshot or
+     * the previous live answer stays and the page says why.
+     *
+     * `?quick=1` answers from Firestore alone, with no sheet read (see
+     * app/api/downtime/route.ts): it carries the running/stale stoppages but
+     * NOT `lastLoggedDate`, which needs «التوقفات». The unclosed-stoppage
+     * banner sits above every number here and qualifies all of them, so it is
+     * fetched in this phase — sub-second, and it queues no tab read. The full
+     * answer follows below, only for the days-since-last-log tile.
+     */
+    const [rr, jr, dq] = await Promise.all([
+      timedJson<Run[]>(fetch, "/api/runs"),
+      timedJson<{ jobs?: Job[] }>(authedFetch, "/api/jobs"),
+      timedJson<{ stale?: StaleEvent[] }>(authedFetch, "/api/downtime?quick=1"),
+    ]);
+    let bad: Issue = "";
+    if (rr.ok && Array.isArray(rr.data)) { setRuns(rr.data); snap.current.runs = rr.data; }
+    else bad = !rr.ok && rr.timedOut ? "timeout" : "error";
+    if (jr.ok) { const j = jr.data.jobs ?? []; setJobs(j); snap.current.jobs = j; }
+    else if (!bad) bad = jr.timedOut ? "timeout" : "error";
+    if (dq.ok) { const s = dq.data.stale ?? []; setStale(s); snap.current.stale = s; }
+    setIssue(bad);
+    setLoading(false);
+    remember();
+
+    /* ---- the rest, AFTER the main read, never blocking it -----------------
+     * The bridge serves one tab at a time, so «الماكينات» and «التوقفات»
+     * started alongside simply queued in front of «الإنتاج» and «أوامر العمل».
+     * Neither of these two carries a headline number: the registry fills the
+     * machine tile's denominator, and the full downtime answer is read ONLY
+     * for `lastLoggedDate` (the days-since-last-stoppage tile).
+     */
+    fetch("/api/machines").then((r) => r.json()).then((m) => {
+      const list: Machine[] = m.machines ?? [];
+      setMachines(list); snap.current.machines = list; remember();
+    }).catch(() => {});
+    authedFetch("/api/downtime").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d) return;
+      const s: StaleEvent[] = d.stale ?? [];
+      const last: string = d.lastLoggedDate ?? "";
+      setStale(s); setLastDowntimeLog(last);
+      snap.current.stale = s; snap.current.lastDowntimeLog = last;
+      remember();
+    }).catch(() => {});
+  }, [remember]);
 
   useEffect(() => {
-    fetch("/api/machines").then((r) => r.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
-    // A non-2xx (401 on a missing/expired token) must land in the ERROR state —
-    // parsed as data it renders as zeros and an empty list, which lies to the
-    // owner. Same rule for runs: swallowing its failure left the spinner
-    // spinning forever. (Pattern from app/dashboard/jobs/page.tsx.)
-    authedFetch("/api/jobs")
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
-      .then((j) => setJobs(j.jobs ?? []))
-      .catch(() => setError(true));
-    fetch("/api/runs")
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
-      .then((r) => setRuns(Array.isArray(r) ? r : []))
-      .catch(() => setError(true));
-    // Guarded route (the rows carry createdBy), so this one is authenticated.
-    authedFetch("/api/downtime")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { setStale(d?.stale ?? []); setLastDowntimeLog(d?.lastLoggedDate ?? ""); })
-      .catch(() => {});
-  }, []);
+    // What this device saw last time paints at once; the live answers replace
+    // it piece by piece. The page used to show a spinner for the whole bridge
+    // round trip — 10–160s on a cold instance.
+    const s = readLastSeen<Snap>(LAST_KEY);
+    if (s) {
+      const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+      snap.current = {
+        runs: arr<Run>(s.runs), jobs: arr<Job>(s.jobs), machines: arr<Machine>(s.machines),
+        stale: arr<StaleEvent>(s.stale), lastDowntimeLog: s.lastDowntimeLog ?? "",
+      };
+      // The snapshot is written piece by piece, so an EMPTY list in it means
+      // "that fetch never answered" — leave it unanswered («…») rather than
+      // paint a zero the owner would read as a fact.
+      if (snap.current.runs.length) setRuns(snap.current.runs);
+      if (snap.current.jobs.length) setJobs(snap.current.jobs);
+      if (snap.current.machines.length) setMachines(snap.current.machines);
+      setStale(snap.current.stale);
+      setLastDowntimeLog(snap.current.lastDowntimeLog);
+    }
+    load();
+  }, [load]);
 
   const fmt = (n: number) => n.toLocaleString(isAr ? LOCALE_AR : "en-US");
 
   // Checked BEFORE the loading gate: a failed runs fetch leaves `runs` null,
-  // so the spinner below would otherwise spin forever.
-  if (error) {
+  // so the spinner below would otherwise spin forever. With a snapshot on the
+  // device `runs` is NOT null, so the page renders and the failure becomes the
+  // line below the header instead of a wall.
+  if (runs === null && issue !== "") {
     return (
       <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
         <div className="mb-6 sm:mb-8">
@@ -78,7 +152,10 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-500">{p.overview.subtitle}</p>
         </div>
         <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-          {p.common.loadError}
+          <p>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</p>
+          <div className="mt-3 flex justify-center">
+            <Btn variant="outline" onClick={load} disabled={loading}>{p.common.retry}</Btn>
+          </div>
         </div>
       </div>
     );
@@ -103,11 +180,13 @@ export default function DashboardPage() {
   const today = new Date().toISOString().slice(0, 10);
   const ym = today.slice(0, 7);
 
-  const operational = machines.filter((m) => OPERATIONAL.includes(m.status)).length;
-  const activeJobs = jobs.filter((j) => j.status === "In Production").length;
-  const overdue = jobs.filter(
-    (j) => !DONE.includes(j.status) && j.dueDate && j.dueDate < today
-  ).length;
+  // «…» while a list has not answered — a zero here would read as a fact.
+  const PENDING = "…";
+  const operational = machines ? machines.filter((m) => OPERATIONAL.includes(m.status)).length : null;
+  const activeJobs = jobs ? jobs.filter((j) => j.status === "In Production").length : null;
+  const overdue = jobs
+    ? jobs.filter((j) => !DONE.includes(j.status) && j.dueDate && j.dueDate < today).length
+    : null;
 
   // Days since the last «التوقفات» row. Capture going quiet is invisible by
   // nature — it looks exactly like nothing breaking — so the gap is surfaced
@@ -142,6 +221,17 @@ export default function DashboardPage() {
         <p className="text-sm text-gray-500">{p.overview.subtitle}</p>
       </div>
 
+      {/* The read stalled but there are numbers on screen — keep them, say why
+          they are not moving, and offer the retry. */}
+      {issue !== "" && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</span>
+          <span className="text-xs text-red-600/80">{p.common.slowSheet}</span>
+          <Btn variant="outline" onClick={load} disabled={loading} className="ms-auto">{p.common.retry}</Btn>
+        </div>
+      )}
+      {issue === "" && loading && <p className="mb-6 text-xs text-gray-400">{p.common.stillLoading}</p>}
+
       {/* Unclosed stoppages. Deliberately ABOVE the stats: every number below
           assumes downtime is fully logged, and this is the case where it is not. */}
       {stale.length > 0 && (
@@ -175,14 +265,14 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-8">
         <Stat
           label={p.overview.operationalMachines}
-          value={operational}
-          sub={`${p.overview.ofTotal} ${machines.length}`}
+          value={operational === null ? PENDING : fmt(operational)}
+          sub={`${p.overview.ofTotal} ${machines ? fmt(machines.length) : PENDING}`}
         />
-        <Stat label={p.overview.activeJobs} value={activeJobs} />
+        <Stat label={p.overview.activeJobs} value={activeJobs === null ? PENDING : fmt(activeJobs)} />
         <Stat
           label={p.overview.overdueJobs}
-          value={overdue}
-          tone={overdue > 0 ? "red" : undefined}
+          value={overdue === null ? PENDING : fmt(overdue)}
+          tone={overdue !== null && overdue > 0 ? "red" : undefined}
         />
         {daysSinceDowntimeLog !== null && (
           <Stat

@@ -2,14 +2,18 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { useEffect, useState } from "react";
+import { pd } from "@/lib/i18n.prod";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, FileText, Trash2, Sparkles } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
-import { EmptyState, inputCls } from "@/components/dashboard/ui";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { EmptyState, inputCls, Spinner } from "@/components/dashboard/ui";
 import { LOCALE_AR } from "@/lib/format";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
+/** What this device saw last time — painted at once so the first open is not a spinner. */
+const LAST_KEY = "itqan.reports.last";
 type DraftMeta = {
   provider: "gemini" | "anthropic" | "rules";
   runCount: number;
@@ -30,9 +34,14 @@ const monthNamesAr = [
 export default function ReportsPage() {
   const { lang } = useLang();
   const tr = t[lang];
+  const p = pd[lang];
   const isAr = lang === "ar";
   usePageTitle(tr.dashboard.reports);
-  const [reports, setReports] = useState<Report[]>([]);
+  // null = nothing to show yet. A failed refresh must never turn a filled list
+  // into an empty one — the list only ever moves forward on a good answer.
+  const [reports, setReports] = useState<Report[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<null | { timedOut: boolean }>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const now = new Date();
@@ -51,12 +60,25 @@ export default function ReportsPage() {
   const [drafted, setDrafted] = useState<DraftMeta | null>(null);
   const [draftError, setDraftError] = useState(false);
 
-  async function load() {
-    const res = await authedFetch("/api/reports");
-    if (res.ok) setReports(await res.json());
-  }
+  const load = useCallback(async () => {
+    setLoading(true);
+    // Bounded: this route reads the sheet, which has answered in 160 s on a
+    // cold instance. Without a timeout the page span until the platform killed
+    // the function; now a stall becomes a line with a retry.
+    const r = await timedJson<Report[]>(authedFetch, "/api/reports");
+    setLoading(false);
+    if (!r.ok) { setErr({ timedOut: r.timedOut }); return; }
+    const list = Array.isArray(r.data) ? r.data : [];
+    setReports(list);
+    setErr(null);
+    writeLastSeen(LAST_KEY, list);
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const snap = readLastSeen<Report[]>(LAST_KEY);
+    if (Array.isArray(snap)) setReports(snap);
+    load();
+  }, [load]);
 
   /**
    * Pre-fill the form from the month's real numbers + the shared AI review.
@@ -66,13 +88,15 @@ export default function ReportsPage() {
   async function generateDraft() {
     const month = `${form.year}-${String(Number(form.month)).padStart(2, "0")}`;
     setDrafting(true); setDraftError(false); setDrafted(null);
-    const res = await authedFetch(`/api/reports/draft?month=${month}`).catch(() => null);
+    // The slowest call on the page — a whole month of OEE plus the LLM review.
+    // Bounded like every other read, so it cannot hang the button for ever.
+    const r = await timedJson<{ ok: boolean; draft: Record<string, string>; meta: DraftMeta }>(
+      authedFetch, `/api/reports/draft?month=${month}`,
+    );
     setDrafting(false);
-    if (!res || !res.ok) { setDraftError(true); return; }
-    const json = await res.json();
-    if (!json.ok) { setDraftError(true); return; }
-    setForm((f) => ({ ...f, ...json.draft }));
-    setDrafted(json.meta);
+    if (!r.ok || !r.data?.ok) { setDraftError(true); return; }
+    setForm((f) => ({ ...f, ...r.data.draft }));
+    setDrafted(r.data.meta);
     setShowForm(true);
   }
 
@@ -121,6 +145,22 @@ export default function ReportsPage() {
           </button>
         </div>
       </div>
+
+      {err && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
+          <span>{err.timedOut ? p.common.timedOut : p.common.loadError}</span>
+          <button
+            onClick={load}
+            className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          >
+            {p.common.retry}
+          </button>
+        </div>
+      )}
+      {/* A snapshot is on screen and the live answer is still coming. */}
+      {loading && reports !== null && (
+        <p className="text-xs text-gray-400 mb-3">{p.common.stillLoading}</p>
+      )}
 
       {draftError && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -252,7 +292,9 @@ export default function ReportsPage() {
         </form>
       )}
 
-      {reports.length === 0 ? (
+      {reports === null ? (
+        err ? null : <div className="flex justify-center py-10"><Spinner text={p.common.loading} /></div>
+      ) : reports.length === 0 ? (
         <EmptyState text={tr.dashboard.noReports} />
       ) : (
         <div className="space-y-3">

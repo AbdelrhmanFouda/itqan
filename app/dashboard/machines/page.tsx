@@ -2,16 +2,25 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { useEffect, useState } from "react";
-import { Plus, Circle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Plus, Circle, RefreshCw } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { pd } from "@/lib/i18n.prod";
 import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
 /**
  * Machine registry — read from the sheet's `machines` tab (one row per
  * PHYSICAL machine; the PQPI code is the unique id since several tonnages
  * exist twice). The form appends a new registry row.
+ *
+ * Speed (2026-09-10): «الماكينات» is a sheet tab, so a cold instance takes
+ * seconds to answer and the page used to spin for all of it with no timeout
+ * at all — the spinner stayed until the platform killed the function. Now the
+ * registry this device saw last renders AT ONCE (localStorage), the live read
+ * is bounded, and a failure keeps what is on screen and says so with a retry.
+ * A failed or empty answer NEVER replaces a good list.
  */
 
 type MachineInfo = {
@@ -25,6 +34,9 @@ type MachineInfo = {
   shiftLength: number;
 };
 type Data = { machines: MachineInfo[]; writable: boolean; configured: boolean };
+
+/** The last registry this device saw — rendered before the network is touched. */
+const LAST_KEY = "itqan.machines.last";
 
 const L = {
   en: {
@@ -60,27 +72,43 @@ export default function MachinesPage() {
   const { lang } = useLang();
   const tr = t[lang];
   const l = L[lang];
+  const p = pd[lang];
   const isAr = lang === "ar";
   usePageTitle(tr.dashboard.machines);
 
   const [data, setData] = useState<Data | null>(null);
-  const [error, setError] = useState(false);
+  /** The last read that did not arrive — null while the data on screen is live. */
+  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(false);
   const [form, setForm] = useState({ code: "", name: "", manufacturer: "", status: "Active", shiftLength: "720", product: "" });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  async function load() {
-    try {
-      const res = await fetch("/api/machines");
-      if (!res.ok) throw new Error("bad_status");
-      setData(await res.json());
-    } catch {
-      setError(true);
+  // `/api/machines` is an open read, so a plain bounded fetch is right here.
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await timedJson<Data>(fetch, "/api/machines");
+    if (r.ok && Array.isArray(r.data?.machines)) {
+      const next = r.data;
+      // An empty answer never replaces a registry that has rows — "no
+      // machines" read as the truth is the lie this guards against.
+      setData((prev) => (prev && prev.machines.length > 0 && next.machines.length === 0 ? prev : next));
+      setFailed(null);
+      if (next.machines.length > 0) writeLastSeen(LAST_KEY, next);
+    } else if (!r.ok) {
+      // Keep whatever is on screen. A stalled bridge must not blank a
+      // registry the person was reading a second ago.
+      setFailed({ timedOut: r.timedOut });
     }
-  }
-  useEffect(() => { load(); }, []);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    const snap = readLastSeen<Data>(LAST_KEY);
+    if (snap && Array.isArray(snap.machines)) setData(snap);
+    load();
+  }, [load]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -103,6 +131,21 @@ export default function MachinesPage() {
       <div className="mb-6 sm:mb-8">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{tr.dashboard.machines}</h1>
         <p className="text-sm text-gray-500">{l.subtitle}</p>
+        {/* A list is on screen and the live read did not arrive: say so, keep the list. */}
+        {failed && data && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
+            </button>
+          </p>
+        )}
+        {/* A remembered list is showing while the live read is still in flight. */}
+        {!failed && loading && data && <p className="text-xs text-gray-400 mt-2">{p.common.stillLoading}</p>}
         {data?.writable && (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Btn onClick={() => setShowForm(!showForm)}>
@@ -145,8 +188,13 @@ export default function MachinesPage() {
         </form>
       )}
 
-      {error || (data && !data.configured && data.machines.length === 0) ? (
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{l.unreachable}</div>
+      {(failed && !data) || (data && !data.configured && data.machines.length === 0) ? (
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          <p>{failed?.timedOut ? p.common.timedOut : l.unreachable}</p>
+          <Btn variant="outline" onClick={load} disabled={loading} className="mt-4">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{p.common.retry}
+          </Btn>
+        </div>
       ) : !data ? (
         <div className="flex justify-center py-16">
           <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />

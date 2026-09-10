@@ -38,6 +38,8 @@ import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
+import { pd } from "@/lib/i18n.prod";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { hasFullAccess } from "@/lib/roles";
 import {
   NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, dupKey, duplicateNums,
@@ -56,6 +58,15 @@ import { LOCALE_AR } from "@/lib/format";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
 const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
+/**
+ * The last good answer, kept on the device. The page already refused to blank a
+ * filled table on a bad refresh — but the FIRST open of the day still faced the
+ * storage bridge cold (3–6 s, and it has been far worse), behind a spinner.
+ * Now it paints what it painted last time and replaces it when the live answer
+ * lands. A snapshot's server-side age is unknown, so `readAt`/`stale` are
+ * stripped before it is shown; the spinning refresh icon is its honest hint.
+ */
+const LAST_KEY = "itqan.storage.last";
 
 type Tab = "balance" | "in" | "out";
 type Sort = "sheet" | "item" | "loc" | "avail";
@@ -85,6 +96,7 @@ export default function StoragePage() {
   const { lang } = useLang();
   const isAr = lang === "ar";
   const s = sd[lang];
+  const p = pd[lang];
   usePageTitle(s.title);
   const { user, profile } = useAuth();
   const role = profile?.role ?? null;
@@ -93,6 +105,10 @@ export default function StoragePage() {
 
   const [data, setData] = useState<StorageData | null>(null);
   const [loadErr, setLoadErr] = useState(false);
+  // A read that never answered (or timed out) — distinct from `loadErr`, which
+  // means the SERVER answered and told us its copy was stale.
+  const [fetchErr, setFetchErr] = useState<null | { timedOut: boolean }>(null);
+  const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("balance");
   const [notice, setNotice] = useState("");
 
@@ -126,21 +142,36 @@ export default function StoragePage() {
   const [formErr, setFormErr] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The 20 s poll must not stack: a bounded read can still take a minute and a
+  // half, and three overlapping calls to a serialised bridge make it slower.
+  const inFlight = useRef(false);
   const load = useCallback(async () => {
-    try {
-      const res = await authedFetch("/api/storage", { cache: "no-store" });
-      const json = (await res.json()) as StorageData;
-      // never blank a filled table on a transient empty fetch
-      setData((prev) => (json.ok || !prev ? json : prev));
-      // `stale`: the bridge did not answer and the server served its last good
-      // copy — the same "couldn't reach the storage sheet" line applies.
-      setLoadErr(json.stale || (!json.ok && json.configured));
-    } catch {
-      setLoadErr(true);
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setLoading(true);
+    const r = await timedJson<StorageData>(authedFetch, "/api/storage", { cache: "no-store" });
+    inFlight.current = false;
+    setLoading(false);
+    if (!r.ok) {
+      // Keep whatever is on screen — a failed refresh never empties the room.
+      setFetchErr({ timedOut: r.timedOut });
+      return;
     }
+    const json = r.data;
+    setFetchErr(null);
+    // never blank a filled table on a transient empty fetch
+    setData((prev) => (json.ok || !prev ? json : prev));
+    // `stale`: the bridge did not answer and the server served its last good
+    // copy — the same "couldn't reach the storage sheet" line applies.
+    setLoadErr(json.stale || (!json.ok && json.configured));
+    if (json.ok && json.configured) writeLastSeen(LAST_KEY, json);
   }, []);
 
   useEffect(() => {
+    // What this device saw last time, at once. Its age is unknown, so the two
+    // server-side age fields are cleared rather than replayed as if fresh.
+    const snap = readLastSeen<StorageData>(LAST_KEY);
+    if (snap && Array.isArray(snap.balance)) setData({ ...snap, readAt: 0, stale: false });
     load();
     const t = setInterval(load, 20000);
     return () => clearInterval(t);
@@ -470,10 +501,31 @@ export default function StoragePage() {
 
   /* ------------------------------ render ------------------------------ */
 
+  const errorLine = fetchErr ? (
+    <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
+      <span>{fetchErr.timedOut ? p.common.timedOut : s.loadError}</span>
+      <button
+        onClick={load}
+        className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+      >
+        {p.common.retry}
+      </button>
+    </div>
+  ) : null;
+
   if (!data) {
     return (
-      <div className="flex justify-center py-16">
-        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+      <div dir={isAr ? "rtl" : "ltr"}>
+        <div className="mb-5 sm:mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{s.title}</h1>
+          <p className="text-sm text-gray-500">{s.subtitle}</p>
+        </div>
+        {errorLine}
+        {!fetchErr && (
+          <div className="flex justify-center py-16">
+            <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+          </div>
+        )}
       </div>
     );
   }
@@ -535,8 +587,8 @@ export default function StoragePage() {
             </>
           )}
           <div className="flex items-center gap-0.5 ms-auto">
-            <button onClick={load} className={iconBtn} title={s.refresh} aria-label={s.refresh}>
-              <RefreshCw size={15} /><span className="hidden sm:inline">{s.refresh}</span>
+            <button onClick={load} className={iconBtn} title={s.refresh} aria-label={s.refresh} disabled={loading}>
+              <RefreshCw size={15} className={loading ? "animate-spin" : ""} /><span className="hidden sm:inline">{s.refresh}</span>
             </button>
             {canWrite && (
               <>
@@ -557,7 +609,8 @@ export default function StoragePage() {
           {notice}
         </p>
       )}
-      {loadErr && <p className="text-xs text-amber-600 mb-3">{s.loadError}</p>}
+      {errorLine}
+      {loadErr && !fetchErr && <p className="text-xs text-amber-600 mb-3">{s.loadError}</p>}
       {!canWrite && <p className="text-xs text-gray-400 mb-3">{s.readOnly}</p>}
 
       {/* stat tiles that filter */}

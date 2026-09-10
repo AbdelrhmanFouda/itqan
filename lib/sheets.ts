@@ -99,7 +99,11 @@ export const SHEET_CACHE_TAG = "sheet-read";
 /** The most one bridge GET may take. The bridge has answered in 58 s during a
  *  slow spell, so this is generous — but finite: a hung answer used to hold
  *  the instance's whole read queue until the platform killed the function. */
-const BRIDGE_READ_MS = 40_000;
+const BRIDGE_READ_MS = 30_000;
+/** The most one bridge POST may take. A write that hangs used to hold the
+ *  request until the platform killed it; the page then retried a write that
+ *  may already have landed (the bridge is at-least-once). */
+const BRIDGE_WRITE_MS = 60_000;
 /** `at` — when the bridge answered; set by remember(), carried by every copy,
  *  so a route can tell the page how old the numbers it shows are. */
 type SheetRead = { title: string; values: string[][]; at?: number };
@@ -135,11 +139,12 @@ export const missingTabs = (): string[] => Array.from(MISSING_TABS);
  */
 export async function invalidateSheetCache(tab?: string): Promise<void> {
   sheetInflight.clear();
-  // A copy must never outlive a write: the next read finds none and waits for
-  // the sheet as it is now, exactly as before this layer existed.
-  lastGood.clear();
   const now = Date.now();
   const tabs = tab ? tabsNamed(tab) : Object.values(ENTITIES).map((e) => e.tab);
+  // A copy of the WRITTEN tab must never outlive the write; the other tabs'
+  // copies are untouched by it (2026-09-10 — clearing all of them made every
+  // page cold after any save).
+  for (const t of tabs) lastGood.delete(t);
   for (const t of tabs) writtenAt.set(t, now);
   try {
     // `updateTag` is the read-your-own-writes primitive, but it is Server
@@ -209,7 +214,11 @@ function tabsNamed(title: string): string[] {
  * every guarded write makes (the identity check, then the write's own
  * header/snapshot read) into one bridge round trip.
  */
-const SHEET_STALE_MAX_MS = 30 * 60 * 1000;
+// A copy of ANY reasonable age is served at once and refreshed behind (was 30
+// min; 2026-09-10 audit: past the cutoff every page waited for the bridge —
+// 10–160 s on a cold instance). Every route reports the copy's age; the pages
+// say «الأرقام من قبل X» and refetch. Writes still read fresh.
+const SHEET_STALE_MAX_MS = 12 * 60 * 60 * 1000;
 const FRESH_REUSE_MS = 1500;
 const lastGood = new Map<string, StaleCopy<SheetRead>>();
 /** Per tab: the moment this instance last wrote it. A copy read before that
@@ -274,10 +283,15 @@ async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
     keepAlive(readOnce(tab, true));
     return verdict.value;
   }
-  // Nothing to serve yet: read through Next's data cache and wait. Route
-  // handlers do not get React's per-render fetch memoization, so two routes
-  // reading the same tab in the same instant share one trip (readOnce).
-  return readOnce(tab, false);
+  // Nothing to serve yet: read and wait. Two routes reading the same tab in
+  // the same instant share one trip (readOnce). If the read gives up, the last
+  // good copy — of any age — beats an empty table that looks like an empty tab.
+  const read = await readOnce(tab, false);
+  if (read.values.length === 0) {
+    const c = lastGood.get(tab);
+    if (c && c.at > fence) return c.value;
+  }
+  return read;
 }
 
 /**
@@ -300,89 +314,143 @@ function queued<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/* ------------------------- one bridge read, classified ----------------------- *
+ * Rewritten 2026-09-10 after the page-speed audit measured the old plan: a
+ * timeout was NOT treated like a `no_tab`, so after 40 s on the real name the
+ * loop asked every English alias (each a full round trip), slept, and asked
+ * twice more — 205 s for one tab, 616 s for /api/runs' three, against a 300 s
+ * function cap. The production log "never opened" by arithmetic.
+ *
+ * Now: the real name once; a `no_tab` walks the aliases (once each, no
+ * sleeps) and is final; anything else — timeout, HTTP error, an HTML page,
+ * unparseable, empty — gets ONE more try of the real name after a breath and
+ * then gives up. Worst case per tab ≈ 2 × BRIDGE_READ_MS + 1.5 s. Callers
+ * serve the last good copy when a read gives up (fetchSheet), so giving up
+ * costs a stale page, not a blank one.
+ *
+ * Several tabs asked for in the same tick go to the bridge as ONE request
+ * (`?tabs=a,b,c` — apps-script.gs doGet, bridge version 6) when the deployed
+ * bridge understands it: the round trip, not the payload, is the cost
+ * (measured: a 15-row tab 3.4 s, a 963-row tab 3.0 s), so four tabs in one
+ * call is four times faster on a cold instance. An older bridge answers
+ * `no_tab` to a `tabs=` request without a `tab`; that is remembered for ten
+ * minutes and the reads go one by one, exactly as before.
+ */
+type Answer =
+  | { kind: "ok"; values: string[][] }
+  | { kind: "no_tab" | "empty" | "timeout" | "http" | "html" | "error"; detail: string };
+
+async function bridgeText(url: string): Promise<{ status: number; text: string } | { kind: "timeout" | "error"; detail: string }> {
+  try {
+    const res = await queued(() =>
+      fetch(url, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(BRIDGE_READ_MS) }),
+    );
+    return { status: res.status, text: await res.text() };
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    return { kind: timedOut ? "timeout" : "error", detail: e instanceof Error ? e.message : "request failed" };
+  }
+}
+
+function classify(name: string, r: Awaited<ReturnType<typeof bridgeText>>): Answer {
+  if ("kind" in r) return { kind: r.kind, detail: `"${name}" ${r.detail}` };
+  if (r.status < 200 || r.status >= 300) return { kind: "http", detail: `"${name}" HTTP ${r.status}` };
+  try {
+    const json = JSON.parse(r.text) as { values?: string[][]; error?: string };
+    if (json.values && json.values.length > 0) return { kind: "ok", values: json.values };
+    if (json.error === "no_tab") return { kind: "no_tab", detail: `"${name}" is not a tab in the workbook` };
+    return { kind: "empty", detail: `"${name}" returned no rows` };
+  } catch {
+    return {
+      kind: "html",
+      detail: `"${name}" returned ${r.text.trim().startsWith("<") ? "an HTML error page (bridge throttled?)" : "unparseable output"}`,
+    };
+  }
+}
+
+async function readOneTab(name: string): Promise<Answer> {
+  const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tab=${encodeURIComponent(name)}`;
+  return classify(name, await bridgeText(u));
+}
+
+/* micro-batching: tabs asked for in the same tick share one request */
+const BATCH_WINDOW_MS = 8;
+const MULTI_RETRY_MS = 10 * 60 * 1000;
+let multiUnsupportedUntil = 0;
+const batchWaiting = new Map<string, Array<(a: Answer) => void>>();
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readViaBatch(name: string): Promise<Answer> {
+  return new Promise((resolve) => {
+    const list = batchWaiting.get(name) ?? [];
+    list.push(resolve);
+    batchWaiting.set(name, list);
+    if (!batchTimer) batchTimer = setTimeout(flushBatch, BATCH_WINDOW_MS);
+  });
+}
+
+async function flushBatch(): Promise<void> {
+  batchTimer = null;
+  const names = Array.from(batchWaiting.keys());
+  const waiting = new Map(batchWaiting);
+  batchWaiting.clear();
+  const settle = (name: string, a: Answer) => { for (const r of waiting.get(name) ?? []) r(a); };
+  const oneByOne = async (todo: string[]) => { for (const n of todo) settle(n, await readOneTab(n)); };
+
+  if (names.length === 1 || Date.now() < multiUnsupportedUntil) return oneByOne(names);
+
+  const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tabs=${encodeURIComponent(names.join(","))}`;
+  const r = await bridgeText(u);
+  if ("kind" in r) {
+    // The bridge did not answer at all — nothing to learn about `tabs`; every
+    // tab reports the same failure and fetchSheetUncached retries each alone.
+    for (const n of names) settle(n, { kind: r.kind, detail: `"${n}" ${r.detail}` });
+    return;
+  }
+  let json: { ok?: boolean; tabs?: Record<string, { values?: string[][]; error?: string }>; error?: string } = {};
+  try { json = JSON.parse(r.text); } catch { json = {}; }
+  if (!json.tabs || typeof json.tabs !== "object") {
+    // An older deployment ignores `tabs` and answers {"error":"no_tab"}.
+    multiUnsupportedUntil = Date.now() + MULTI_RETRY_MS;
+    console.error("[sheets] the deployed bridge does not answer `tabs=` — reading one tab per call (deploy bridge version 6 for one round trip per page)");
+    return oneByOne(names);
+  }
+  const leftover: string[] = [];
+  for (const n of names) {
+    const t = json.tabs[n];
+    if (t && t.values && t.values.length > 0) settle(n, { kind: "ok", values: t.values });
+    else if (t && t.error === "no_tab") settle(n, { kind: "no_tab", detail: `"${n}" is not a tab in the workbook` });
+    else if (t) settle(n, { kind: "empty", detail: `"${n}" returned no rows` });
+    else leftover.push(n); // not in the answer at all — ask alone
+  }
+  await oneByOne(leftover);
+}
+
+const breath = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRead> {
-  // Preferred: Apps Script (works on a private sheet, no API key).
-  // getSheetByName() in the script is CASE-SENSITIVE and the sheet's tab names
-  // have drifted between "Production"/"production" etc., so retry casings and
-  // the pre-rename English aliases.
+  void fresh; // both paths read the bridge the same way; who asks for `fresh` matters above
   if (SCRIPT_URL && SCRIPT_SECRET) {
-    const lower = tab.toLowerCase();
-    const cap = lower.charAt(0).toUpperCase() + lower.slice(1);
-    const candidates = Array.from(new Set([tab, ...(TAB_ALIASES[tab] ?? []), lower, cap, tab.toUpperCase()]));
-    // The real tab name first, then aliases, then one more go at the real name
-    // after a pause — a bridge that refused because it was busy will usually
-    // answer a moment later, and the alternative is handing the UI an empty
-    // page that looks exactly like "there is no data".
-    const plan: (string | number)[] = [...candidates, 1500, tab, 4000, tab];
-    let lastProblem = "";
-    // The bridge answers `{"error":"no_tab"}` when the workbook has no sheet by
-    // that name. That is a DEFINITIVE answer, not a throttled one: waiting 1.5s
-    // and 4s to ask the same question twice more cannot change it. Counting
-    // them lets the loop give up once every candidate name has been refused.
-    //
-    // Measured cost of not doing this: «تسجيل الإنتاج» was removed from the
-    // workbook on 2026-08-27, and until this route stopped asking for it, every
-    // uncached read that loaded it — /api/runs, /api/oee, /api/hourly,
-    // /api/jobs/[id] — spent 5.5s asleep plus five wasted bridge calls before
-    // returning the empty array it already had after the first one.
-    let refused = 0;
-    for (const step of plan) {
-      if (typeof step === "number") {
-        if (refused >= candidates.length) break; // every name refused — no point waiting
-        await new Promise((r) => setTimeout(r, step));
-        continue;
-      }
-      const name = step;
-      try {
-        const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&tab=${encodeURIComponent(name)}`;
-        // A PLAIN fetch, bounded — no Next data cache on the read path since
-        // 2026-09-10. The night before, every sheet-backed route on production
-        // hung until the platform killed it (504 after 300 s) while the
-        // token-only routes answered in 200 ms: the reads had a dependency on
-        // Vercel's cache service that never resolved, and this fetch carried
-        // no timeout at all. The per-instance copy above (and the bounded,
-        // optional shared copy) is the cache now; the bridge is the only
-        // thing this call waits for, and never for more than BRIDGE_READ_MS.
-        // `fresh` is kept as a parameter (the semantics of who asks for it
-        // matter above), but both paths read the bridge the same way.
-        void fresh;
-        const res = await queued(() =>
-          fetch(u, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(BRIDGE_READ_MS) }),
-        );
-        if (res.ok) {
-          // Under load the bridge answers with an HTML error page, not JSON.
-          // Parsing that threw into an empty catch, which is how a throttled
-          // moment became a silently blank dashboard.
-          const body = await res.text();
-          try {
-            const json = JSON.parse(body) as { values?: string[][]; error?: string };
-            if (json.values && json.values.length > 0) return { title: name, values: json.values };
-            if (json.error === "no_tab") {
-              refused++;
-              lastProblem = `"${name}" is not a tab in the workbook`;
-            } else lastProblem = `"${name}" returned no rows`;
-          } catch {
-            lastProblem = `"${name}" returned ${body.trim().startsWith("<") ? "an HTML error page (bridge throttled?)" : "unparseable output"}`;
-          }
-        } else {
-          lastProblem = `"${name}" HTTP ${res.status}`;
-        }
-      } catch (e) {
-        lastProblem = `"${name}" ${e instanceof Error ? e.message : "request failed"}`;
-      }
+    let a = await readViaBatch(tab);
+    if (a.kind !== "ok" && a.kind !== "no_tab") {
+      await breath(1500);
+      a = await readOneTab(tab);
     }
-    // Loud, because the caller cannot tell "tab is empty" from "read failed" —
-    // both arrive as [] — and the UI will render an empty page either way.
-    if (refused >= candidates.length) {
-      // A tab that does not exist is a WORKBOOK change, not an outage. Say so
-      // in those words: the last time this happened the message read like a
-      // transient failure and the real event — a tab deleted from the sheet —
-      // took a fresh survey to notice.
+    if (a.kind === "ok") return { title: tab, values: a.values };
+    if (a.kind === "no_tab") {
+      // The pre-rename English names, once each. Their answer is final too.
+      for (const alias of TAB_ALIASES[tab] ?? []) {
+        const b = await readOneTab(alias);
+        if (b.kind === "ok") return { title: alias, values: b.values };
+        if (b.kind !== "no_tab") break;
+      }
       MISSING_TABS.add(tab);
-      console.error(`[sheets] tab "${tab}" does not exist in the workbook (tried: ${candidates.join(", ")}). Was it renamed or deleted?`);
+      console.error(`[sheets] tab "${tab}" does not exist in the workbook (tried: ${[tab, ...(TAB_ALIASES[tab] ?? [])].join(", ")}). Was it renamed or deleted?`);
       return { title: tab, values: [] };
     }
-    console.error(`[sheets] every attempt failed for tab "${tab}" (last: ${lastProblem})`);
+    // Loud, because the caller cannot tell "tab is empty" from "read failed" —
+    // both arrive as [] — and fetchSheet serves the last good copy instead.
+    console.error(`[sheets] every attempt failed for tab "${tab}" (last: ${a.detail})`);
   }
   // Fallback: public read via API key.
   if (!SHEET_ID || !API_KEY) return { title: tab, values: [] };
@@ -774,6 +842,7 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: SCRIPT_SECRET, ...payload }),
       redirect: "follow",
+      signal: AbortSignal.timeout(BRIDGE_WRITE_MS),
     });
     // The bridge is AT-LEAST-ONCE: an answer that is not a clean JSON `ok`
     // (an HTTP error, an HTML page) may still sit on top of a row that DID
@@ -934,7 +1003,9 @@ export async function bridgeFeatures(): Promise<BridgeFeatures> {
     const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
     // Every file call below is bounded: the bridge is ONE serial queue, and a
     // call that never returns would hold every sheet read behind it.
-    const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000) }));
+    // NOT queued (2026-09-10): the probe used to sit in the serial read queue
+    // ahead of the issues list — a 20 s probe delayed the page by 20 s.
+    const res = await fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; features?: unknown };
     audio = json.ok === true && Array.isArray(json.features) && json.features.includes("audio");
   } catch {

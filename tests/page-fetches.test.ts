@@ -26,7 +26,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const OPEN_PREFIXES = [
   "/api/runs", "/api/oee", "/api/machines", "/api/issues",
   "/api/sheet/molds", "/api/sheet/products", "/api/sheet/machines", "/api/sheet/issues",
-  "/api/public/showcase", "/api/contact",
+  "/api/public/showcase", "/api/contact", "/api/health", "/api/warm",
 ];
 
 // Endpoints that MUST be called with a token — a plain fetch here is the
@@ -58,16 +58,20 @@ function sources(): [string, string][] {
 /** Every fetch(…) / authedFetch(…) whose first argument is a string literal. */
 function calls(): Call[] {
   const out: Call[] = [];
-  const re = /\b(authedFetch|fetch)\(\s*(["'`])([^"'`]*)/g;
+  // Two shapes: fetch("/api/…") / authedFetch("/api/…"), and — since 2026-09-10 —
+  // timedJson(fetch, "/api/…") / timedJson(authedFetch, "/api/…"), the bounded
+  // form every page load uses now (components/dashboard/last-seen.ts).
+  const re = /\b(?:timedJson(?:<[^>]*>)?\(\s*(authedFetch|fetch)\s*,|(authedFetch|fetch)\()\s*(["'`])([^"'`]*)/g;
   for (const [file, src] of sources()) {
     for (let m = re.exec(src); m; m = re.exec(src)) {
-      const url = m[3].split("${")[0]; // a template's literal prefix
+      const fn = m[1] ?? m[2];
+      const url = m[4].split("${")[0]; // a template's literal prefix
       const line = src.slice(0, m.index).split("\n").length;
       // The storage page attaches `Authorization: Bearer` by hand; the
       // assistant page posts the token in the body as `idToken` (the agent
       // route verifies it from there). Either counts as carrying a token.
       const window = src.slice(m.index, m.index + 400);
-      out.push({ file, line, url, authed: m[1] === "authedFetch", ownToken: /Authorization|idToken:/.test(window) });
+      out.push({ file, line, url, authed: fn === "authedFetch", ownToken: /Authorization|idToken:/.test(window) });
     }
   }
   return out;

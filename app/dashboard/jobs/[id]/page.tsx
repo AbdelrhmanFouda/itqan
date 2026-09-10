@@ -2,7 +2,7 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -12,6 +12,7 @@ import {
   priorityTone, localize, options,
 } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
 /**
@@ -48,6 +49,9 @@ type Run = {
 // `label` is the registry identity («PQ 7 — 100»); `name` is the bare tonnage.
 type MachineAgg = { name: string; label: string };
 type Mold = { row: number; code?: string; name?: string };
+/** The three pieces the page draws — remembered per work order, per device. */
+type JobPayload = { job: Job; runs: Run[]; standard: Standard | null };
+const lastKeyFor = (id: string) => `itqan.job.${id}.last`;
 
 export default function JobDetailPage() {
   const { lang } = useLang();
@@ -62,6 +66,12 @@ export default function JobDetailPage() {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [standard, setStandard] = useState<Standard | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // A stalled or refused read is NOT a missing work order. It used to render as
+  // one: any non-2xx set `notFound`, so a 401 or a slow bridge told the owner
+  // his job did not exist. Only a real 404 does that now; everything else is a
+  // load error with a retry, and whatever is on screen stays there.
+  const [loadErr, setLoadErr] = useState<null | { timedOut: boolean }>(null);
+  const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState<MachineAgg[]>([]);
   const [molds, setMolds] = useState<Mold[]>([]);
   const [open, setOpen] = useState(false);
@@ -87,22 +97,49 @@ export default function JobDetailPage() {
   );
   const [form, setForm] = useState(blankRun());
 
-  const load = useCallback(async () => {
-    // The edit form's datalists load on their own, so a cold bridge read of
-    // the registry or «الاسطمبات» never holds the work order back (2026-09-04).
+  /**
+   * The datalists behind the EDIT FORM only. They are started after the work
+   * order has answered, deliberately: the bridge serialises its tab reads, so
+   * firing «الماكينات» and «الاسطمبات» first queued two cold tab reads (2–11 s
+   * each) IN FRONT of the read this page exists to show. Nothing on screen
+   * needs them until the modal opens.
+   */
+  const loadLists = useCallback(() => {
     fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
-    // Product/mold-code datalists for the edit form — a hand-typed product
-    // name that doesn't match Master exactly breaks the join, so offer the
-    // real names the same way the add form does.
+    // A hand-typed product name that doesn't match Master exactly breaks the
+    // join, so offer the real names the same way the add form does.
     fetch("/api/sheet/molds").then((x) => x.json()).then((mo) => setMolds(mo.records ?? [])).catch(() => {});
-    const jRes = await authedFetch(`/api/jobs/${id}`);
-    if (!jRes.ok) { setNotFound(true); return; }
-    const j = await jRes.json();
+  }, []);
+  const listsStarted = useRef(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await timedJson<JobPayload>(authedFetch, `/api/jobs/${id}`);
+    setLoading(false);
+    if (!r.ok) {
+      if (r.status === 404) { setNotFound(true); return; }
+      setLoadErr({ timedOut: r.timedOut });
+      return;
+    }
+    const j = r.data;
     setJob(j.job);
     setRuns(j.runs ?? []);
     setStandard(j.standard ?? null);
-  }, [id]);
-  useEffect(() => { load(); }, [load]);
+    setLoadErr(null);
+    setNotFound(false);
+    writeLastSeen(lastKeyFor(id), { job: j.job, runs: j.runs ?? [], standard: j.standard ?? null });
+    // Only now — the work order is on screen and the bridge is free.
+    if (!listsStarted.current) { listsStarted.current = true; loadLists(); }
+  }, [id, loadLists]);
+
+  useEffect(() => {
+    // What this device saw last time for THIS work order, at once. It is
+    // possibly old — the live answer replaces every field of it — and writes
+    // never read from it: each one reloads through `load()`.
+    const snap = readLastSeen<JobPayload>(lastKeyFor(id));
+    if (snap && snap.job) { setJob(snap.job); setRuns(snap.runs ?? []); setStandard(snap.standard ?? null); }
+    load();
+  }, [id, load]);
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -151,6 +188,9 @@ export default function JobDetailPage() {
 
   function openEdit() {
     if (!job) return;
+    // If the page is showing a remembered copy, the live read has not started
+    // the datalists yet — start them the moment they are actually needed.
+    if (!listsStarted.current) { listsStarted.current = true; loadLists(); }
     setEditErr(false);
     setEditForm(jobFormOf(job));
     setEditOpen(true);
@@ -253,10 +293,28 @@ export default function JobDetailPage() {
       </div>
     );
   }
+  const errorLine = loadErr ? (
+    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
+      <span>{loadErr.timedOut ? p.common.timedOut : p.common.loadError}</span>
+      <button
+        onClick={load}
+        className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+      >
+        {p.common.retry}
+      </button>
+    </div>
+  ) : null;
+
   if (!job || runs === null) {
     return (
-      <div className="flex justify-center py-16">
-        <Spinner text={p.common.loading} />
+      <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
+        <Link href="/dashboard/jobs" className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">{p.common.back}</Link>
+        <div className="mt-4">{errorLine}</div>
+        {!loadErr && (
+          <div className="flex justify-center py-16">
+            <Spinner text={p.common.loading} />
+          </div>
+        )}
       </div>
     );
   }
@@ -273,6 +331,10 @@ export default function JobDetailPage() {
   return (
     <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
       <Link href="/dashboard/jobs" className="inline-flex items-center min-h-11 sm:min-h-0 text-sm text-blue-600 hover:underline">{p.common.back}</Link>
+
+      <div className="mt-3">{errorLine}</div>
+      {/* A remembered copy is on screen and the live one is still coming. */}
+      {loading && !loadErr && <p className="text-xs text-gray-400 mt-2">{p.common.stillLoading}</p>}
 
       {/* Header. `flex-wrap` + `w-full sm:w-auto` on the controls: title, status
           select and two icon buttons cannot share one 375px line, so on a phone

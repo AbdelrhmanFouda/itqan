@@ -33,3 +33,31 @@ export function writeLastSeen(key: string, data: unknown): void {
     /* private mode, quota, or storage blocked — the page still works */
   }
 }
+
+/* ---------------------------- bounded fetch (2026-09-10) ---------------------------
+ * No dashboard page had a client-side timeout: when the bridge stalled, the
+ * spinner stayed until the platform killed the function (300 s). Every page
+ * load goes through this now — the last answer on the device paints first
+ * (readLastSeen), the live one replaces it, and a stall becomes a visible
+ * line with a retry instead of an endless spinner.
+ */
+export const LOAD_TIMEOUT_MS = 90_000;
+
+export type Timed<T> = { ok: true; data: T } | { ok: false; status: number; timedOut: boolean };
+
+/** fetch → JSON with a hard timeout; never throws. `fetcher` is fetch or authedFetch. */
+export async function timedJson<T>(
+  fetcher: (input: string, init?: RequestInit) => Promise<Response>,
+  url: string,
+  init: RequestInit = {},
+  ms = LOAD_TIMEOUT_MS,
+): Promise<Timed<T>> {
+  try {
+    const res = await fetcher(url, { ...init, signal: AbortSignal.timeout(ms) });
+    if (!res.ok) return { ok: false, status: res.status, timedOut: false };
+    return { ok: true, data: (await res.json()) as T };
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    return { ok: false, status: 0, timedOut };
+  }
+}

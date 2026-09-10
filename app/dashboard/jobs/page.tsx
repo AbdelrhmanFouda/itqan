@@ -29,7 +29,7 @@ import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/compon
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { ageLabel, numLocale } from "@/lib/format";
-import { readLastSeen, writeLastSeen } from "@/components/dashboard/last-seen";
+import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { nameKey } from "@/lib/master-lookup";
 import {
@@ -108,9 +108,9 @@ export default function JobsPage() {
       // state — parsed as data it flows into `configured: undefined` and the
       // page tells the user to go add a `jobs` tab to the sheet, which is a
       // lie about what went wrong.
-      const r = await authedFetch("/api/jobs");
+      const r = await timedJson<Data>(authedFetch, "/api/jobs");
       if (!r.ok) throw new Error(String(r.status));
-      const json = (await r.json()) as Data;
+      const json = r.data;
       setData(json);
       setError(false);
       writeLastSeen(LAST_KEY, json);
@@ -137,12 +137,14 @@ export default function JobsPage() {
     // to look at a spinner for the whole sheet round trip.
     const snap = readLastSeen<Data>(LAST_KEY);
     if (snap && Array.isArray(snap.jobs)) setData({ ...snap, meta: undefined });
-    load();
-    // The order book renders the moment /api/jobs answers; the two lists that
-    // feed the new-order form (Master names + clients, the registry) arrive on
-    // their own — a cold bridge read of «الرئيسي» is 2–5s.
-    fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
-    authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
+    // The two lists that feed the new-order form (Master names + clients, the
+    // registry) are asked for AFTER the order book answers: fired first, their
+    // tab reads sat ahead of «أوامر العمل» in the instance's one serial bridge
+    // queue and delayed the list by a Master read (2026-09-10 audit).
+    load().then(() => {
+      fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+      authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
+    });
     return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); };
   }, [load]);
 
@@ -181,8 +183,12 @@ export default function JobsPage() {
     // Starting an order that never had a start date dates it today, so its
     // progress counts production from now on (the sheet's «تاريخ البدء»).
     if (action === "start" && !job.startDate) body.startDate = today;
+    // Bounded (2026-09-10): a save that hangs must not hold the button forever —
+    // the bridge is at-least-once, so a timed-out save may still have landed,
+    // which is why the list is reloaded before anyone taps again.
     const res = await authedFetch(`/api/jobs/${job.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
     if (!res || !res.ok) {
       const reason = res ? String((await res.json().catch(() => ({}))).reason ?? "") : "";
@@ -240,6 +246,7 @@ export default function JobsPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...form, product: picked?.name ?? form.product, status: "Not Started", startDate: today }),
+      signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
     setSaving(false);
     if (!res || !res.ok) {

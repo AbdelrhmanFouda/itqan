@@ -23,18 +23,34 @@ const TOKEN = "itqan_bridge_8fK2pXq9Lm4Rv7Tz1Wn6Bd";
 // feature list, so an OLD deployment degrades (no microphone on the issues
 // page) instead of failing saves. An old deployment answers `no_tab` to the
 // ping — measured 2026-09-09 — which the site reads as "no features".
-const BRIDGE_VERSION = 5;
+const BRIDGE_VERSION = 6; // 6 (2026-09-10): ?tabs=a,b,c multi-read
 
 function doGet(e) {
   if (!e || !e.parameter || e.parameter.token !== TOKEN) return _json({ error: "unauthorized" });
   // ?ping=1 → what this deployment can do (see BRIDGE_VERSION).
   if (e.parameter.ping) {
-    return _json({ ok: true, version: BRIDGE_VERSION, features: ["audio", "formulas", "createTab"] });
+    return _json({ ok: true, version: BRIDGE_VERSION, features: ["audio", "formulas", "createTab", "multi"] });
   }
   // ?audio=<Drive file id> → one voice note from «الأعطال», base64. Only files
   // inside the recordings folder are served: the id is the caller's only
   // input, and this script runs as the owner over the owner's whole Drive.
   if (e.parameter.audio) return _readAudio(e.parameter.audio);
+  // ?tabs=a,b,c → several tabs in ONE execution (version 6, 2026-09-10). The
+  // round trip, not the payload, is what a read costs (a 15-row tab and a
+  // 963-row tab both take ~3 s), so a page that needs four tabs pays one. A
+  // tab that does not exist answers {error:"no_tab"} in its own slot; the
+  // others still come back. Deploy → Manage deployments → New version.
+  if (e.parameter.tabs) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const out = {};
+    String(e.parameter.tabs).split(",").forEach(function (name) {
+      const n = name.trim();
+      if (!n) return;
+      const sh = ss.getSheetByName(n);
+      out[n] = sh ? { values: sh.getDataRange().getDisplayValues() } : { error: "no_tab", values: [] };
+    });
+    return _json({ ok: true, tabs: out });
+  }
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(e.parameter.tab);
   if (!sheet) return _json({ error: "no_tab", values: [] });
   // ?mode=formulas → the formula text of every cell ("" where a cell holds a plain

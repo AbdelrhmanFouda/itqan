@@ -71,12 +71,15 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   // construction: the file has no POST, and adding one here is a decision.
   "stock":               { GET: "guard" },
   "storage":             { GET: "guard", POST: "token" },
+  // Warms the instance's copies of the core tabs after sign-in (2026-09-10);
+  // answers {ok:true} at once, returns no data.
+  "warm":                { GET: "open" },
 };
 
 // The documented open reads — CLAUDE.md: "Operational reads (sheet molds,
 // products, machines, runs, oee, issues) stay open deliberately — that list is
 // exhaustive". sheet/[entity] is the conditional one (lib/open-reads.ts).
-const DOCUMENTED_OPEN = ["health", "issues", "machines", "machines/[id]", "machines/[id]/notes", "oee", "public/showcase", "runs"];
+const DOCUMENTED_OPEN = ["health", "issues", "machines", "machines/[id]", "machines/[id]/notes", "oee", "public/showcase", "runs", "warm"];
 
 /* --------------------------------- helpers -------------------------------- */
 

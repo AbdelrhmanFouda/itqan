@@ -1,11 +1,12 @@
 "use client";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
 import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN } from "@/lib/downtime";
 import { hasFullAccess } from "@/lib/roles";
@@ -38,6 +39,17 @@ type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string }
 type OtherRow = { row: number; date: string; machine: string; minutes: number; notes: string };
 
 const MACHINES_KEY = "itqan.downtime.machines"; // last machine list seen — see useState below
+/**
+ * Today's FINISHED list and its two tiles, as this device last saw them. That
+ * half of the page comes from «التوقفات» — a sheet read, 10–160s on a cold
+ * instance — and it used to sit behind «…» and a spinner for all of it. The
+ * RUNNING list is deliberately NOT remembered: it comes from Firestore in well
+ * under a second, and a remembered stoppage could show a machine as down after
+ * somebody else stopped it (or leave its start button disabled), which the
+ * four-tap flow must never do.
+ */
+const LAST_KEY = "itqan.downtime.last";
+type TodaySnap = { today: Event[]; todayDate: string };
 
 /** Big enough to hit with a work glove on. */
 const TAP =
@@ -82,10 +94,14 @@ export default function DowntimePage() {
   const [data, setData] = useState<Data | null>(null);
   // «today» comes from the sheet and arrives after the running list does
   const [todayLoaded, setTodayLoaded] = useState(false);
+  // The finished list this device saw last time — shown only once the quick
+  // answer confirms it belongs to the SAME factory day (see snapUsable below).
+  const [todaySnap, setTodaySnap] = useState<TodaySnap | null>(null);
+  const [todayErr, setTodayErr] = useState<"net" | "timeout" | null>(null);
   const [machine, setMachine] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [loadErr, setLoadErr] = useState<"auth" | "role" | "net" | null>(null);
+  const [loadErr, setLoadErr] = useState<"auth" | "role" | "net" | "timeout" | null>(null);
   // Ticks once a minute so a running stoppage counts up on its own.
   const [now, setNow] = useState(() => Date.now());
   // ---- Owner-only review of «أخرى» rows (never rendered for the floor) ----
@@ -115,59 +131,85 @@ export default function DowntimePage() {
    * costs a sheet read that takes ~9.5s whenever the 45s cache has gone cold,
    * and it had been holding the whole screen behind a spinner.
    */
+  const quickInFlight = useRef(false);
   const loadQuick = useCallback(async () => {
-    setLoadErr(null);
-    try {
-      const res = await authedFetch("/api/downtime?quick=1");
-      if (res.ok) {
-        const q = (await res.json()) as Pick<Data, "open" | "stale" | "todayDate">;
-        setData((prev) => ({ today: prev?.today ?? [], ...q }));
-        return true;
-      }
-      setLoadErr(res.status === 401 ? "auth" : res.status === 403 ? "role" : "net");
-    } catch {
-      setLoadErr("net");
+    if (quickInFlight.current) return false;
+    quickInFlight.current = true;
+    // Firestore only, so it answers in well under a second — bounded shorter
+    // than a sheet read, because the floor is waiting on THIS one.
+    const r = await timedJson<Pick<Data, "open" | "stale" | "todayDate">>(authedFetch, "/api/downtime?quick=1", {}, 30_000);
+    quickInFlight.current = false;
+    if (r.ok) {
+      setData((prev) => ({ today: prev?.today ?? [], ...r.data }));
+      setLoadErr(null);
+      return true;
     }
+    setLoadErr(r.timedOut ? "timeout" : r.status === 401 ? "auth" : r.status === 403 ? "role" : "net");
     return false;
   }, []);
 
+  /**
+   * Today's finished list, from «التوقفات». Bounded and never blocking: the
+   * running lists and the start/stop buttons are already on screen, and a
+   * failure here keeps whatever the device remembered rather than replacing it
+   * with an empty list.
+   */
+  const fullInFlight = useRef(false);
   const loadFull = useCallback(async () => {
-    try {
-      const res = await authedFetch("/api/downtime");
-      if (!res.ok) return;
-      setData(await res.json());
-      setTodayLoaded(true);
-    } catch {
-      /* the quick answer is already on screen; the list fills in on the next load */
-    }
+    if (fullInFlight.current) return;
+    fullInFlight.current = true;
+    const r = await timedJson<Data>(authedFetch, "/api/downtime");
+    fullInFlight.current = false;
+    if (!r.ok) { setTodayErr(r.timedOut ? "timeout" : "net"); return; }
+    setData(r.data);
+    setTodayLoaded(true);
+    setTodayErr(null);
+    writeLastSeen(LAST_KEY, { today: r.data.today ?? [], todayDate: r.data.todayDate });
   }, []);
 
   const load = useCallback(async () => {
-    if (await loadQuick()) await loadFull();
+    // The sheet half is fired, not awaited — a stop must not stay «busy» for
+    // the length of a cold «التوقفات» read.
+    if (await loadQuick()) void loadFull();
   }, [loadQuick, loadFull]);
 
-  useEffect(() => {
-    fetch("/api/machines")
-      .then((r) => r.json())
-      .then((d) => {
-        const list = (d.machines ?? []) as MachineInfo[];
-        setMachines(list);
-        try { localStorage.setItem(MACHINES_KEY, JSON.stringify(list)); } catch { /* private mode */ }
-      })
-      .catch(() => setMachines((prev) => prev ?? []));
+  const machinesAsked = useRef(false);
+  const refreshMachines = useCallback(async () => {
+    if (machinesAsked.current) return;
+    machinesAsked.current = true;
+    const r = await timedJson<{ machines?: MachineInfo[] }>(fetch, "/api/machines");
+    if (!r.ok) { setMachines((prev) => prev ?? []); return; }
+    const list = r.data.machines ?? [];
+    setMachines(list);
+    try { localStorage.setItem(MACHINES_KEY, JSON.stringify(list)); } catch { /* private mode */ }
   }, []);
 
   // Wait for Firebase to restore the session before the authenticated call.
   // authedFetch reads auth.currentUser, which is null for the first moments
   // after a page load — calling too early is an automatic 401.
   useEffect(() => {
-    if (authLoading || !user) return;
-    load();
-  }, [authLoading, user, load]);
+    if (authLoading) return;
+    // Signed out: the guarded lists cannot load, but the machine buttons must
+    // still render, so ask for the registry straight away.
+    if (!user) { void refreshMachines(); return; }
+    // ORDER MATTERS. «الماكينات» is a sheet read the bridge serialises (9.5s
+    // cold, measured 2026-09-02) — started first it queued the running-stoppage
+    // call behind it. The buttons come from the remembered list meanwhile.
+    void loadQuick().then((ok) => {
+      void refreshMachines();
+      if (ok) void loadFull();
+    });
+  }, [authLoading, user, loadQuick, loadFull, refreshMachines]);
+
+  // Today's finished list as this device last saw it, at once.
+  useEffect(() => {
+    const snap = readLastSeen<TodaySnap>(LAST_KEY);
+    if (snap && Array.isArray(snap.today)) setTodaySnap(snap);
+  }, []);
 
   const loadOthers = useCallback(async () => {
-    const res = await authedFetch("/api/downtime/reclassify").catch(() => null);
-    if (res?.ok) setOthers((await res.json()).rows ?? []);
+    const r = await timedJson<{ rows?: OtherRow[] }>(authedFetch, "/api/downtime/reclassify");
+    if (r.ok) setOthers(r.data.rows ?? []);
   }, []);
 
   useEffect(() => {
@@ -288,7 +330,12 @@ export default function DowntimePage() {
   // shows them as one, longest-down first.
   const openList = [...(data?.stale ?? []), ...(data?.open ?? [])]
     .sort((a, b) => a.startedAt - b.startedAt);
-  const todayList = data?.today ?? [];
+  // The remembered finished list stands in ONLY while the live one is still
+  // coming AND the quick answer says it is the same factory day — yesterday's
+  // stoppages printed under «اليوم» would be a lie, not a stale number.
+  const snapUsable = !todayLoaded && !!todaySnap && !!data?.todayDate && todaySnap.todayDate === data.todayDate;
+  const todayList = todayLoaded ? (data?.today ?? []) : snapUsable && todaySnap ? todaySnap.today : (data?.today ?? []);
+  const todayShown = todayLoaded || snapUsable;
 
   // A machine with an unclosed stoppage must not be startable again; that
   // would open a second event and double-count it. openList already includes
@@ -320,8 +367,8 @@ export default function DowntimePage() {
       <p className="text-sm text-gray-500 mb-6">{t.subtitle}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 max-w-sm">
-        <Stat label={t.todayMinutes} value={todayLoaded ? lostToday.toLocaleString(LOCALE_AR) : "…"} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
-        <Stat label={t.todayEvents} value={todayLoaded ? todayList.length.toLocaleString(LOCALE_AR) : "…"} />
+        <Stat label={t.todayMinutes} value={todayShown ? lostToday.toLocaleString(LOCALE_AR) : "…"} sub={t.minutes} tone={lostToday > 0 ? "amber" : undefined} />
+        <Stat label={t.todayEvents} value={todayShown ? todayList.length.toLocaleString(LOCALE_AR) : "…"} />
       </div>
 
       {failed && (
@@ -336,7 +383,10 @@ export default function DowntimePage() {
       {loadErr && (
         <div className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3">
           <p className="font-semibold text-amber-900">
-            {loadErr === "auth" ? t.errAuth : loadErr === "role" ? t.errRole : t.errNet}
+            {loadErr === "auth" ? t.errAuth
+              : loadErr === "role" ? t.errRole
+              : loadErr === "timeout" ? p.common.timedOut
+              : t.errNet}
           </p>
           {loadErr !== "role" && (
             <button
@@ -459,8 +509,26 @@ export default function DowntimePage() {
       {/* ---- Today's finished stoppages ---- */}
       <section className="mt-8">
         <h2 className="text-sm font-semibold text-gray-500 mb-2">{t.today}</h2>
+        {/* The sheet half failed or stalled: the remembered list stays, this
+            line says so, and the retry asks for the finished list alone — the
+            running stoppages and the start/stop buttons are untouched. */}
+        {todayErr && (
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+            <span>{todayErr === "timeout" ? p.common.timedOut : p.common.loadError}</span>
+            <button
+              type="button"
+              onClick={() => { setTodayErr(null); void loadFull(); }}
+              className="inline-flex items-center min-h-11 px-2 -mx-2 rounded-lg font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            >
+              {p.common.retry}
+            </button>
+          </div>
+        )}
+        {!todayLoaded && !todayErr && todayShown && (
+          <p className="mb-2 text-xs text-gray-500">{p.common.stillLoading}</p>
+        )}
         {todayList.length === 0 ? (
-          todayLoaded ? <EmptyState text={t.empty} /> : <Spinner text={p.common.loading} />
+          todayShown ? <EmptyState text={t.empty} /> : todayErr ? null : <Spinner text={p.common.loading} />
         ) : (
           <div className="space-y-3">
             {todayList.map((e) => (

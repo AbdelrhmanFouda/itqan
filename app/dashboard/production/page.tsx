@@ -2,11 +2,12 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
 import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { moldKey } from "@/lib/mold-number";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -24,6 +25,11 @@ type Mold = { row: number; code?: string; name?: string; number?: string; notesN
 // identity written to the production tab's machine-code column.
 type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
 
+/** The last «الإنتاج» answer this device saw — painted at once on the next open. */
+const LAST_KEY = "itqan.runs.last";
+/** Why the live read is not moving. Kept as a KIND, so the message follows the language. */
+type Issue = "" | "timeout" | "error";
+
 export default function ProductionPage() {
   const { lang } = useLang();
   const p = pd[lang];
@@ -37,6 +43,8 @@ export default function ProductionPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [issue, setIssue] = useState<Issue>("");
+  const [loading, setLoading] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const ym = today.slice(0, 7);
@@ -51,18 +59,48 @@ export default function ProductionPage() {
   );
   const [form, setForm] = useState(blank());
 
-  const load = useCallback(async () => {
-    // The log renders the moment /api/runs answers; the mould numbers and the
-    // machine list land on their own. A cold Master read is 2–4s, and until
-    // 2026-09-04 the table waited for all three.
+  // The two lists that only feed the log-production form («الرئيسي» for the
+  // mould numbers, «الماكينات» for the registry) are started AFTER the log has
+  // answered, and only once. The bridge serves one tab at a time: firing them
+  // first (as this page did until 2026-09-10) put two cold tab reads — 2–11s
+  // each — in front of the read the table itself is waiting for. Nothing here
+  // blocks the table, and a failure leaves the dropdown empty, not the page.
+  const listsStarted = useRef(false);
+  const loadLists = useCallback(() => {
+    if (listsStarted.current) return;
+    listsStarted.current = true;
     // Master (guarded) rather than the open «الاسطمبات» view: only Master
     // carries the notes column where 26 products keep their mould number.
     authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
     fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
-    const r = await fetch("/api/runs").then((x) => x.json()).catch(() => []);
-    setRuns(Array.isArray(r) ? r : []);
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    // Bounded (lib last-seen, 90s): the bridge can take 10–160s on a cold
+    // instance and there was NO client timeout — the spinner simply stayed
+    // until the platform killed the function at 300s.
+    const r = await timedJson<Run[]>(fetch, "/api/runs");
+    if (r.ok && Array.isArray(r.data)) {
+      setRuns(r.data);
+      setIssue("");
+      writeLastSeen(LAST_KEY, r.data);
+    } else {
+      // A stall must never replace good numbers: whatever is on screen (the
+      // device snapshot, or the previous live answer) stays, and the page says
+      // why it is not moving instead of showing an empty log.
+      setIssue(!r.ok && r.timedOut ? "timeout" : "error");
+    }
+    setLoading(false);
+    loadLists();
+  }, [loadLists]);
+  useEffect(() => {
+    // What this device saw last time paints at once; the live answer replaces
+    // it. Opening the page used to mean a spinner for the whole round trip.
+    const snap = readLastSeen<Run[]>(LAST_KEY);
+    if (Array.isArray(snap)) setRuns(snap);
+    load();
+  }, [load]);
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => {
@@ -165,6 +203,19 @@ export default function ProductionPage() {
         </div>
       </div>
 
+      {/* The read stalled but there are numbers on screen — say so, keep them,
+          and offer the retry. Never blank a log that was readable a moment ago. */}
+      {runs !== null && issue !== "" && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</span>
+          <span className="text-xs text-red-600/80">{p.common.slowSheet}</span>
+          <Btn variant="outline" onClick={load} disabled={loading} className="ms-auto">{p.common.retry}</Btn>
+        </div>
+      )}
+      {runs !== null && issue === "" && loading && (
+        <p className="mb-4 text-xs text-gray-400">{p.common.stillLoading}</p>
+      )}
+
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <Stat label={p.runs.totalGood} value={fmt(good)} tone="green" />
@@ -174,7 +225,17 @@ export default function ProductionPage() {
       </div>
 
       {runs === null ? (
-        <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>
+        issue !== "" ? (
+          // Nothing to show at all — the existing error box, now with a way out.
+          <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+            <p>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</p>
+            <div className="mt-3 flex justify-center">
+              <Btn variant="outline" onClick={load} disabled={loading}>{p.common.retry}</Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>
+        )
       ) : runs.length === 0 ? (
         <EmptyState text={p.runs.empty} />
       ) : (

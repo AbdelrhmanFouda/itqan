@@ -1,10 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
+import { pd } from "@/lib/i18n.prod";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 
 type Rec = { row: number } & Record<string, string>;
 type Payload = {
@@ -19,6 +21,19 @@ type Payload = {
 /**
  * Generic dashboard section backed by one tab of the Google Sheet.
  * Column labels come from the sheet headers (bilingual), so it adapts to any tab.
+ *
+ * ONE entity per page (products, clients), so the device snapshot is keyed by
+ * the entity: `itqan.sheet.<entity>.last`. Speed (2026-09-10) — a sheet read
+ * is seconds on a cold instance and this component had no timeout at all: the
+ * spinner turned until the platform killed the function, and a transient
+ * failure was swallowed silently, leaving the page looking merely slow. Now
+ * the tab this device saw last renders AT ONCE, the live read is bounded, a
+ * failure keeps the rows and says so with a retry, and an empty or failed
+ * answer never replaces good rows. Saves still write and re-render LIVE.
+ *
+ * The read keeps `authedFetch` for every entity: the tab is chosen at runtime
+ * and «العملاء» is a guarded read (contact data, server-side rule), so the
+ * token must travel. Sending it to an open tab costs nothing.
  */
 export default function SheetSection({
   entity, title, subtitle, columns = 3,
@@ -30,28 +45,44 @@ export default function SheetSection({
 }) {
   const { lang } = useLang();
   const m = mr[lang];
+  const p = pd[lang];
   const isAr = lang === "ar";
 
   const [data, setData] = useState<Payload | null>(null);
+  /** The last read that did not arrive — null while what is shown is live. */
+  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Rec | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  async function load(initial = false) {
-    try {
-      // authed: the clients tab (contact/payment data) is signed-in-only server-side
-      const res = await authedFetch(`/api/sheet/${entity}`);
-      const json = await res.json();
-      setData((prev) =>
-        !initial && prev && prev.records.length > 0 && (json?.records?.length ?? 0) === 0 ? prev : json
-      );
-    } catch {
-      /* keep current data on a transient error */
+  const load = useCallback(async () => {
+    setLoading(true);
+    // authed: the clients tab (contact/payment data) is signed-in-only server-side
+    const r = await timedJson<Payload>(authedFetch, `/api/sheet/${entity}`);
+    if (r.ok && Array.isArray(r.data?.records)) {
+      const next = r.data;
+      // An empty answer never replaces rows that are on screen — "no records"
+      // read as the truth is exactly the lie this guards against.
+      setData((prev) => (prev && prev.records.length > 0 && next.records.length === 0 ? prev : next));
+      setFailed(null);
+      if (next.records.length > 0) writeLastSeen(`itqan.sheet.${entity}.last`, next);
+    } else if (!r.ok) {
+      setFailed({ timedOut: r.timedOut });
     }
-  }
-  useEffect(() => { setData(null); load(true); }, [entity]);
+    setLoading(false);
+  }, [entity]);
+  useEffect(() => {
+    // Switching entity discards the previous tab's rows, then paints this
+    // tab's remembered ones before the network is touched.
+    setData(null);
+    setFailed(null);
+    const snap = readLastSeen<Payload>(`itqan.sheet.${entity}.last`);
+    if (snap && Array.isArray(snap.records)) setData(snap);
+    load();
+  }, [entity, load]);
   // Auto-refresh so sheet edits appear without a manual reload — paused while
   // editing AND while the tab is hidden (long-lived background tabs otherwise
   // keep fetching and become targets for the browser's memory-saver tab kill).
@@ -61,7 +92,7 @@ export default function SheetSection({
     const onVis = () => { if (!document.hidden && !editing) load(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
-  }, [editing, entity]);
+  }, [editing, load]);
 
   const label = (f: string) => {
     const l = data?.labels?.[f];
@@ -96,15 +127,34 @@ export default function SheetSection({
     if (json.ok) {
       setData((d) => (d ? { ...d, records: d.records.map((r) => (r.row === editing.row ? { ...r, ...changes } : r)) } : d));
       setEditing(null);
+      // The cell is shown optimistically, then re-read from the sheet — a
+      // write is never confirmed against the device snapshot.
+      load();
     } else {
       setSaveMsg(`${m.saveFailed}${json.reason ? ` · ${json.reason}` : ""}`);
     }
   }
 
-  if (data === null) return <div className="flex justify-center py-16"><Spinner text={m.loading} /></div>;
-
   const t = isAr ? title.ar : title.en;
   const sub = isAr ? subtitle.ar : subtitle.en;
+
+  // Nothing on screen and the read did not arrive: the error state plus the
+  // one action that helps. With a snapshot showing, this branch is skipped and
+  // the line inside the page says the rows are not live.
+  if (failed && !data) {
+    return (
+      <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">{t}</h1>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          <p>{failed.timedOut ? p.common.timedOut : m.loadError}</p>
+          <Btn variant="outline" onClick={load} disabled={loading} className="mt-4">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{m.refresh}
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+  if (data === null) return <div className="flex justify-center py-16"><Spinner text={m.loading} /></div>;
 
   if (!data.configured) {
     return (
@@ -130,12 +180,30 @@ export default function SheetSection({
         <span className="text-sm text-gray-400 tabular-nums">{filtered.length}</span>
         <button
           onClick={() => load()}
-          className="ms-auto inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          disabled={loading}
+          className="ms-auto inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 px-2 -mx-2 rounded text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-60"
         >
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
           {m.refresh}
         </button>
       </div>
       <p className="text-sm text-gray-500 mb-6">{sub}</p>
+
+      {/* Rows are on screen and the live read did not arrive: keep them, say so. */}
+      {failed && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{failed.timedOut ? p.common.timedOut : m.loadError}</span>
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
+          </button>
+        </p>
+      )}
+      {/* A remembered tab is showing while the live read is still in flight. */}
+      {!failed && loading && <p className="text-xs text-gray-400 mb-5">{p.common.stillLoading}</p>}
 
       <div className="mb-5">
         <input className={`${inputCls} w-full max-w-md`} placeholder={m.search} value={query} onChange={(e) => setQuery(e.target.value)} />

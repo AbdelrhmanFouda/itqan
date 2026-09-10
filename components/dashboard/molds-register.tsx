@@ -1,12 +1,14 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
+import { pd } from "@/lib/i18n.prod";
 import { normalizeArabic } from "@/lib/prod-meta";
 import { moldKey } from "@/lib/mold-number";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import type { MoldRow } from "@/app/api/molds/route";
 
 /**
@@ -23,9 +25,20 @@ import type { MoldRow } from "@/app/api/molds/route";
  * still comes from the API, never from the client) and goes through
  * PATCH /api/molds, which re-locates the row by NAME on a fresh read. When the
  * bridge cannot write, the same modal opens read-only.
+ *
+ * Speed (2026-09-10): the register is «الرئيسي», the biggest tab there is, so
+ * a cold read is seconds and there was no client timeout at all — the worker
+ * standing at the press watched a spinner until the platform killed the
+ * function. The register this device saw last renders AT ONCE, the live read
+ * is bounded, and a failure keeps the rows on screen with a retry beside the
+ * refresh. Saves still reload LIVE — a snapshot is never what a write is
+ * checked against.
  */
 
 type Payload = { molds: MoldRow[]; writable: boolean; canEdit: boolean; configured: boolean };
+
+/** The last register this device saw — rendered before the network is touched. */
+const LAST_KEY = "itqan.molds.last";
 type NumberFilter = "all" | "with" | "without";
 
 // Search folding: Arabic spelling variants + Arabic-Indic digits + case, so
@@ -44,10 +57,13 @@ export default function MoldsRegister({ title, subtitle }: {
 }) {
   const { lang } = useLang();
   const m = mr[lang];
+  const p = pd[lang];
   const isAr = lang === "ar";
 
   const [data, setData] = useState<Payload | null>(null);
-  const [error, setError] = useState(false);
+  /** The last read that did not arrive — null while what is shown is live. */
+  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [numberFilter, setNumberFilter] = useState<NumberFilter>("all");
   const [category, setCategory] = useState("");
@@ -56,20 +72,29 @@ export default function MoldsRegister({ title, subtitle }: {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  async function load(initial = false) {
-    try {
-      const res = await authedFetch("/api/molds");
-      // A non-2xx (an expired token) must show as an error, never as an empty
-      // register — the owner would read "no moulds" as the truth.
-      if (!res.ok) throw new Error(String(res.status));
-      const json = (await res.json()) as Payload;
-      setError(false);
-      setData((prev) => (!initial && prev && prev.molds.length > 0 && json.molds.length === 0 ? prev : json));
-    } catch {
-      if (initial) setError(true);
+  // Guarded route, so the token travels — and the read is bounded, so a
+  // stalled bridge becomes a line with a retry instead of an endless spinner.
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await timedJson<Payload>(authedFetch, "/api/molds");
+    if (r.ok && Array.isArray(r.data?.molds)) {
+      const next = r.data;
+      // A non-2xx (an expired token) or an empty answer must never show as an
+      // empty register — the owner would read "no moulds" as the truth.
+      setData((prev) => (prev && prev.molds.length > 0 && next.molds.length === 0 ? prev : next));
+      setFailed(null);
+      if (next.molds.length > 0) writeLastSeen(LAST_KEY, next);
+    } else if (!r.ok) {
+      setFailed({ timedOut: r.timedOut });
     }
-  }
-  useEffect(() => { load(true); }, []);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    // What this device saw last time renders at once; the live answer replaces it.
+    const snap = readLastSeen<Payload>(LAST_KEY);
+    if (snap && Array.isArray(snap.molds)) setData(snap);
+    load();
+  }, [load]);
   // Refresh while the tab is visible and nothing is open — a Master edit made
   // in the sheet appears without a reload.
   useEffect(() => {
@@ -77,7 +102,7 @@ export default function MoldsRegister({ title, subtitle }: {
     const onVis = () => { if (!document.hidden && !selected) load(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
-  }, [selected]);
+  }, [selected, load]);
 
   const label = (f: keyof MoldRow): string => {
     switch (f) {
@@ -151,11 +176,19 @@ export default function MoldsRegister({ title, subtitle }: {
   const t = isAr ? title.ar : title.en;
   const sub = isAr ? subtitle.ar : subtitle.en;
 
-  if (error) {
+  // Nothing on screen and the read did not arrive: the error state plus the
+  // one action that can help. A snapshot, if there was one, takes this branch
+  // away — the rows stay and the line below says the numbers are not live.
+  if (failed && !data) {
     return (
       <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{t}</h1>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{m.loadError}</div>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          <p>{failed.timedOut ? p.common.timedOut : m.loadError}</p>
+          <Btn variant="outline" onClick={load} disabled={loading} className="mt-4">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{m.refresh}
+          </Btn>
+        </div>
       </div>
     );
   }
@@ -184,12 +217,29 @@ export default function MoldsRegister({ title, subtitle }: {
         <span className="text-sm text-gray-400 tabular-nums">{filtered.length}</span>
         <button
           onClick={() => load()}
-          className="ms-auto inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          disabled={loading}
+          className="ms-auto inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 px-2 -mx-2 rounded text-xs text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-60"
         >
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
           {m.refresh}
         </button>
       </div>
       <p className="text-sm text-gray-500 mb-4">{sub}</p>
+      {/* Rows are on screen and the live read did not arrive: keep them, say so. */}
+      {failed && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{failed.timedOut ? p.common.timedOut : m.loadError}</span>
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
+          </button>
+        </p>
+      )}
+      {/* A remembered register is showing while the live read is still in flight. */}
+      {!failed && loading && <p className="text-xs text-gray-400 mb-4">{p.common.stillLoading}</p>}
       {!canEdit && <p className="text-xs text-gray-400 mb-4">{m.readOnlyHint}</p>}
 
       <div className="mb-4">

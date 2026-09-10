@@ -282,6 +282,9 @@ async function post(payload: Record<string, unknown>): Promise<StorageWriteResul
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: SECRET, ...payload }),
       redirect: "follow",
+      // Bounded (2026-09-10): a save that hung held the phone until the
+      // platform killed the request, and the bridge may have written anyway.
+      signal: AbortSignal.timeout(60_000),
     });
     // The sheet changed — or may have, the bridge is at-least-once — so every
     // copy is dropped BEFORE answering: the page reloads the moment we do.

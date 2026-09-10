@@ -1,6 +1,6 @@
 "use client";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
@@ -8,6 +8,7 @@ import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
 import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { Plus } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { moldKey } from "@/lib/mold-number";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -21,6 +22,11 @@ type Run = {
 type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
 // From GET /api/molds (Master): `number` is the mould number — D, else the notes.
 type Mold = { row: number; code?: string; name?: string; number?: string; notesNumber?: string };
+
+/** The last «الإنتاج» answer this device saw — painted at once on the next open. */
+const LAST_KEY = "itqan.quality.last";
+/** Why the live read is not moving. Kept as a KIND, so the message follows the language. */
+type Issue = "" | "timeout" | "error";
 
 export default function QualityPage() {
   const { lang } = useLang();
@@ -37,6 +43,8 @@ export default function QualityPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [issue, setIssue] = useState<Issue>("");
+  const [loading, setLoading] = useState(false);
 
   const blank = useCallback(
     () => ({
@@ -48,16 +56,43 @@ export default function QualityPage() {
   );
   const [form, setForm] = useState(blank());
 
-  const load = useCallback(async () => {
-    // The day's entries render the moment /api/runs answers; the registry and
-    // the mould numbers land on their own (see the production page).
+  // The registry and the mould numbers only feed the log form, so they are
+  // started AFTER the day's entries have answered, and only once: the bridge
+  // serves one tab at a time, and starting them alongside queued two cold tab
+  // reads in front of the read this page exists to show (see the production
+  // page). Non-blocking — a failure leaves a dropdown empty, not the page.
+  const listsStarted = useRef(false);
+  const loadLists = useCallback(() => {
+    if (listsStarted.current) return;
+    listsStarted.current = true;
     fetch("/api/machines").then((x) => x.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
     // Master (guarded) rather than the open view — see the production page.
     authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
-    const r = await fetch("/api/runs").then((x) => x.json()).catch(() => []);
-    setRuns(Array.isArray(r) ? r : []);
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    // Bounded (90s): there was no client timeout at all, so a stalled bridge
+    // meant a spinner until the platform killed the function at 300s.
+    const r = await timedJson<Run[]>(fetch, "/api/runs");
+    if (r.ok && Array.isArray(r.data)) {
+      setRuns(r.data);
+      setIssue("");
+      writeLastSeen(LAST_KEY, r.data);
+    } else {
+      // Keep whatever is on screen — a failed read must not read as "no
+      // entries today", which is a different and much worse statement.
+      setIssue(!r.ok && r.timedOut ? "timeout" : "error");
+    }
+    setLoading(false);
+    loadLists();
+  }, [loadLists]);
+  useEffect(() => {
+    // The last answer this device saw paints at once; the live one replaces it.
+    const snap = readLastSeen<Run[]>(LAST_KEY);
+    if (Array.isArray(snap)) setRuns(snap);
+    load();
+  }, [load]);
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => {
@@ -117,6 +152,23 @@ export default function QualityPage() {
   const numberOf = (r: Run) => numberByName.get(moldKey(r.product))?.number || "";
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
 
+  // Nothing on screen and nothing came back — the error box, now with a way out.
+  if (runs === null && issue !== "") {
+    return (
+      <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.quality.title}</h1>
+          <p className="text-sm text-gray-500">{a.quality.subtitle}</p>
+        </div>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+          <p>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</p>
+          <div className="mt-3 flex justify-center">
+            <Btn variant="outline" onClick={load} disabled={loading}>{p.common.retry}</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (runs === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
   const dayRuns = runs.filter((r) => r.date === date);
@@ -138,6 +190,17 @@ export default function QualityPage() {
           </div>
         </div>
       </div>
+
+      {/* The read stalled but the day's entries are on screen — keep them, say
+          why the numbers are not moving, and offer the retry. */}
+      {issue !== "" && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</span>
+          <span className="text-xs text-red-600/80">{p.common.slowSheet}</span>
+          <Btn variant="outline" onClick={load} disabled={loading} className="ms-auto">{p.common.retry}</Btn>
+        </div>
+      )}
+      {issue === "" && loading && <p className="mb-4 text-xs text-gray-400">{p.common.stillLoading}</p>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <Stat label={a.quality.dayGood} value={fmt(good)} tone="green" />

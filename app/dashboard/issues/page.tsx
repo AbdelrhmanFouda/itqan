@@ -29,6 +29,7 @@ import { pd } from "@/lib/i18n.prod";
 import { Plus, Pencil, Mic, ChevronDown, ChevronUp, X } from "lucide-react";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
@@ -51,6 +52,16 @@ type Draft = {
   date: string; machine: string; product: string; category: string;
   description: string; action: string; status: string; note: string;
 };
+/** The whole `/api/issues` answer — what the device remembers between visits. */
+type IssuesResp = { issues?: Issue[]; audio?: { supported?: boolean } };
+
+/**
+ * The last answer this device saw. «الأعطال» is a sheet read, and a sheet read
+ * on a cold serverless instance has been measured at 10–160s — the page used
+ * to show a spinner for all of it. Now it shows what it showed last time and
+ * replaces it when the live answer lands (components/dashboard/last-seen.ts).
+ */
+const LAST_KEY = "itqan.issues.last";
 
 const statusCls = (s: string) =>
   s === "تم"
@@ -95,6 +106,11 @@ export default function IssuesPage() {
   const [adding, setAdding] = useState(false);
   const [openRow, setOpenRow] = useState<number | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // A read that failed or timed out — the list on screen is KEPT and this line
+  // says so; it never blanks the page and never becomes an empty list.
+  const [loadErr, setLoadErr] = useState<"net" | "timeout" | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const inFlight = useRef(false);
   const noticeTimer = useRef<number | null>(null);
   const today = cairoToday();
 
@@ -104,30 +120,65 @@ export default function IssuesPage() {
     noticeTimer.current = window.setTimeout(() => setNotice(null), kind === "ok" ? 4000 : 8000);
   }, []);
 
+  /**
+   * The list. BOUNDED (timedJson — the platform used to kill the function at
+   * 300s while this page span) and NON-DESTRUCTIVE: a failed or timed-out read
+   * keeps whatever is already on screen and raises a line with a retry, because
+   * an empty list here reads as "no faults today", which would be a lie.
+   */
   const load = useCallback(async () => {
-    try {
-      const j = await (await fetch("/api/issues")).json();
-      if (Array.isArray(j.issues)) setIssues(j.issues);
-      else setIssues((prev) => prev ?? []);
-      setAudioOk(Boolean(j.audio?.supported));
-    } catch {
-      setIssues((prev) => prev ?? []);
+    inFlight.current = true;
+    setRefreshing(true);
+    const r = await timedJson<IssuesResp>(fetch, "/api/issues");
+    inFlight.current = false;
+    setRefreshing(false);
+    if (r.ok && Array.isArray(r.data.issues)) {
+      setIssues(r.data.issues);
+      setAudioOk(Boolean(r.data.audio?.supported));
+      setLoadErr(null);
+      writeLastSeen(LAST_KEY, r.data);
+      return;
     }
+    setLoadErr(!r.ok && r.timedOut ? "timeout" : "net");
   }, []);
 
   useEffect(() => {
+    let alive = true;
     // Deferred a tick: the first list read sets state, and an effect body that
     // calls setState synchronously is what the compiler's lint forbids.
-    void Promise.resolve().then(load);
-    fetch("/api/machines").then((r) => r.json())
-      .then((m) => setMachines(m.machines ?? [])).catch(() => {});
-    fetch("/api/sheet/products").then((r) => r.json())
-      .then((d) => setProducts(((d.records ?? []) as { name?: string }[]).map((x) => x.name || "").filter(Boolean)))
-      .catch(() => {});
+    void Promise.resolve()
+      .then(() => {
+        if (!alive) return;
+        // What this device saw last time, at once — the live answer replaces it.
+        const snap = readLastSeen<IssuesResp>(LAST_KEY);
+        if (snap && Array.isArray(snap.issues)) {
+          setIssues(snap.issues);
+          setAudioOk(Boolean(snap.audio?.supported));
+        }
+        return load();
+      })
+      .then(() => {
+        if (!alive) return;
+        // ONLY after the log has answered. Both of these are sheet reads that
+        // the bridge serialises, and they feed nothing but the form's machine
+        // dropdown and product datalist — started first, they queued the tab
+        // the page is actually waiting for behind them.
+        void timedJson<{ machines?: Machine[] }>(fetch, "/api/machines")
+          .then((r) => { if (alive && r.ok) setMachines(r.data.machines ?? []); });
+        void timedJson<{ records?: { name?: string }[] }>(fetch, "/api/sheet/products")
+          .then((r) => {
+            if (alive && r.ok) setProducts((r.data.records ?? []).map((x) => x.name || "").filter(Boolean));
+          });
+      });
+    return () => { alive = false; };
   }, [load]);
   const modalOpen = adding || openRow !== null;
   useEffect(() => {
-    const id = setInterval(() => { if (!modalOpen && !document.hidden) load(); }, 30000);
+    // Skip a tick while a read is still in flight — a slow sheet must not
+    // stack polls on top of each other.
+    const id = setInterval(() => {
+      if (!modalOpen && !document.hidden && !inFlight.current) load();
+    }, 30000);
     return () => clearInterval(id);
   }, [modalOpen, load]);
 
@@ -295,10 +346,42 @@ export default function IssuesPage() {
         )}
       </div>
 
-      {issues === null ? (
-        <div className="flex justify-center py-16">
-          <Spinner text={p.common.loading} />
+      {/* A read that failed with a list already on screen: keep the list, say
+          what happened, offer the retry. Never blank, never an empty list. */}
+      {loadErr && issues !== null && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          <span>{loadErr === "timeout" ? p.common.timedOut : p.common.loadError}</span>
+          <button
+            type="button"
+            onClick={() => load()}
+            className="inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded-lg font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
+            {p.common.retry}
+          </button>
         </div>
+      )}
+      {/* The device's last answer is showing while the live one is still coming. */}
+      {!loadErr && refreshing && issues !== null && (
+        <p className="mb-3 text-xs text-gray-500">{p.common.stillLoading}</p>
+      )}
+
+      {issues === null ? (
+        loadErr ? (
+          <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
+            <p>{loadErr === "timeout" ? p.common.timedOut : p.common.loadError}</p>
+            <button
+              type="button"
+              onClick={() => load()}
+              className="mt-3 inline-flex items-center justify-center min-h-11 rounded-lg border-2 border-red-300 px-4 font-semibold text-red-700 active:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            >
+              {p.common.retry}
+            </button>
+          </div>
+        ) : (
+          <div className="flex justify-center py-16">
+            <Spinner text={p.common.loading} />
+          </div>
+        )
       ) : filtered.length === 0 ? (
         <EmptyState text={anyFilter ? t.noneMatch : t.empty} />
       ) : (

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { isArabicOnlyPath } from "@/lib/arabic-only";
 import { useAuth } from "@/context/AuthContext";
@@ -60,6 +60,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!profile || profile.status !== "approved" || !profile.role) return;
     if (!canAccess(profile.role, pathname)) router.replace(landingFor(profile.role));
   }, [profile, pathname, router]);
+
+  // Warm the function instance's copies of the core sheet tabs once per shell
+  // mount (2026-09-10): by the time a page is tapped, the reads it needs are
+  // usually done or in flight. /api/warm answers at once and returns nothing.
+  const warmed = useRef(false);
+  useEffect(() => {
+    if (warmed.current || !profile || profile.status !== "approved") return;
+    warmed.current = true;
+    fetch("/api/warm").catch(() => {});
+  }, [profile]);
 
   async function handleSignOut() {
     await signOut();

@@ -8,6 +8,7 @@ import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } f
 import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
 type OEE = {
@@ -188,6 +189,20 @@ const L = {
   },
 };
 
+/**
+ * The OEE set is the slowest read on the site — /api/oee reads four tabs and
+ * measured 34 s on a cold instance. So the page follows /dashboard/jobs and
+ * /dashboard/stock: the last answer THIS DEVICE saw for THIS period paints at
+ * once, every fetch is bounded (`timedJson`), and a failed refresh keeps the
+ * numbers and offers a retry instead of blanking or spinning forever.
+ *
+ * ⚠ The snapshot carries its period. Showing «this month»'s remembered numbers
+ * under the «all time» toggle would be a silent lie, so it is adopted only
+ * when the periods match.
+ */
+type Snap = { period: "month" | "all"; data: Data };
+const LAST_KEY = "itqan.performance.last";
+
 const pf = (x: number) => `${(x * 100).toFixed(1)}%`;
 const oeeText = (x: number) => (x >= 0.85 ? "text-green-600" : x >= 0.6 ? "text-amber-600" : "text-red-600");
 
@@ -211,41 +226,51 @@ export default function PerformancePage() {
   const [period, setPeriod] = useState<"month" | "all">("month");
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
+  /** What is on screen came off this device, not off a live answer. */
+  const [fromSnapshot, setFromSnapshot] = useState(false);
   const [review, setReview] = useState<ReviewPayload | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(false);
-    try {
-      const q = period === "month" ? `?month=${thisMonth}` : "";
-      const res = await fetch(`/api/oee${q}`);
-      if (!res.ok) throw new Error("bad_status");
-      setData(await res.json());
-    } catch {
-      setError(true); // keep any previously-loaded data on screen
-    } finally {
-      setLoading(false);
+    setFailed(null);
+    const q = period === "month" ? `?month=${thisMonth}` : "";
+    const res = await timedJson<Data>(fetch, `/api/oee${q}`);
+    if (res.ok) {
+      setData(res.data);
+      setFromSnapshot(false);
+      writeLastSeen(LAST_KEY, { period, data: res.data } satisfies Snap);
+    } else {
+      // Keep whatever is on screen — a stalled bridge must not turn a page of
+      // real numbers into an empty one.
+      setFailed({ timedOut: res.timedOut });
     }
+    setLoading(false);
   }, [period, thisMonth]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // The last answer this device saw for this period renders AT ONCE; the
+    // live one replaces it.
+    const snap = readLastSeen<Snap>(LAST_KEY);
+    if (snap && snap.period === period && snap.data && Array.isArray(snap.data.machines)) {
+      setData(snap.data);
+      setFromSnapshot(true);
+    }
+    load();
+  }, [load, period]);
 
   const loadReview = useCallback(async (refresh = false) => {
     setReviewBusy(true);
-    try {
-      const params = new URLSearchParams();
-      if (period === "month") params.set("month", thisMonth);
-      if (refresh) params.set("refresh", "1");
-      const qs = params.toString();
-      const res = await authedFetch(`/api/ai-review${qs ? `?${qs}` : ""}`);
-      if (!res.ok) throw new Error("bad_status");
-      setReview(await res.json());
-    } catch {
-      setReview((r) => r ?? { review: null, provider: null, model: null, generatedAt: null, cached: false, llmConfigured: false, configured: false });
-    } finally {
-      setReviewBusy(false);
-    }
+    const params = new URLSearchParams();
+    if (period === "month") params.set("month", thisMonth);
+    if (refresh) params.set("refresh", "1");
+    const qs = params.toString();
+    // Bounded, and on its OWN effect: the narrative can never hold up the OEE
+    // numbers, and a review that never answers is a line in its own card.
+    const res = await timedJson<ReviewPayload>(authedFetch, `/api/ai-review${qs ? `?${qs}` : ""}`);
+    if (res.ok) setReview(res.data);
+    else setReview((r) => r ?? { review: null, provider: null, model: null, generatedAt: null, cached: false, llmConfigured: false, configured: false });
+    setReviewBusy(false);
   }, [period, thisMonth]);
   useEffect(() => { loadReview(); }, [loadReview]);
 
@@ -264,14 +289,22 @@ export default function PerformancePage() {
         <Spinner text={p.common.loading} />
       </div>
     );
-  if ((error && !data) || (data && !data.configured)) {
+  if ((failed && !data) || (data && !data.configured)) {
     return (
       <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
         <div className="mb-6 sm:mb-8">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">{t.title}</h1>
           <p className="text-sm text-gray-500">{t.subtitle}</p>
         </div>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{t.unreachable}</div>
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600 space-y-3">
+          <p>{failed ? (failed.timedOut ? p.common.timedOut : t.unreachable) : t.unreachable}</p>
+          <button
+            onClick={load}
+            className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 text-xs font-medium hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
+            {p.common.retry}
+          </button>
+        </div>
       </div>
     );
   }
@@ -335,6 +368,19 @@ export default function PerformancePage() {
         </div>
         <p className="text-sm text-gray-500">{t.subtitle}</p>
       </div>
+
+      {/* A refresh that failed keeps the numbers and says so — it never blanks
+          the page, and it never leaves an endless spinner. */}
+      {failed && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
+          <button onClick={load} className="font-medium underline underline-offset-2 min-h-8 inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded">
+            {p.common.retry}
+          </button>
+        </p>
+      )}
+      {failed && fromSnapshot && <p className="text-xs text-amber-700 mb-3">{p.common.slowSheet}</p>}
+      {loading && fromSnapshot && !failed && <p className="text-xs text-gray-400 mb-3">{p.common.stillLoading}</p>}
 
       {data.runCount === 0 || !o ? (
         <div>

@@ -1,12 +1,27 @@
 "use client";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
-import { useEffect, useState } from "react";
+/**
+ * Sales reads the inquiries (Firestore, fast) and the order book
+ * («أوامر العمل» through /api/jobs — four sheet tabs, seconds on a cold
+ * instance). Same pattern as /dashboard/jobs and /dashboard/stock:
+ *
+ *  - the last answer THIS DEVICE saw paints at once (`itqan.sales.last`);
+ *  - both fetches are bounded (`timedJson`), so a stalled bridge becomes a
+ *    line with a retry instead of a spinner that runs until the platform
+ *    kills the function;
+ *  - the two sections are independent — the inquiries render without waiting
+ *    for the sheet, and a section whose source has not landed says so rather
+ *    than claiming «no inquiries» / «no orders»;
+ *  - a failed refresh never replaces what is on screen.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
 import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { Pill, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
+import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
 type Inquiry = {
@@ -18,7 +33,11 @@ type Job = {
   qtyOrdered: number; dueDate: string; status: string; produced: number;
 };
 
+/** What the device remembers between visits — both halves, in one object. */
+type Snap = { inquiries: Inquiry[]; jobs: Job[] };
+
 const DONE = ["Completed", "Delivered"];
+const LAST_KEY = "itqan.sales.last";
 
 export default function SalesPage() {
   const { lang } = useLang();
@@ -27,46 +46,88 @@ export default function SalesPage() {
   const isAr = lang === "ar";
   usePageTitle(a.sales.title);
 
+  // null = that source has not answered yet. An empty array is an ANSWER.
   const [inquiries, setInquiries] = useState<Inquiry[] | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [produced, setProduced] = useState<Record<string, number>>({});
-  const [error, setError] = useState(false);
+  const [jobs, setJobs] = useState<Job[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
+  /** Everything on screen came off this device, not off a live answer. */
+  const [fromSnapshot, setFromSnapshot] = useState(false);
+
+  // The last GOOD value of each half, so a snapshot write never drops the half
+  // that did not refresh this time.
+  const seen = useRef<Snap>({ inquiries: [], jobs: [] });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFailed(null);
+    // Both go out at once and each paints on its own: the inquiries (Firestore,
+    // fast) never wait behind the four sheet tabs of /api/jobs.
+    const ip = timedJson<Inquiry[]>(authedFetch, "/api/inquiries");
+    const jp = timedJson<{ jobs?: Job[] }>(authedFetch, "/api/jobs");
+    void ip.then((res) => {
+      if (!res.ok) return; // a failure must never blank what is already shown
+      const list = Array.isArray(res.data) ? res.data : [];
+      seen.current = { ...seen.current, inquiries: list };
+      setInquiries(list);
+      setFromSnapshot(false);
+    });
+    void jp.then((res) => {
+      if (!res.ok) return;
+      const list = res.data.jobs ?? [];
+      seen.current = { ...seen.current, jobs: list };
+      setJobs(list);
+      setFromSnapshot(false);
+    });
+    const [i, j] = await Promise.all([ip, jp]);
+    if (i.ok || j.ok) writeLastSeen(LAST_KEY, seen.current);
+    const bad = !i.ok ? i : !j.ok ? j : null;
+    setFailed(bad ? { timedOut: bad.timedOut } : null);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    Promise.all([
-      // A non-2xx (401 on a missing/expired token) must land in the ERROR
-      // state — parsed as data it renders as "no inquiries / no orders",
-      // which lies to the owner. (Pattern from app/dashboard/jobs/page.tsx.)
-      authedFetch("/api/inquiries").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
-      authedFetch("/api/jobs").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
-    ])
-      .then(([i, j]) => {
-        setInquiries(Array.isArray(i) ? i : []);
-        const list: Job[] = j.jobs ?? [];
-        setJobs(list);
-        const by: Record<string, number> = {};
-        for (const jb of list) by[jb.id] = jb.produced || 0;
-        setProduced(by);
-      })
-      .catch(() => setError(true));
-  }, []);
+    // What this device saw last time renders AT ONCE; the live answer replaces
+    // it. A phone opening the page cold used to watch a spinner for the whole
+    // bridge round trip.
+    const snap = readLastSeen<Snap>(LAST_KEY);
+    if (snap && Array.isArray(snap.inquiries) && Array.isArray(snap.jobs)) {
+      seen.current = { inquiries: snap.inquiries, jobs: snap.jobs };
+      setInquiries(snap.inquiries);
+      setJobs(snap.jobs);
+      setFromSnapshot(true);
+    }
+    load();
+  }, [load]);
 
   const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
   const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? LOCALE_AR : "en-US") : "—");
+  const produced = useMemo(() => {
+    const by: Record<string, number> = {};
+    for (const jb of jobs ?? []) by[jb.id] = jb.produced || 0;
+    return by;
+  }, [jobs]);
 
-  if (error) {
+  // Nothing at all on screen: the existing error state, now with a retry.
+  if (failed && inquiries === null && jobs === null) {
     return (
       <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{a.sales.title}</h1>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-          {p.common.loadError}
+        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600 space-y-3">
+          <p>{failed.timedOut ? p.common.timedOut : p.common.loadError}</p>
+          <button
+            onClick={load}
+            className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 text-xs font-medium hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
+            {p.common.retry}
+          </button>
         </div>
       </div>
     );
   }
-  if (inquiries === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
+  if (inquiries === null && jobs === null) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
 
-  const openJobs = jobs.filter((j) => !DONE.includes(j.status));
+  const openJobs = (jobs ?? []).filter((j) => !DONE.includes(j.status));
   const byClient: Record<string, Job[]> = {};
   for (const j of openJobs) {
     if (!byClient[j.client]) byClient[j.client] = [];
@@ -81,9 +142,25 @@ export default function SalesPage() {
         <p className="text-sm text-gray-500">{a.sales.subtitle}</p>
       </div>
 
+      {/* A refresh that failed keeps what is on screen and says so — it never
+          blanks the page, and it never leaves an endless spinner. */}
+      {failed && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
+          <button onClick={load} className="font-medium underline underline-offset-2 min-h-8 inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded">
+            {p.common.retry}
+          </button>
+        </p>
+      )}
+      {failed && fromSnapshot && <p className="text-xs text-amber-700 mb-3">{p.common.slowSheet}</p>}
+      {loading && fromSnapshot && !failed && <p className="text-xs text-gray-400 mb-3">{p.common.stillLoading}</p>}
+
       {/* Incoming inquiries */}
       <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.sales.inquiries}</h2>
-      {inquiries.length === 0 ? (
+      {inquiries === null ? (
+        // Not «no inquiries» — that source simply has not answered yet.
+        <div className="flex justify-center"><Spinner text={p.common.loading} /></div>
+      ) : inquiries.length === 0 ? (
         <EmptyState text={a.sales.noInquiries} />
       ) : (
         <div className="grid sm:grid-cols-2 gap-4 mb-8 sm:mb-10">
@@ -113,7 +190,10 @@ export default function SalesPage() {
 
       {/* Open orders by customer */}
       <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.sales.demand}</h2>
-      {clients.length === 0 ? (
+      {jobs === null ? (
+        // Not «no orders» — «أوامر العمل» simply has not answered yet.
+        <div className="flex justify-center"><Spinner text={p.common.loading} /></div>
+      ) : clients.length === 0 ? (
         <EmptyState text={a.sales.noOrders} />
       ) : (
         <div className="space-y-5">
