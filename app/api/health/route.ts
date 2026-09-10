@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sheetsApiState, sheetsApiUsable } from "@/lib/google-sheets-api";
 
 /**
  * Which build is serving, with NO dependencies — no sheet, no Firebase, no
@@ -17,6 +18,10 @@ export async function GET() {
       build: (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7) || "local",
       region: process.env.VERCEL_REGION || "",
       sharedCopy: process.env.SHEET_SHARED_COPY === "on",
+      // Which transport reads and writes the workbook right now: the Google
+      // Sheets API (owner's OAuth token) or the Apps Script bridge.
+      transport: sheetsApiUsable() ? "api" : "bridge",
+      sheetsApi: sheetsApiState(),
       at: new Date().toISOString(),
     },
     { headers: { "Cache-Control": "no-store" } },

@@ -16,6 +16,14 @@ import { after } from "next/server";
 import { planRollback, cellRef, type WriteCell } from "@/lib/sheet-write";
 import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
 import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-copy";
+// The Google Sheets API as the transport (2026-09-10) — used for every read
+// and write when the owner's OAuth token is configured and not broken; the
+// Apps Script bridge below remains the fallback and still carries the voice
+// notes. See lib/google-sheets-api.ts for the semantics kept identical.
+import {
+  SheetsApiError, apiAppend, apiCreateTab, apiDeleteRow, apiReadTabs, apiUpdate, sheetsApiUsable,
+  type ApiTabAnswer,
+} from "@/lib/google-sheets-api";
 import {
   ENTITIES, clean, normHeader, colIndex, findHeaderRow, splitLabel, type EntityConfig,
 } from "@/lib/sheet-entities";
@@ -408,7 +416,32 @@ function classify(name: string, r: Awaited<ReturnType<typeof bridgeText>>): Answ
   }
 }
 
+function fromApi(name: string, a: ApiTabAnswer | undefined): Answer {
+  if (!a) return { kind: "error", detail: `"${name}" missing from the API answer` };
+  if ("error" in a) return { kind: "no_tab", detail: `"${name}" is not a tab in the workbook` };
+  if (a.values.length > 0) return { kind: "ok", values: a.values };
+  return { kind: "empty", detail: `"${name}" returned no rows` };
+}
+
+/** Read the tabs through the Sheets API; null when the API is unusable (not
+ *  configured, or its token was refused — the bridge takes over). A non-auth
+ *  failure is an answer of its own: every tab reports it, no bridge fallback
+ *  (the two would otherwise hide each other's outages). */
+async function readViaApi(names: string[]): Promise<Record<string, Answer> | null> {
+  if (!sheetsApiUsable()) return null;
+  try {
+    const answers = await apiReadTabs(names);
+    return Object.fromEntries(names.map((n) => [n, fromApi(n, answers[n])]));
+  } catch (e) {
+    if (e instanceof SheetsApiError && e.auth) return null;
+    const detail = e instanceof Error ? e.message : "failed";
+    return Object.fromEntries(names.map((n) => [n, { kind: "error", detail: `"${n}" sheets api: ${detail}` } as Answer]));
+  }
+}
+
 async function readOneTab(name: string): Promise<Answer> {
+  const viaApi = await readViaApi([name]);
+  if (viaApi) return viaApi[name];
   const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tab=${encodeURIComponent(name)}`;
   return classify(name, await bridgeText(u));
 }
@@ -437,6 +470,8 @@ async function flushBatch(): Promise<void> {
   const settle = (name: string, a: Answer) => { for (const r of waiting.get(name) ?? []) r(a); };
   const oneByOne = async (todo: string[]) => { for (const n of todo) settle(n, await readOneTab(n)); };
 
+  const viaApi = await readViaApi(names);
+  if (viaApi) { for (const n of names) settle(n, viaApi[n]); return; }
   if (names.length === 1 || Date.now() < multiUnsupportedUntil) return oneByOne(names);
 
   const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tabs=${encodeURIComponent(names.join(","))}`;
@@ -904,10 +939,53 @@ async function postUpdates(tab: string, updates: Cell[], before?: string[], expe
 }
 
 // One POST helper for every write action (updates / append / deleteRow).
+/** One write through the Sheets API, in the bridge's own vocabulary. */
+async function postViaApi(payload: Record<string, unknown>): Promise<UpdateResult & { row?: number }> {
+  const tab = String(payload.tab ?? "");
+  if (payload.createTab) {
+    await apiCreateTab(String(payload.createTab), Array.isArray(payload.headers) ? (payload.headers as string[]) : null);
+    return { ok: true };
+  }
+  if (Array.isArray(payload.append)) {
+    const r = await apiAppend(tab, (payload.append as unknown[]).map((v) => String(v ?? "")));
+    return { ok: true, row: r.row };
+  }
+  if (payload.deleteRow) {
+    const r = await apiDeleteRow(tab, Number(payload.deleteRow));
+    return r.ok ? { ok: true } : { ok: false, reason: "no_tab" };
+  }
+  if (Array.isArray(payload.updates)) {
+    const r = await apiUpdate(tab, payload.updates as Cell[], Array.isArray(payload.expect) ? (payload.expect as Cell[]) : undefined);
+    return r.ok ? { ok: true } : { ok: false, reason: "row_changed" };
+  }
+  return { ok: false, reason: "unknown_action" };
+}
+
 async function postAction(payload: Record<string, unknown>): Promise<UpdateResult> {
   // The tab this write touches (updates / append / deleteRow carry it;
   // createTab does not) — what the cache drop below is scoped to.
   const written = typeof payload.tab === "string" ? payload.tab : undefined;
+  if (sheetsApiUsable()) {
+    try {
+      const r = await postViaApi(payload);
+      if (!r.ok) {
+        if (r.reason !== "row_changed") await invalidateSheetCache(written);
+        return { ok: false, reason: r.reason };
+      }
+      const patchable = !!written && (Array.isArray(payload.updates) || (Array.isArray(payload.append) && typeof r.row === "number" && r.row >= 2));
+      await invalidateSheetCache(written, patchable);
+      if (patchable) applyWriteToCopy(written as string, payload, r.row);
+      return { ok: true };
+    } catch (e) {
+      // A refused token is thrown BEFORE any request reaches the workbook, so
+      // handing the write to the bridge is safe. Anything else may have
+      // landed: report it, never retry it through the other transport.
+      if (!(e instanceof SheetsApiError && e.auth)) {
+        await invalidateSheetCache(written);
+        return { ok: false, reason: `sheets_api:${e instanceof Error ? e.message : "failed"}` };
+      }
+    }
+  }
   try {
     const res = await fetch(SCRIPT_URL!, {
       method: "POST",
@@ -1096,6 +1174,10 @@ export async function bridgeFeatures(): Promise<BridgeFeatures> {
   } catch {
     audio = false;
   }
+  // Through the Sheets API both are native: several tabs per call, and the
+  // row check made right before the write (apiUpdate). Audio stays the
+  // bridge's, so its answer still comes from the ping above.
+  if (sheetsApiUsable()) { multi = true; expect = true; }
   featuresSeen = { value: { audio, multi, expect }, at: now };
   return featuresSeen.value;
 }

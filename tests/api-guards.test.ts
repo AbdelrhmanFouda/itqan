@@ -41,6 +41,11 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "downtime":            { GET: "guard", POST: "guard", PATCH: "guard" },
   "downtime/export":     { GET: "guard" },
   "downtime/reclassify": { GET: "owner", POST: "owner" },
+  // The one-time OAuth handshake for the Sheets API transport (2026-09-10):
+  // connect only redirects to Google with the public client id; callback
+  // shows the consenting person their own refresh token, once. No data.
+  "google/callback":     { GET: "open" },
+  "google/connect":      { GET: "open" },
   // Which build is serving — a commit hash and a region, no data (2026-09-10).
   "health":              { GET: "open" },
   "inquiries":           { GET: "sales" },
@@ -79,7 +84,7 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
 // The documented open reads — CLAUDE.md: "Operational reads (sheet molds,
 // products, machines, runs, oee, issues) stay open deliberately — that list is
 // exhaustive". sheet/[entity] is the conditional one (lib/open-reads.ts).
-const DOCUMENTED_OPEN = ["health", "issues", "machines", "machines/[id]", "machines/[id]/notes", "oee", "public/showcase", "runs", "warm"];
+const DOCUMENTED_OPEN = ["google/callback", "google/connect", "health", "issues", "machines", "machines/[id]", "machines/[id]/notes", "oee", "public/showcase", "runs", "warm"];
 
 /* --------------------------------- helpers -------------------------------- */
 
