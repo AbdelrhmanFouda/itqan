@@ -145,13 +145,18 @@ export default function StoragePage() {
   // The 20 s poll must not stack: a bounded read can still take a minute and a
   // half, and three overlapping calls to a serialised bridge make it slower.
   const inFlight = useRef(false);
+  // A reload asked for while one is in flight (the save's reload behind the
+  // 20 s poll) used to be dropped, so pre-save numbers stood until the next
+  // tick. It runs once the in-flight read settles now (2026-09-10).
+  const wanted = useRef(false);
   const load = useCallback(async () => {
-    if (inFlight.current) return;
+    if (inFlight.current) { wanted.current = true; return; }
     inFlight.current = true;
     setLoading(true);
     const r = await timedJson<StorageData>(authedFetch, "/api/storage", { cache: "no-store" });
     inFlight.current = false;
     setLoading(false);
+    if (wanted.current) { wanted.current = false; void load(); }
     if (!r.ok) {
       // Keep whatever is on screen — a failed refresh never empties the room.
       setFetchErr({ timedOut: r.timedOut });
@@ -191,11 +196,20 @@ export default function StoragePage() {
   type PostResult = { ok: boolean; num?: string; nums?: string[]; split?: boolean; message?: string; error?: string };
   async function post(payload: Record<string, unknown>): Promise<PostResult> {
     const token = user ? await user.getIdToken() : "";
-    const res = await fetch("/api/storage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
+    // Bounded (2026-09-10): a save that hangs held the modal until the platform
+    // killed the request. The bridge is at-least-once, so the callers reload
+    // after a failure too — the row may be in the sheet.
+    let res: Response;
+    try {
+      res = await fetch("/api/storage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch {
+      return { ok: false, error: "timeout" };
+    }
     return (await res.json().catch(() => ({ ok: false, error: "bad_response" }))) as PostResult;
   }
 
@@ -445,7 +459,7 @@ export default function StoragePage() {
     };
     const res = await post(payload);
     setSaving(false);
-    if (!res.ok) { setFormErr(res.error || "error"); return; }
+    if (!res.ok) { setFormErr(res.error || "error"); load(); return; }
     setOpen(false);
     // a withdrawal with no location can become several rows (v4 spreads it over
     // the places holding the item) — say so instead of naming one number

@@ -193,9 +193,17 @@ export default function JobsPage() {
     if (!res || !res.ok) {
       const reason = res ? String((await res.json().catch(() => ({}))).reason ?? "") : "";
       setActErr((p.jobs.errors as Record<string, string>)[reason] ?? p.jobs.actionFailed);
+      // A failed-looking save may still have landed (at-least-once bridge):
+      // the list is reloaded BEFORE the buttons come back, so nobody taps twice.
+      await load();
+      setActing("");
+      return;
     }
-    await load();
+    // Confirmed: the optimistic pill already shows what the sheet holds. The
+    // buttons come back now; the reload runs behind (2026-09-10 — waiting for
+    // it froze every button on every card for a whole bridge round trip).
     setActing("");
+    load();
   }
 
   /* ------------------------------ the new order ---------------------------- */

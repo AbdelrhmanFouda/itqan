@@ -308,6 +308,10 @@ const downtimeFingerprint = (e: {
  * within a minute of the next person opening the page. Best-effort by design:
  * a failure here must never break the read that carried it.
  */
+/** How long a just-closed stop is left to its own after() append before the
+ *  retry is allowed to touch it. Two bridge round trips at slow-spell speed. */
+const FLUSH_GRACE_MS = 3 * 60 * 1000;
+
 export async function flushPendingDowntime(): Promise<{
   flushed: number; failed: number; alreadyThere: number;
 }> {
@@ -328,6 +332,13 @@ export async function flushPendingDowntime(): Promise<{
   );
 
   for (const e of pending) {
+    // A stop closed moments ago has its row being appended AFTER its own
+    // response (app/api/downtime/route.ts, 2026-09-10). Retrying it here
+    // before that append can land would give one stoppage two rows — the
+    // exact duplicate this function exists to prevent. Leave it for the
+    // next pass.
+    const ended = typeof e.endedAt === "number" ? e.endedAt : Date.parse(String(e.endedAt ?? ""));
+    if (Number.isFinite(ended) && Date.now() - ended < FLUSH_GRACE_MS) continue;
     // A stoppage rounded to zero minutes is a mis-tap, not a stoppage: !D
     // forbids a zero and inventing a 1 would be a measurement nobody made. The
     // Firestore document stays as the only record of the tap.

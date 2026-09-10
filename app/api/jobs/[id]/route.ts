@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecords, updateRecord, deleteRecord } from "@/lib/sheets";
+import { getRecords, updateRecord, deleteRecord, bridgeFeatures } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
@@ -141,11 +141,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // the same job code, or nothing is written — 409, same shape as
     // PATCH /api/issues/[row].
     const expect = body.expect;
+    let expectOpt: { field: string; value: string } | undefined;
     if (expect && typeof expect === "object") {
-      const fresh = await getRecords("jobs", { fresh: true });
-      const rec = fresh.records.find((r) => r.row === Number(id));
+      // Bridge version 7 checks the row INSIDE the write (one round trip);
+      // an older bridge gets the fresh read here, as before (two).
+      const feats = await bridgeFeatures();
+      const copy = await getRecords("jobs", { fresh: !feats.expect });
+      const rec = copy.records.find((r) => r.row === Number(id));
       const want = codeKey(String((expect as { code?: unknown }).code ?? ""));
       if (!rec || !want || codeKey(rec.code) !== want) return bad("row_changed", 409);
+      if (feats.expect) expectOpt = { field: "code", value: rec.code };
     }
 
     const changes: Record<string, string> = {};
@@ -182,7 +187,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       changes[key] =
         key === "status" ? jobStatusToSheet(val) : key === "priority" ? jobPriorityToSheet(val) : val;
     }
-    const res = await updateRecord("jobs", Number(id), changes);
+    const res = await updateRecord("jobs", Number(id), changes, expectOpt ? { expect: expectOpt } : {});
+    if (!res.ok && res.reason === "row_changed") return bad("row_changed", 409);
     return NextResponse.json(res, { status: res.ok ? 200 : 400 });
   } catch (err) {
     console.error(err);

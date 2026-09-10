@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import {
   getOpenDowntimeEvents,
   addDowntimeEvent,
@@ -73,7 +74,12 @@ export async function GET(req: NextRequest) {
     // Any stop whose row did not reach the sheet gets another go first, so the
     // list below shows it. Best-effort — a failure here must not take the read
     // down with it.
-    await flushPendingDowntime().catch(() => null);
+    // …AFTER the answer (2026-09-10): the retry costs a fresh «التوقفات» read
+    // plus one append per pending row, and it used to sit in front of the
+    // read the today-list was spinning on. A flushed row shows up one poll
+    // later (≤30 s); nothing is lost meanwhile — the event stays
+    // sheetSynced:false in Firestore until its row is confirmed.
+    after(() => flushPendingDowntime().catch(() => null));
     const [rows, open] = await Promise.all([
       loadDowntimeRecords(),
       getOpenDowntimeEvents(),
@@ -212,34 +218,45 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, minutes: res.minutes, already: false });
     }
 
-    const write = await appendDowntimeRow({
-      date: e.date,
-      machine: e.machine,
-      reason: e.reason,
-      minutes: e.minutes,
-      startedAt: e.startedAt,
-      endedAt: e.endedAt,
-      createdBy: e.createdBy,
-      estimated: e.estimated,
+    // The «التوقفات» row is written AFTER the answer (2026-09-10, "stopping
+    // downtime is super slow"): the append cost two bridge round trips inside
+    // the response — a fresh read of the tab for its header row, then the
+    // POST — 5–8 s normally and up to two minutes in a slow spell, while the
+    // stop was already committed in Firestore with sheetSynced:false on the
+    // line above. That flag is the guarantee: if this instance dies mid-append
+    // the next GET's flushPendingDowntime writes the row (after a grace window
+    // that keeps it from racing this very append). The phone hears «تم» the
+    // moment the stoppage is closed; the sheet catches up a few seconds later.
+    after(async () => {
+      const write = await appendDowntimeRow({
+        date: e.date,
+        machine: e.machine,
+        reason: e.reason,
+        minutes: e.minutes,
+        startedAt: e.startedAt,
+        endedAt: e.endedAt,
+        createdBy: e.createdBy,
+        estimated: e.estimated,
+      });
+      if (write.ok) {
+        await markDowntimeSynced(e.id).catch(() => {});
+      } else {
+        // The stop is safe in Firestore with sheetSynced:false and will be
+        // retried on the next GET — the minutes are not lost. Loud, because
+        // "the bridge is refusing writes" is not something to discover from a
+        // total that quietly stopped growing.
+        console.error(
+          `[downtime] stop recorded but «التوقفات» row not written for ${e.date} ${e.machine}: ${write.reason}`,
+        );
+      }
     });
-    if (write.ok) {
-      await markDowntimeSynced(e.id).catch(() => {});
-    } else {
-      // The stop is safe in Firestore with sheetSynced:false and will be
-      // retried on the next GET — the minutes are not lost. Loud, because
-      // "the bridge is refusing writes" is not something to discover from a
-      // total that quietly stopped growing.
-      console.error(
-        `[downtime] stop recorded but «التوقفات» row not written for ${e.date} ${e.machine}: ${write.reason}`,
-      );
-    }
     return NextResponse.json({
       ok: true,
       minutes: res.minutes,
       already: false,
       estimated: e.estimated,
       /** false ⇒ the row is queued for retry, not lost. */
-      written: write.ok,
+      queued: true, // the «التوقفات» row is written after this answer
     });
   } catch (err) {
     console.error(err);

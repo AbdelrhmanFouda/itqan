@@ -23,13 +23,13 @@ const TOKEN = "itqan_bridge_8fK2pXq9Lm4Rv7Tz1Wn6Bd";
 // feature list, so an OLD deployment degrades (no microphone on the issues
 // page) instead of failing saves. An old deployment answers `no_tab` to the
 // ping — measured 2026-09-09 — which the site reads as "no features".
-const BRIDGE_VERSION = 6; // 6 (2026-09-10): ?tabs=a,b,c multi-read
+const BRIDGE_VERSION = 7; // 6: ?tabs=a,b,c multi-read · 7: `expect` on updates (both 2026-09-10)
 
 function doGet(e) {
   if (!e || !e.parameter || e.parameter.token !== TOKEN) return _json({ error: "unauthorized" });
   // ?ping=1 → what this deployment can do (see BRIDGE_VERSION).
   if (e.parameter.ping) {
-    return _json({ ok: true, version: BRIDGE_VERSION, features: ["audio", "formulas", "createTab", "multi"] });
+    return _json({ ok: true, version: BRIDGE_VERSION, features: ["audio", "formulas", "createTab", "multi", "expect"] });
   }
   // ?audio=<Drive file id> → one voice note from «الأعطال», base64. Only files
   // inside the recordings folder are served: the id is the caller's only
@@ -117,6 +117,21 @@ function doPost(e) {
   // 8 September.
   if (body.updates) {
     const ups = body.updates;
+    // `expect`: [{row, col, value}] — the cells that must still hold these
+    // display values (whitespace folded) or NOTHING is written (version 7,
+    // 2026-09-10). The site used to read the whole tab before every write to
+    // check the row had not moved under it; that read is now this comparison,
+    // made here, atomically with the write.
+    if (body.expect && body.expect.length) {
+      const fold = function (v) { return String(v == null ? "" : v).replace(/\s+/g, " ").trim(); };
+      for (let i = 0; i < body.expect.length; i++) {
+        const x = body.expect[i];
+        const cur = fold(sheet.getRange(Number(x.row), Number(x.col)).getDisplayValue());
+        if (cur !== fold(x.value)) {
+          return _json({ ok: false, error: "row_changed", at: "R" + x.row + "C" + x.col, current: cur });
+        }
+      }
+    }
     // Snapshot first. Per cell rather than one bounding range: the rows in a
     // batch are scattered (an import writes rows 212 and 640), and the box
     // around them can be the whole tab.

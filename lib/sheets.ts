@@ -137,14 +137,16 @@ export const missingTabs = (): string[] => Array.from(MISSING_TABS);
  * copy read before the write (`writtenAt`). Without a tab — createTab, or a
  * caller that does not know — every tab is treated as written.
  */
-export async function invalidateSheetCache(tab?: string): Promise<void> {
+export async function invalidateSheetCache(tab?: string, keepLocal = false): Promise<void> {
   sheetInflight.clear();
   const now = Date.now();
   const tabs = tab ? tabsNamed(tab) : Object.values(ENTITIES).map((e) => e.tab);
   // A copy of the WRITTEN tab must never outlive the write; the other tabs'
   // copies are untouched by it (2026-09-10 — clearing all of them made every
-  // page cold after any save).
-  for (const t of tabs) lastGood.delete(t);
+  // page cold after any save). `keepLocal`: the caller is about to PATCH the
+  // local copy with exactly what it wrote (applyWriteToCopy), so the reload
+  // right after a save is served warm instead of paying a bridge round trip.
+  if (!keepLocal) for (const t of tabs) lastGood.delete(t);
   for (const t of tabs) writtenAt.set(t, now);
   try {
     // `updateTag` is the read-your-own-writes primitive, but it is Server
@@ -226,6 +228,44 @@ const lastGood = new Map<string, StaleCopy<SheetRead>>();
 const writtenAt = new Map<string, number>();
 const sharedKey = (tab: string) => `sheet:${tab}`;
 const sharedTag = (tab: string) => `sheet:${tab}`;
+
+/** A copy young enough to supply a tab's HEADER ROW and title to a write
+ *  (appendRecord, the expect-checked update) without a fresh read. Columns
+ *  move rarely and by the owner's hand; ten minutes is the exposure. The
+ *  bridge verifies the ROW itself when asked (`expect`), so this never decides
+ *  which row is written — only which column a field lands in. */
+const HEADER_REUSE_MS = 10 * 60 * 1000;
+async function recentRead(tab: string): Promise<SheetRead> {
+  const c = lastGood.get(tab);
+  if (c && Date.now() - c.at <= HEADER_REUSE_MS && c.at > (writtenAt.get(tab) ?? 0)) return c.value;
+  return fetchSheet(tab, true);
+}
+
+/**
+ * Apply a write this instance just made to its own copy of the tab, so the
+ * reload that follows every save is served warm (2026-09-10 — every save
+ * used to evict the copy and pay a full bridge round trip to rebuild it).
+ * Only what was written changes; a colleague's edit in the same window shows
+ * up on the next refresh. Never used for a deleteRow — rows shift.
+ */
+function applyWriteToCopy(tab: string, payload: Record<string, unknown>, row?: number): void {
+  const c = lastGood.get(tab);
+  if (!c) return;
+  const values = c.value.values.map((r) => r.slice());
+  const set = (r: number, col: number, v: string) => {
+    while (values.length < r) values.push([]);
+    const line = values[r - 1];
+    while (line.length < col) line.push("");
+    line[col - 1] = v;
+  };
+  if (Array.isArray(payload.updates)) {
+    for (const u of payload.updates as Cell[]) set(u.row, u.col, String(u.value ?? ""));
+  } else if (Array.isArray(payload.append) && row && row >= 2) {
+    (payload.append as unknown[]).forEach((v, i) => set(row, i + 1, String(v ?? "")));
+  } else return;
+  const at = Math.max(Date.now(), (writtenAt.get(tab) ?? 0) + 1);
+  lastGood.set(tab, { value: { title: c.value.title, values, at }, at });
+}
 
 function remember(tab: string) {
   return (r: SheetRead): SheetRead => {
@@ -578,12 +618,34 @@ const MASTER_TAB = "الرئيسي"; // resolved through TAB_ALIASES → falls b
 const MASTER_VIEWS = new Set(["molds", "products"]); // entities mirrored from Master
 const ID_KEYWORDS = ["id", "الرقم", "رقم", "no."]; // the key column in Master + its views
 
-export async function updateRecord(entity: string, row: number, changes: Record<string, string>): Promise<UpdateResult> {
+export type UpdateOptions = {
+  /**
+   * The row must still hold `value` in `field`'s column or NOTHING is written.
+   * Verified INSIDE the bridge POST (version 7), atomically with the write, so
+   * the pre-write fresh read the identity check used to need is gone: the
+   * columns come from a copy ≤10 min old (recentRead) and the bridge answers
+   * `row_changed` if the row moved. An older bridge answers
+   * `expect_unsupported` — the caller falls back to its fresh-read check.
+   */
+  expect?: { field: string; value: string };
+};
+
+export async function updateRecord(
+  entity: string, row: number, changes: Record<string, string>, opts: UpdateOptions = {},
+): Promise<UpdateResult> {
   if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   if (!Number.isFinite(row) || row < 2) return { ok: false, reason: "bad_row" };
   if (!changes || Object.keys(changes).length === 0) return { ok: true }; // nothing changed
+
+  if (opts.expect) {
+    if (MASTER_VIEWS.has(entity)) return { ok: false, reason: "master_view_not_supported" };
+    if (!(await bridgeFeatures()).expect) return { ok: false, reason: "expect_unsupported" };
+    const plan = await mapInTab(cfg, row, changes, opts.expect);
+    if ("reason" in plan) return { ok: false, reason: plan.reason };
+    return postUpdates(plan.tab, plan.updates, plan.before, plan.expect);
+  }
 
   const plan = MASTER_VIEWS.has(entity)
     ? await mapToMaster(cfg, row, changes)
@@ -733,8 +795,11 @@ async function mapToMaster(
 // Map fields → columns of the entity's OWN tab (for manual tabs like Clients).
 async function mapInTab(
   cfg: EntityConfig, row: number, changes: Record<string, string>,
-): Promise<{ tab: string; updates: Cell[]; before: string[] } | { reason: string }> {
-  const { values, title } = await fetchSheet(cfg.tab, true);
+  expect?: { field: string; value: string },
+): Promise<{ tab: string; updates: Cell[]; before: string[]; expect?: Cell[] } | { reason: string }> {
+  // With `expect` the bridge verifies the row; the read here only supplies
+  // the columns, so a copy ≤10 min old will do. Without it, fresh, as always.
+  const { values, title } = expect ? await recentRead(cfg.tab) : await fetchSheet(cfg.tab, true);
   if (values.length < 2) return { reason: "empty_sheet" };
   const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
   const updates: Cell[] = [];
@@ -746,7 +811,14 @@ async function mapInTab(
     updates.push({ row, col: ci + 1, value: value ?? "" });
   }
   if (updates.length === 0) return { reason: "no_fields" };
-  return { tab: title, updates, before: readCells(values, updates) };
+  let expectCells: Cell[] | undefined;
+  if (expect) {
+    const f = cfg.fields.find((x) => x.key === expect.field);
+    const ci = f ? colIndex(headers, f.keywords) : -1;
+    if (ci < 0) return { reason: `no_column:${expect.field}` };
+    expectCells = [{ row, col: ci + 1, value: expect.value }];
+  }
+  return { tab: title, updates, before: readCells(values, updates), expect: expectCells };
 }
 
 /** The display value each target cell held in a snapshot of the tab. */
@@ -779,8 +851,8 @@ function readCells(values: string[][], cells: Cell[]): string[] {
  * then this is the whole safety net, and it stays useful afterwards because it
  * also catches the bridge's at-least-once replies.
  */
-async function postUpdates(tab: string, updates: Cell[], before?: string[]): Promise<UpdateResult> {
-  const res = await postAction({ tab, updates });
+async function postUpdates(tab: string, updates: Cell[], before?: string[], expect?: Cell[]): Promise<UpdateResult> {
+  const res = await postAction(expect ? { tab, updates, expect } : { tab, updates });
   if (res.ok || !before || updates.length < 2) return res;
   // A new-enough bridge already rolled the batch back itself and told us so.
   // Its report is authoritative — it saw the underlying values — and anything
@@ -853,7 +925,7 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
     if (!res.ok) { await invalidateSheetCache(written); return { ok: false, reason: `http_${res.status}` }; }
     const text = await res.text();
     let json: {
-      ok?: boolean; error?: string;
+      ok?: boolean; error?: string; row?: number;
       // Only from a bridge new enough to roll a rejected batch back itself.
       at?: string | null; message?: string; rolledBack?: number; notRolledBack?: string[];
     };
@@ -861,8 +933,15 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
     // A stale copy after a successful write would show the crew their own
     // edit missing for the rest of the TTL — on this instance AND on the
     // region's shared copy (awaited: the page reloads the moment we answer).
-    if (json.ok) await invalidateSheetCache(written);
-    if (json.ok) return { ok: true };
+    if (json.ok) {
+      const patchable = !!written && (Array.isArray(payload.updates) || (Array.isArray(payload.append) && typeof json.row === "number"));
+      await invalidateSheetCache(written, patchable);
+      if (patchable) applyWriteToCopy(written as string, payload, json.row);
+      return { ok: true };
+    }
+    // Bridge version 7: the `expect` cells no longer hold what the caller
+    // saw — nothing was written. The row moved (or was edited) under us.
+    if (json.error === "row_changed") return { ok: false, reason: "row_changed" };
 
     // A deployed-since-2026-08-14 bridge tells us which cell it refused and
     // whether it undid the rest. Pass that through instead of flattening it to
@@ -909,7 +988,10 @@ export async function appendRecord(entity: string, values: Record<string, string
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
 
-  const { values: sheetVals, title } = await fetchSheet(cfg.tab, true);
+  // The header row and the tab's title are all an append needs from a read —
+  // a copy ≤10 min old supplies them (recentRead), so the append is ONE bridge
+  // round trip instead of two (2026-09-10; the downtime stop paid both).
+  const { values: sheetVals, title } = await recentRead(cfg.tab);
   if (sheetVals.length === 0) return { ok: false, reason: "no_tab" };
   const headers = sheetVals[findHeaderRow(sheetVals, cfg.fields)] ?? [];
   if (headers.length === 0) return { ok: false, reason: "no_headers" };
@@ -985,7 +1067,7 @@ export async function ensureHeaders(entity: string, headers: string[]): Promise<
 
 /** What the DEPLOYED bridge can do — an older deployment answers no_tab to
  *  `?ping=1` (measured 2026-09-09) and simply has no features. */
-export type BridgeFeatures = { audio: boolean };
+export type BridgeFeatures = { audio: boolean; multi: boolean; expect: boolean };
 let featuresSeen: { value: BridgeFeatures; at: number } | null = null;
 // A deployment does not lose a feature, so a yes can stand for a while; a no
 // must expire quickly so the site lights up minutes after the owner deploys.
@@ -993,12 +1075,12 @@ const FEATURES_YES_MS = 30 * 60 * 1000;
 const FEATURES_NO_MS = 2 * 60 * 1000;
 
 export async function bridgeFeatures(): Promise<BridgeFeatures> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false };
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false, multi: false, expect: false };
   const now = Date.now();
   if (featuresSeen && now - featuresSeen.at < (featuresSeen.value.audio ? FEATURES_YES_MS : FEATURES_NO_MS)) {
     return featuresSeen.value;
   }
-  let audio = false;
+  let audio = false, multi = false, expect = false;
   try {
     const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
     // Every file call below is bounded: the bridge is ONE serial queue, and a
@@ -1007,11 +1089,14 @@ export async function bridgeFeatures(): Promise<BridgeFeatures> {
     // ahead of the issues list — a 20 s probe delayed the page by 20 s.
     const res = await fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(20_000) });
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; features?: unknown };
-    audio = json.ok === true && Array.isArray(json.features) && json.features.includes("audio");
+    const feats = json.ok === true && Array.isArray(json.features) ? (json.features as unknown[]) : [];
+    audio = feats.includes("audio");
+    multi = feats.includes("multi");
+    expect = feats.includes("expect");
   } catch {
     audio = false;
   }
-  featuresSeen = { value: { audio }, at: now };
+  featuresSeen = { value: { audio, multi, expect }, at: now };
   return featuresSeen.value;
 }
 
