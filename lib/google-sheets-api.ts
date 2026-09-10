@@ -62,8 +62,13 @@ export function sheetsApiState(): { configured: boolean; broken: string | null }
 }
 
 export class SheetsApiError extends Error {
-  constructor(public status: number, message: string, public auth = false) {
+  status: number;
+  /** The token was refused — nothing was sent to the workbook. */
+  auth: boolean;
+  constructor(status: number, message: string, auth = false) {
     super(message);
+    this.status = status;
+    this.auth = auth;
   }
 }
 
