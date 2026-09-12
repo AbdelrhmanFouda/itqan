@@ -10,7 +10,8 @@ import {
 import { sumCavities } from "@/lib/cavities";
 import { resolveMoldNumber } from "@/lib/mold-number";
 import {
-  codeKey, duplicateCodes, isOpenOrder, machineMatch, parseQuantity, type DuplicateCode,
+  codeKey, duplicateCodes, isOpenOrder, machineMatch, parseQuantity, registryLabelsFrom,
+  type DuplicateCode,
 } from "@/lib/work-orders";
 
 /**
@@ -161,14 +162,7 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   // identity everywhere; built from code + tonnage when J is blank, the same
   // way /api/machines builds it. Never hardcoded: the registry has been
   // renumbered four times.
-  const registryLabels = machinesTab.records
-    .map((m) => {
-      const label = (m.label || "").trim();
-      if (label) return label;
-      const code = (m.code || "").trim(), ton = latinDigits((m.name || "").trim());
-      return code && ton ? `${code} — ${ton}` : "";
-    })
-    .filter(Boolean);
+  const registryLabels = registryLabelsFrom(machinesTab.records);
 
   // Product → standards, first row wins (same as the sheet's VLOOKUP) — and a
   // count per name, because "first row wins" is only honest while the name is

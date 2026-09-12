@@ -135,6 +135,12 @@ export function parseQuantity(raw: string | number | undefined | null): ParsedQu
   return { value: null, unreadable: true, raw: text };
 }
 
+/**
+ * A due date the tab accepts: ISO yyyy-mm-dd. Both jobs routes refuse anything
+ * else with `missing_due` — one constant so they cannot drift apart.
+ */
+export const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /* ------------------------------- machines -------------------------------- */
 
 /**
@@ -151,6 +157,28 @@ export function machineLabelKey(label: string | undefined | null): string {
     .replace(/\s+/g, "")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * The registry's labels, built the one way — «الماكينات»!J («PQ 7 — 100») when
+ * it is filled, else code + tonnage, the same composite /api/machines writes.
+ * Never hardcoded: the registry has been renumbered four times.
+ *
+ * Takes a structural row so this module stays import-free. The index signature
+ * matters: callers pass a SheetRecord ({row:number} & Record<string,string>),
+ * and TypeScript's weak-type check rejects that against an all-optional shape.
+ */
+export type RegistryRow = { label?: string; code?: string; name?: string; [k: string]: unknown };
+
+export function registryLabelsFrom(rows: readonly RegistryRow[]): string[] {
+  return rows
+    .map((m) => {
+      const label = (m.label || "").trim();
+      if (label) return label;
+      const code = (m.code || "").trim(), ton = latinDigits((m.name || "").trim());
+      return code && ton ? `${code} — ${ton}` : "";
+    })
+    .filter(Boolean);
 }
 
 export type MachineMatch = { matched: boolean; label: string };

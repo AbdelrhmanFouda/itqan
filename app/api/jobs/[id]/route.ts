@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 import { resolveMoldNumber } from "@/lib/mold-number";
 import { masterRowByName, masterRowForDisplay } from "@/lib/master-lookup";
-import { codeKey, machineMatch, parseQuantity } from "@/lib/work-orders";
+import { codeKey, machineMatch, parseQuantity, registryLabelsFrom, ISO_DAY } from "@/lib/work-orders";
 import { latinDigits } from "@/lib/dates";
 import { num } from "@/lib/run-join";
 
@@ -170,12 +170,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         continue;
       }
       if (key === "materialIssued" && val.trim() && parseQuantity(val).unreadable) return bad("bad_material_issued");
-      if (key === "dueDate" && val.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return bad("missing_due");
+      if (key === "dueDate" && val.trim() && !ISO_DAY.test(val.trim())) return bad("missing_due");
       if (key === "machine" && val.trim()) {
         const machines = await getRecords("machines");
-        const labels = machines.records
-          .map((m) => (m.label || "").trim() || (m.code && m.name ? `${m.code.trim()} — ${latinDigits(m.name.trim())}` : ""))
-          .filter(Boolean);
+        const labels = registryLabelsFrom(machines.records);
         const mm = machineMatch(latinDigits(val.trim()), labels);
         if (!mm.matched) return bad("bad_machine");
         changes[key] = mm.label;

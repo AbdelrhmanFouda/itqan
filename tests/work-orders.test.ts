@@ -10,7 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   OPEN_ORDER_STATUSES, codeKey, compareByDue, daysLate, duplicateCodes, foldWord, groupOrders,
-  hasNoDue, isLate, isOpenOrder, machineLabelKey, machineMatch, nextActions, parseQuantity, statusAfter,
+  hasNoDue, isLate, isOpenOrder, machineLabelKey, machineMatch, nextActions, parseQuantity,
+  registryLabelsFrom, statusAfter, ISO_DAY,
 } from "../lib/work-orders.ts";
 import { JOB_STATUSES } from "../lib/prod-meta.ts";
 
@@ -103,6 +104,27 @@ test("the live legacy cells do not match — tonnage alone is ambiguous and is n
     assert.equal(m.label, v, "an unmatched value is shown as it is, never rewritten");
   }
   assert.deepEqual(machineMatch("", REGISTRY), { matched: false, label: "" });
+});
+
+test("registryLabelsFrom: «الماكينات»!J wins, code + tonnage is the fallback, blanks drop out", () => {
+  assert.deepEqual(
+    registryLabelsFrom([
+      { label: "PQ 7 — 100", code: "PQ 7", name: "100" },
+      { label: "  ", code: "PQ 11", name: "180" },
+      { code: "PQ 12", name: "١٨٠" },      // Arabic-Indic tonnage folds to Latin
+      { label: "", code: "", name: "220" }, // no code → no identity, dropped
+      { label: "", code: "PQ 9", name: "" },
+    ]),
+    ["PQ 7 — 100", "PQ 11 — 180", "PQ 12 — 180"],
+  );
+  assert.deepEqual(registryLabelsFrom([]), []);
+});
+
+test("ISO_DAY accepts yyyy-mm-dd only — both jobs routes refuse anything else as missing_due", () => {
+  assert.equal(ISO_DAY.test("2026-09-09"), true);
+  for (const v of ["", "09/09/2026", "2026-9-9", "2026-09-09T00:00", "غير متاح / N/A"]) {
+    assert.equal(ISO_DAY.test(v), false, v);
+  }
 });
 
 /* ------------------------------- lateness --------------------------------- */

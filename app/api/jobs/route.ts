@@ -3,7 +3,7 @@ import { appendRecord, getRecords } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
-import { codeKey, machineMatch, parseQuantity } from "@/lib/work-orders";
+import { codeKey, machineMatch, parseQuantity, registryLabelsFrom, ISO_DAY } from "@/lib/work-orders";
 import { masterRowForDisplay } from "@/lib/master-lookup";
 import { latinDigits } from "@/lib/dates";
 
@@ -37,7 +37,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * A new work order (2026-09-09 brief). Four things are refused here that the
@@ -78,9 +77,7 @@ export async function POST(req: NextRequest) {
     // The registry (cached is fine — it changes rarely, and it is re-read
     // within 45s), then Master and the tab itself as they are RIGHT NOW.
     const [machines, jobs] = await Promise.all([getRecords("machines"), getRecords("jobs", { fresh: true })]);
-    const labels = machines.records
-      .map((m) => (m.label || "").trim() || (m.code && m.name ? `${m.code.trim()} — ${latinDigits(m.name.trim())}` : ""))
-      .filter(Boolean);
+    const labels = registryLabelsFrom(machines.records);
     const mm = machineMatch(latinDigits(s("machine")), labels);
     if (!mm.matched) return bad("bad_machine");
 
