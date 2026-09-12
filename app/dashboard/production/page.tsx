@@ -5,7 +5,7 @@ import { pd } from "@/lib/i18n.prod";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
-import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
+import { DOWNTIME_REASONS, SHIFTS, downtimeReasonLabel, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { moldKey } from "@/lib/mold-number";
@@ -271,7 +271,7 @@ export default function ProductionPage() {
                   <span className="text-gray-500">
                     {fmt(r.downtimeMin)} {p.overview.minutes}
                     {r.downtimeReason && r.downtimeReason !== "None"
-                      ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                      ? ` · ${downtimeReasonLabel(r.downtimeReason, isAr)}`
                       : ""}
                   </span>
                 ) : null}
@@ -311,7 +311,7 @@ export default function ProductionPage() {
                   <td className="px-4 py-3 text-gray-500 tabular-nums">
                     {r.downtimeMin ? `${fmt(r.downtimeMin)} ${p.overview.minutes}` : "—"}
                     {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"
-                      ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                      ? ` · ${downtimeReasonLabel(r.downtimeReason, isAr)}`
                       : ""}
                   </td>
                   <td className="px-4 py-3 text-gray-500">{r.operator || "—"}</td>

@@ -155,6 +155,22 @@ const reasonFor = (key: string) => ALL_DOWNTIME_REASONS.find((r) => r.key === ke
 /** Canonical downtime key → the crew's Arabic wording (falls back to the key). */
 export const downtimeReasonAr = (key: string): string => reasonFor(key)?.ar ?? key;
 
+/**
+ * The label for a downtime key on ANY display surface, in either language.
+ *
+ * Use this everywhere a stored reason is shown. The older pattern —
+ * `localize(key, DOWNTIME_REASONS, p.runs.reasons)` — resolves only the seven
+ * values of the sheet's own dropdown, so the four capture-only keys ("Setup",
+ * "No material", "Sprue broken", …) printed as bare English on Arabic pages.
+ * This is total over ALL_DOWNTIME_REASONS and falls back to the raw key, which
+ * is the honest answer for a word nobody has ever defined.
+ */
+export const downtimeReasonLabel = (key: string, isAr: boolean): string => {
+  const r = reasonFor(key);
+  if (!r) return key;
+  return isAr ? r.ar : r.en;
+};
+
 /* ------------------ the sheet's Arabic ⇄ the app's keys -------------------- */
 /**
  * «التوقفات» stores the crew's ARABIC wording; everything downstream — the

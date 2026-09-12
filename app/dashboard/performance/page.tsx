@@ -2,7 +2,7 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { DOWNTIME_REASONS, localize } from "@/lib/prod-meta";
+import { downtimeReasonLabel } from "@/lib/prod-meta";
 import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } from "@/components/dashboard/charts";
 import { formatDate } from "@/lib/dates";
@@ -274,7 +274,7 @@ export default function PerformancePage() {
   }, [period, thisMonth]);
   useEffect(() => { loadReview(); }, [loadReview]);
 
-  const reasonLabel = (r: string) => localize(r, DOWNTIME_REASONS, p.runs.reasons);
+  const reasonLabel = (r: string) => downtimeReasonLabel(r, isAr);
   const pf0 = (x: number) => `${Math.round(x * 100)}%`;
   const action = (b: Bottleneck) =>
     b.factor === "downtime"

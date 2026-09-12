@@ -7,6 +7,7 @@ import { normalizeDate, latinDigits } from "@/lib/dates";
 import { sumCavities } from "@/lib/cavities";
 import { resolveScrap } from "@/lib/scrap";
 import { distributeDowntime } from "@/lib/downtime";
+import { isPlannedDowntime, isOrganisationalDowntime } from "@/lib/prod-meta";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 // The run-join rules are SHARED with /api/runs and lib/jobs.ts — see lib/run-join.ts.
 import {
@@ -250,16 +251,35 @@ export async function buildOEEData(month: string | null) {
 
   // Downtime Pareto (excludes "None") — sheet column + phone capture, each at
   // its own recorded reason.
+  //
+  // Each bar also carries whether that reason is SCHEDULED work or a failure,
+  // and whether it is organisational (a rota problem, not a machine problem).
+  // The flags are metadata on the reason itself (lib/prod-meta.ts) — the worker
+  // is never asked and never sees them; they exist so the monthly report can
+  // say what share of the stoppage time was avoidable. Until 2026-09-12 nothing
+  // set them, so every line of the report read «غير مخطط», «تغيير الاسطمبة»
+  // included, and the two summary lines below were unreachable.
   const reasonMap: Record<string, number> = {};
+  let plannedDowntimeMin = 0;
+  let unplannedDowntimeMin = 0;
+  let organisationalDowntimeMin = 0;
   const addPareto = (reason: string, minutes: number) => {
     if (minutes > 0 && reason && reason !== "None") {
       reasonMap[reason] = (reasonMap[reason] || 0) + minutes;
+      if (isPlannedDowntime(reason)) plannedDowntimeMin += minutes;
+      else unplannedDowntimeMin += minutes;
+      if (isOrganisationalDowntime(reason)) organisationalDowntimeMin += minutes;
     }
   };
   for (const r of runs) addPareto(r.downtimeReason || "None", num(r.sheetDowntimeMin));
   for (const e of capturedInPeriod) addPareto(e.reason, e.minutes);
   const downtime = Object.entries(reasonMap)
-    .map(([reason, minutes]) => ({ reason, minutes }))
+    .map(([reason, minutes]) => ({
+      reason,
+      minutes,
+      planned: isPlannedDowntime(reason),
+      organisational: isOrganisationalDowntime(reason),
+    }))
     .sort((a, b) => b.minutes - a.minutes);
 
   // Daily trend — OEE factors + scrap per ISO day. Undated runs are excluded
@@ -361,6 +381,11 @@ export async function buildOEEData(month: string | null) {
     overspeedMin: Math.round(overall.overspeedMin),
     goodUnits: overall.goodUnits,
     scrapUnits: overall.scrapUnits,
+    // The planned/unplanned split of the Pareto above, and the organisational
+    // slice of it. Same set of minutes as `downtime` — "None" excluded.
+    plannedDowntimeMin: Math.round(plannedDowntimeMin),
+    unplannedDowntimeMin: Math.round(unplannedDowntimeMin),
+    organisationalDowntimeMin: Math.round(organisationalDowntimeMin),
   };
 
   return {

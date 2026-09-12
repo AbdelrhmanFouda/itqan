@@ -4,7 +4,7 @@ import { buildOEEData } from "@/lib/oee-data";
 import {
   cairoDay, generateReview, readCachedReview, writeCachedReview, rulesReview,
 } from "@/lib/ai-review";
-import { buildReportDraft, type DraftOEE, type DraftReview } from "@/lib/report-draft";
+import { buildReportDraft, type DraftReview } from "@/lib/report-draft";
 import { downtimeReasonAr } from "@/lib/prod-meta";
 
 /**
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     }
 
     const review: DraftReview = envelope?.review ?? rulesReview(data);
-    const draft = buildReportDraft(month, data as unknown as DraftOEE, review, downtimeReasonAr);
+    const draft = buildReportDraft(month, data, review, downtimeReasonAr);
 
     return NextResponse.json({
       ok: true,

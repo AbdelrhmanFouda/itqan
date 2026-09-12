@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
-import { DOWNTIME_REASONS, SHIFTS, localize, options } from "@/lib/prod-meta";
+import { DOWNTIME_REASONS, SHIFTS, downtimeReasonLabel, localize, options } from "@/lib/prod-meta";
 import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
 import { Plus } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
@@ -238,7 +238,7 @@ export default function QualityPage() {
                     <span className="text-gray-500">
                       {fmt(r.downtimeMin)} {a.quality.min}
                       {r.downtimeReason && r.downtimeReason !== "None"
-                        ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                        ? ` · ${downtimeReasonLabel(r.downtimeReason, isAr)}`
                         : ""}
                     </span>
                   ) : null}
@@ -282,7 +282,7 @@ export default function QualityPage() {
                     <td className="px-4 py-3 text-gray-500 tabular-nums">
                       {r.downtimeMin ? `${fmt(r.downtimeMin)} ${a.quality.min}` : "—"}
                       {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"
-                        ? ` · ${localize(r.downtimeReason, DOWNTIME_REASONS, p.runs.reasons)}`
+                        ? ` · ${downtimeReasonLabel(r.downtimeReason, isAr)}`
                         : ""}
                     </td>
                     <td className="px-4 py-3 text-gray-500">{r.operator || "—"}</td>
