@@ -81,21 +81,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "overview": return p.nav.overview;
       case "machines": return p.nav.machines;
       case "molds": return p.nav.molds;
-      case "products": return isAr ? "المنتجات" : "Products";
+      case "products": return p.nav.products;
       case "jobs": return p.nav.jobs;
       case "production": return p.nav.production;
-      case "downtime": return isAr ? "التوقفات" : "Downtime";
-      case "issues": return isAr ? "الأعطال" : "Issues";
-      case "storage": return isAr ? "المخزن" : "Storage";
-      case "stock": return isAr ? "المتاح في المخزن" : "Available stock";
-      case "performance": return isAr ? "الأداء" : "Performance";
-      case "assistant": return isAr ? "المساعد الذكي" : "Assistant";
+      case "downtime": return p.nav.downtime;
+      case "issues": return p.nav.issues;
+      case "storage": return p.nav.storage;
+      case "stock": return p.nav.stock;
+      case "performance": return p.nav.performance;
+      case "assistant": return p.nav.assistant;
       case "finance": return a.roles.finance;
       case "quality": return a.roles.quality;
       case "sales": return a.roles.sales;
       case "reports": return tr.dashboard.reports;
       case "clients": return tr.dashboard.clients;
-      case "approvals": return isAr ? "الموافقات" : "Approvals";
+      case "approvals": return p.nav.approvals;
     }
   };
 
