@@ -50,6 +50,19 @@ export const pd = {
       langToggle: "عربي",
       refresh: "Refresh",
     },
+    // The /machines registry page's own strings (moved out of the page
+    // 2026-09-12 so the shape test can see them).
+    machines: {
+      subtitle: "From the machines tab — one row per physical machine, identified by its code",
+      addRow: "Add machine", code: "Machine code (e.g. PQPI 16)", machine: "Tonnage (e.g. 220)",
+      manufacturer: "Manufacturer", status: "Status", statuses: ["Active", "Inactive"] as const,
+      statusLabel: { Active: "Active", Inactive: "Inactive" } as Record<string, string>,
+      shiftLength: "Shift length (min)", product: "Current product (optional)",
+      noCode: "no code — add one in the sheet", min: "min",
+      empty: "No machines found in the sheet's machines tab yet.",
+      unreachable: "Couldn't reach the data sheet. Check the connection and reload.",
+      saveFailed: "Saving failed — check the Apps Script deployment.",
+    },
     overview: {
       title: "Production Overview",
       subtitle: "Live snapshot of the shop floor",
@@ -356,6 +369,17 @@ export const pd = {
       stillLoading: "ما زال يقرأ من الجدول…",
       langToggle: "EN",
       refresh: "تحديث",
+    },
+    machines: {
+      subtitle: "من تبويب machines — صف لكل ماكينة فعلية، وهويتها هي الكود",
+      addRow: "إضافة ماكينة", code: "كود الماكينة (مثال PQPI 16)", machine: "الحمولة (مثال 220)",
+      manufacturer: "الشركة المصنعة", status: "الحالة", statuses: ["Active", "Inactive"] as const,
+      statusLabel: { Active: "تعمل", Inactive: "متوقفة" } as Record<string, string>,
+      shiftLength: "طول الوردية (دقيقة)", product: "المنتج الحالي (اختياري)",
+      noCode: "بدون كود — أضفه في الشيت", min: "د",
+      empty: "لا توجد ماكينات في تبويب machines بعد.",
+      unreachable: "تعذّر الوصول إلى جدول البيانات. تحقق من الاتصال وأعد التحميل.",
+      saveFailed: "فشل الحفظ — تحقق من نشر Apps Script.",
     },
     overview: {
       title: "نظرة عامة على الإنتاج",

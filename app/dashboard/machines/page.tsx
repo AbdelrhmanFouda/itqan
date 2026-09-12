@@ -39,31 +39,6 @@ type Data = { machines: MachineInfo[]; writable: boolean; configured: boolean };
 /** The last registry this device saw — rendered before the network is touched. */
 const LAST_KEY = "itqan.machines.last";
 
-const L = {
-  en: {
-    subtitle: "From the machines tab — one row per physical machine, identified by its code",
-    addRow: "Add machine", code: "Machine code (e.g. PQPI 16)", machine: "Tonnage (e.g. 220)",
-    manufacturer: "Manufacturer", status: "Status", statuses: ["Active", "Inactive"] as const,
-    statusLabel: { Active: "Active", Inactive: "Inactive" } as Record<string, string>,
-    shiftLength: "Shift length (min)", product: "Current product (optional)",
-    noCode: "no code — add one in the sheet", min: "min",
-    empty: "No machines found in the sheet's machines tab yet.",
-    unreachable: "Couldn't reach the data sheet. Check the connection and reload.",
-    saveFailed: "Saving failed — check the Apps Script deployment.",
-  },
-  ar: {
-    subtitle: "من تبويب machines — صف لكل ماكينة فعلية، وهويتها هي الكود",
-    addRow: "إضافة ماكينة", code: "كود الماكينة (مثال PQPI 16)", machine: "الحمولة (مثال 220)",
-    manufacturer: "الشركة المصنعة", status: "الحالة", statuses: ["Active", "Inactive"] as const,
-    statusLabel: { Active: "تعمل", Inactive: "متوقفة" } as Record<string, string>,
-    shiftLength: "طول الوردية (دقيقة)", product: "المنتج الحالي (اختياري)",
-    noCode: "بدون كود — أضفه في الشيت", min: "د",
-    empty: "لا توجد ماكينات في تبويب machines بعد.",
-    unreachable: "تعذّر الوصول إلى جدول البيانات. تحقق من الاتصال وأعد التحميل.",
-    saveFailed: "فشل الحفظ — تحقق من نشر Apps Script.",
-  },
-};
-
 const statusColor = (s: string) =>
   /inactive|متوقفة|خارج/i.test(s) ? "text-gray-400"
     : /active|تعمل/i.test(s) ? "text-green-500"
@@ -72,8 +47,8 @@ const statusColor = (s: string) =>
 export default function MachinesPage() {
   const { lang } = useLang();
   const tr = t[lang];
-  const l = L[lang];
   const p = pd[lang];
+  const l = p.machines;
   const isAr = lang === "ar";
   usePageTitle(tr.dashboard.machines);
 

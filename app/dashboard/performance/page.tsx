@@ -2,6 +2,7 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
+import { pf as pfText } from "@/lib/i18n.performance";
 import { downtimeReasonLabel } from "@/lib/prod-meta";
 import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard } from "@/components/dashboard/charts";
@@ -77,118 +78,6 @@ type ReviewPayload = {
   configured: boolean;
 };
 
-const L = {
-  en: {
-    title: "Performance — OEE", subtitle: "Overall Equipment Effectiveness, by machine",
-    thisMonth: "This month", allTime: "All time",
-    oee: "OEE", availability: "Availability", performance: "Performance", quality: "Quality",
-    byMachine: "OEE by machine", worstFirst: "constraint first",
-    limiting: "Limiting factor", coverage: "standard coverage", noStd: "no cycle standard",
-    downtime: "Downtime by reason", scrapTrend: "Scrap-rate trend", min: "min",
-    empty: "No production runs in this period yet. Log runs to see OEE.",
-    tryAll: "There may be data in other months — view All time.",
-    unreachable: "Couldn't reach the data sheet. Check the connection and reload.",
-    factor: { availability: "Availability", performance: "Performance", quality: "Quality" },
-    bottleneck: "Bottleneck Board", fixFirst: "fix this first",
-    lostCap: "lost", recover: "recover", ofOutput: "of this machine's output",
-    factorName: { downtime: "Downtime", performance: "Slow cycle", quality: "Scrap" },
-    act: {
-      downtime: (m: string, r: string) => `Cut downtime on ${m} — biggest cause: ${r}.`,
-      performance: (m: string) => `${m} is running slower than its standard — check tooling, material and operator.`,
-      quality: (m: string) => `High scrap on ${m} — review the mold's known defects.`,
-    },
-    trend: "Daily trend", trendHint: "availability · quality · OEE",
-    lossTitle: "Where capacity is lost", lossHint: "minutes per machine",
-    lossNames: { down: "Downtime", perf: "Slow cycle", qual: "Scrap" },
-    assumed: "assumed — scrap not logged yet",
-    noDowntimeLogged: "no downtime logged yet",
-    needsMold: "needs product names on runs",
-    needsStd: "needs cycle+cavities in Master",
-    readiness: "Data readiness — what to log to make OEE true",
-    readinessIntro: "Each OEE factor only counts what is actually logged. Missing pieces:",
-    rMold: (n: number, t: number) => `${n}/${t} runs name their product or mold — required for Performance and full OEE`,
-    rScrap: (n: number, t: number) => `${n}/${t} runs log scrap units — Quality is assumed 100% where missing`,
-    rDown: (n: number, t: number) => `${n}/${t} runs log downtime — Availability assumes no stops where missing`,
-    rMachines: (d: number) => `Machines tab not found — planned time uses the default ${d} min shift`,
-    rMachinesPartial: (n: number, d: number) => `${n} runs fell back to the default ${d} min shift — add those machines to the Machines tab`,
-    rStd: (k: number, s: number) => `${k}/${s} logged molds have a cycle standard in Master`,
-    rStubs: (n: number) => `${n} empty rows in the Production tab were ignored`,
-    rMissingTabs: (names: string) => `The workbook has no tab named ${names} — anything it fed is missing, not zero`,
-    fillMaster: "Fill cycle + cavities in Master for:", units: "pcs",
-    explainTitle: "How is this number calculated?",
-    explainIntro: "OEE = Availability × Performance × Quality. Every input below comes straight from the sheet:",
-    exA: "Availability = run time ÷ planned time",
-    exP: "Performance = ideal time for the units made ÷ run time (only products with a Master standard)",
-    exQ: "Quality = good units ÷ total units",
-    measured: "measured", assumedChip: "assumed — not logged",
-    minutes: "min",
-    overspeedNote: (m: number) =>
-      `${m} “impossible” ideal minutes were capped: some products out-produce their Master standard, which used to inflate this number. Their wrong standards are listed below.`,
-    suspectsTitle: "Wrong cycle standards in Master",
-    suspectsIntro: "These products produced far more than their standard allows — the Master cycle time is wrong (or Good counts are over-reported). Until fixed, their speed score is capped at 100%:",
-    sProduct: "Product", sMasterCyc: "Master cycle", sImplied: "actual implies", sUnits: "units", sRatio: "ran at",
-    aiTitle: "AI Review", aiDaily: "regenerated daily",
-    aiUpdated: "Updated", aiRegen: "Regenerate", aiRegenerating: "Regenerating…",
-    aiActions: "Do next",
-    aiRules: "Built-in analysis (no AI key set — add GEMINI_API_KEY or ANTHROPIC_API_KEY for an AI-written review)",
-    aiUnavailable: "Couldn't load the review.",
-  },
-  ar: {
-    title: "الأداء — OEE", subtitle: "الفعالية الكلية للمعدات، لكل ماكينة",
-    thisMonth: "هذا الشهر", allTime: "كل الوقت",
-    oee: "OEE", availability: "الإتاحة", performance: "الأداء", quality: "الجودة",
-    byMachine: "OEE لكل ماكينة", worstFirst: "الأضعف أولاً",
-    limiting: "العامل المُقيِّد", coverage: "تغطية المعايير", noStd: "لا يوجد معيار دورة",
-    downtime: "التوقف حسب السبب", scrapTrend: "اتجاه نسبة الهالك", min: "د",
-    empty: "لا توجد تشغيلات إنتاج في هذه الفترة بعد. سجّل التشغيلات لرؤية OEE.",
-    tryAll: "قد توجد بيانات في أشهر أخرى — اعرض كل الوقت.",
-    unreachable: "تعذّر الوصول إلى جدول البيانات. تحقق من الاتصال وأعد التحميل.",
-    factor: { availability: "الإتاحة", performance: "الأداء", quality: "الجودة" },
-    bottleneck: "لوحة الاختناقات", fixFirst: "ابدأ بإصلاح هذا",
-    lostCap: "مفقودة", recover: "استرجاع", ofOutput: "من إنتاج هذه الماكينة",
-    factorName: { downtime: "توقف", performance: "بطء الدورة", quality: "هالك" },
-    act: {
-      downtime: (m: string, r: string) => `قلّل توقف ${m} — أكبر سبب: ${r}.`,
-      performance: (m: string) => `${m} تعمل أبطأ من المعدل القياسي — افحص الاسطمبة والخامة والعامل.`,
-      quality: (m: string) => `هالك مرتفع على ${m} — راجع عيوب الاسطمبة المعروفة.`,
-    },
-    trend: "الاتجاه اليومي", trendHint: "الإتاحة · الجودة · OEE",
-    lossTitle: "أين تُفقد الطاقة الإنتاجية", lossHint: "دقائق لكل ماكينة",
-    lossNames: { down: "توقف", perf: "بطء الدورة", qual: "هالك" },
-    assumed: "افتراضي — الهالك غير مسجَّل بعد",
-    noDowntimeLogged: "لا يوجد توقف مسجَّل بعد",
-    needsMold: "يحتاج اسم المنتج في التشغيلات",
-    needsStd: "يحتاج زمن الدورة والكافيتي في Master",
-    readiness: "جاهزية البيانات — ما يجب تسجيله ليكون OEE حقيقيًا",
-    readinessIntro: "كل عامل في OEE يُحسب فقط مما يُسجَّل فعلاً. الناقص:",
-    rMold: (n: number, t: number) => `${n}/${t} تشغيلات بها اسم المنتج أو كود الاسطمبة — مطلوب لحساب الأداء وOEE الكامل`,
-    rScrap: (n: number, t: number) => `${n}/${t} تشغيلات مسجَّل بها الهالك — الجودة تُفترض 100% عند غيابه`,
-    rDown: (n: number, t: number) => `${n}/${t} تشغيلات مسجَّل بها التوقف — الإتاحة تفترض عدم وجود توقف عند غيابه`,
-    rMachines: (d: number) => `تبويب Machines غير موجود — الزمن المخطط يستخدم وردية افتراضية ${d} دقيقة`,
-    rMachinesPartial: (n: number, d: number) => `${n} تشغيلات استخدمت الوردية الافتراضية ${d} دقيقة — أضف هذه الماكينات إلى تبويب Machines`,
-    rStd: (k: number, s: number) => `${k}/${s} من الاسطمبات المسجَّلة لها معيار دورة في Master`,
-    rStubs: (n: number) => `تم تجاهل ${n} صفوف فارغة في تبويب Production`,
-    rMissingTabs: (names: string) => `لا يوجد في الملف تبويب باسم ${names} — ما كان يعتمد عليه ناقص، وليس صفرًا`,
-    fillMaster: "أكمل زمن الدورة + الكافيتي في Master لـ:", units: "قطعة",
-    explainTitle: "كيف يُحسب هذا الرقم؟",
-    explainIntro: "OEE = الإتاحة × الأداء × الجودة. كل رقم أدناه يأتي مباشرة من الشيت:",
-    exA: "الإتاحة = زمن التشغيل ÷ الزمن المخطط",
-    exP: "الأداء = الزمن المثالي للقطع المنتَجة ÷ زمن التشغيل (فقط المنتجات التي لها معيار في Master)",
-    exQ: "الجودة = القطع السليمة ÷ إجمالي القطع",
-    measured: "مُقاس", assumedChip: "افتراضي — غير مسجَّل",
-    minutes: "د",
-    overspeedNote: (m: number) =>
-      `تم تحييد ${m} دقيقة مثالية «مستحيلة»: بعض المنتجات تنتج أكثر مما يسمح به معيارها في Master، وكان هذا يضخّم الرقم سابقًا. معاييرها الخاطئة مذكورة أدناه.`,
-    suspectsTitle: "معايير دورة خاطئة في Master",
-    suspectsIntro: "هذه المنتجات أنتجت أكثر بكثير مما يسمح به معيارها — زمن الدورة في Master خاطئ (أو عدد السليم مبالغ فيه). حتى يتم التصحيح، سرعتها محسوبة بحد أقصى 100%:",
-    sProduct: "المنتج", sMasterCyc: "دورة Master", sImplied: "الفعلي يعني", sUnits: "قطعة", sRatio: "اشتغل بنسبة",
-    aiTitle: "المراجعة الذكية", aiDaily: "تتجدد يوميًا",
-    aiUpdated: "آخر تحديث", aiRegen: "إعادة التوليد", aiRegenerating: "جارٍ التوليد…",
-    aiActions: "الخطوات التالية",
-    aiRules: "تحليل مدمج (لا يوجد مفتاح AI — أضف GEMINI_API_KEY أو ANTHROPIC_API_KEY لمراجعة مكتوبة بالذكاء الاصطناعي)",
-    aiUnavailable: "تعذّر تحميل المراجعة.",
-  },
-};
 
 /**
  * The OEE set is the slowest read on the site — /api/oee reads four tabs and
@@ -218,7 +107,7 @@ function Bar({ value, max, tone }: { value: number; max: number; tone: string })
 export default function PerformancePage() {
   const { lang } = useLang();
   const p = pd[lang];
-  const t = L[lang];
+  const t = pfText[lang];
   const isAr = lang === "ar";
   usePageTitle(t.title);
   const thisMonth = new Date().toISOString().slice(0, 7);
