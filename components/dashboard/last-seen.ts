@@ -61,3 +61,19 @@ export async function timedJson<T>(
     return { ok: false, status: 0, timedOut };
   }
 }
+
+/* ------------------------- bounded promise (2026-09-10) -------------------------
+ * The same bound for work that is NOT a fetch — the approvals page reads the
+ * user list through the Firestore SDK, and an unresolved promise there left
+ * the page spinning exactly the way a stalled bridge did. Shaped like
+ * `timedJson` so both feed the same `<LoadError/>`.
+ */
+export function bounded<T>(work: Promise<T>, ms = LOAD_TIMEOUT_MS): Promise<Timed<T>> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, status: 0, timedOut: true }), ms);
+    work.then(
+      (data) => { clearTimeout(timer); resolve({ ok: true, data }); },
+      () => { clearTimeout(timer); resolve({ ok: false, status: 0, timedOut: false }); },
+    );
+  });
+}

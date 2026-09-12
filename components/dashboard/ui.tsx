@@ -150,3 +150,81 @@ export function Spinner({ text }: { text: string }) {
     </div>
   );
 }
+
+/**
+ * A read that failed, said once (cleanup batch 7). Twenty-six copies of this
+ * box had grown across seventeen files with three different retry buttons and
+ * the same two sentences. The rule behind all of them is unchanged: a failed
+ * refresh NEVER blanks what is on screen — it adds a line with a way out.
+ *
+ *  - "inline" — a red line under a header, with the numbers still below it
+ *  - "banner" — the same, boxed, where the line stands alone above a list
+ *  - "empty"  — nothing on screen at all: the dashed box that replaces the page
+ */
+export function LoadError({
+  text,
+  note,
+  retry,
+  onRetry,
+  loading,
+  icon,
+  variant = "inline",
+  className = "",
+}: {
+  /** Already localized: p.common.timedOut or p.common.loadError. */
+  text: string;
+  /** An extra half-sentence beside it (p.common.slowSheet). */
+  note?: string;
+  /** The retry label, p.common.retry. */
+  retry: string;
+  onRetry: () => void;
+  loading?: boolean;
+  /** Show the spinning refresh glyph inside the button. */
+  icon?: ReactNode;
+  variant?: "inline" | "banner" | "empty";
+  className?: string;
+}) {
+  if (variant === "empty") {
+    return (
+      <div className={`bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600 ${className}`}>
+        <p>{text}</p>
+        <div className="mt-3 flex justify-center">
+          <Btn variant="outline" onClick={onRetry} disabled={loading}>
+            {icon}
+            {retry}
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+  if (variant === "banner") {
+    return (
+      <div className={`rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700 ${className}`}>
+        <span>{text}</span>
+        {note && <span className="text-xs text-red-600/80">{note}</span>}
+        <button
+          onClick={onRetry}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+        >
+          {icon}
+          {retry}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <p className={`text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 ${className}`}>
+      <span>{text}</span>
+      {note && <span className="text-xs text-red-600/80">{note}</span>}
+      <button
+        onClick={onRetry}
+        disabled={loading}
+        className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+      >
+        {icon}
+        {retry}
+      </button>
+    </p>
+  );
+}
