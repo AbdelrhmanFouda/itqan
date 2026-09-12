@@ -236,3 +236,25 @@ export function formatDate(iso: string, lang: "ar" | "en"): string {
     day: "numeric", month: "short", timeZone: "UTC",
   });
 }
+
+/**
+ * Today in Cairo as "YYYY-MM-DD" — the factory day, and the sheet's date
+ * convention everywhere.
+ *
+ * Ten derivations of "today" lived in the pages and one route before cleanup
+ * batch 7: `new Date().toISOString().slice(0,10)` (UTC — WRONG between 00:00
+ * and 03:00 Cairo, when it still reads yesterday) and
+ * `toLocaleDateString("en-CA")` (the browser's own zone, right only for a
+ * phone set to Cairo). This is the one rule. lib/issues.ts keeps its own
+ * `cairoToday` because node --test loads that module directly and it cannot
+ * import this one; tests/dates.test.ts pins the two equal.
+ */
+export function todayIso(now: number = Date.now()): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date(now));
+  } catch {
+    return new Date(now).toISOString().slice(0, 10);
+  }
+}

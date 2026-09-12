@@ -33,6 +33,7 @@ import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { nameKey } from "@/lib/master-lookup";
+import { todayIso } from "@/lib/dates";
 import {
   codeKey, daysLate, groupOrders, hasNoDue, isLate, nextActions, statusAfter, type OrderAction,
 } from "@/lib/work-orders";
@@ -69,7 +70,6 @@ const blank = {
   priority: "Normal", instructions: "",
 };
 const firstNum = (v: string) => { const m = String(v ?? "").match(/[0-9]+(?:\.[0-9]+)?/); return m ? Number(m[0]) : 0; };
-const todayIso = () => new Date().toLocaleDateString("en-CA");
 
 export default function JobsPage() {
   const { lang } = useLang();

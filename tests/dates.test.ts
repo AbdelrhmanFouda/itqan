@@ -9,8 +9,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeDate, latinDigits, factoryDay,
-  parseClockMinutes, formatClock, factoryDayInstant, factoryDaySpan,
+  parseClockMinutes, formatClock, factoryDayInstant, factoryDaySpan, todayIso,
 } from "../lib/dates.ts";
+import { cairoToday } from "../lib/issues.ts";
 
 test("unambiguous day-first: first part exceeds 12", () => {
   assert.equal(normalizeDate("13/07/2026"), "2026-07-13");
@@ -173,4 +174,24 @@ test("factoryDaySpan leaves an ordinary same-shift stoppage alone", () => {
   const d = factoryDaySpan("2026-08-12", null, parseClockMinutes("10:00"));
   assert.equal(d.startedAt, 0);
   assert.ok(d.endedAt > 0);
+});
+
+/* --------------------------- today, in Cairo ----------------------------- */
+
+test("todayIso is the Cairo day, not the UTC one", () => {
+  // Cairo runs UTC+3 in August: 22:30 UTC on the 12th is already 01:30 on the
+  // 13th on the floor. The UTC form every page used before cleanup batch 7
+  // read yesterday for those hours, every night.
+  assert.equal(todayIso(Date.parse("2026-08-12T22:30:00Z")), "2026-08-13");
+  assert.equal(todayIso(Date.parse("2026-08-12T20:30:00Z")), "2026-08-12");
+});
+
+test("lib/issues.ts cairoToday and lib/dates.ts todayIso agree", () => {
+  // They cannot import each other — node --test loads both directly, and the
+  // tsconfig gives no import form that tsc and node both resolve. So the two
+  // copies are pinned equal here instead.
+  for (const iso of ["2026-08-12T22:30:00Z", "2026-01-01T00:00:00Z", "2026-06-30T12:00:00Z"]) {
+    const at = Date.parse(iso);
+    assert.equal(cairoToday(at), todayIso(at));
+  }
 });

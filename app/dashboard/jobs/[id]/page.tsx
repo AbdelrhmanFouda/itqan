@@ -14,6 +14,7 @@ import {
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { fmtNum } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 /**
  * One job (sheet row in the `jobs` tab) + the production runs credited to it
@@ -87,7 +88,7 @@ export default function JobDetailPage() {
   const [stdErr, setStdErr] = useState<"" | "save" | "identity">("");
   const [stdForm, setStdForm] = useState<Record<string, string>>({});
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const blankRun = useCallback(
     () => ({
       date: today, shift: SHIFTS[0], machine: "", goodUnits: "", scrapUnits: "",

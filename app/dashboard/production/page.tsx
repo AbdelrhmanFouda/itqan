@@ -11,6 +11,7 @@ import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { moldKey } from "@/lib/mold-number";
 import { fmtNum } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -41,7 +42,7 @@ export default function ProductionPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const ym = today.slice(0, 7);
 
   const blank = useCallback(

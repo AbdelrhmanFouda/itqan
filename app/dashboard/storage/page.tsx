@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import type { StorageBalance, StorageData, StorageMovement } from "@/lib/storage";
 import { fill, fmtNum } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
 const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
@@ -75,7 +76,6 @@ type Status = "" | "in" | "zero" | "neg";
 type ItemType = "" | "منتج" | "خامة";
 type MoveType = "إيداع" | "سحب";
 
-const todayStr = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, local tz
 /** The sheet writes «خامة»/«منتج»; be tolerant of a stray «خامات» or a space. */
 const isMaterial = (t: string | undefined) => String(t ?? "").trim().startsWith("خام");
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -88,7 +88,7 @@ type FormState = {
 };
 const blankForm = (): FormState => ({
   moveType: "إيداع", itemType: "منتج", item: "", client: "", forClient: "", loc: "",
-  date: todayStr(), qtyCount: "", qtyKg: "", grams: "", loss: "", notes: "",
+  date: todayIso(), qtyCount: "", qtyKg: "", grams: "", loss: "", notes: "",
 });
 
 export default function StoragePage() {

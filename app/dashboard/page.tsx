@@ -9,6 +9,7 @@ import { Stat, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui"
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { fmtNum } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 type Machine = { name: string; status: string };
 type Job = { id: string; code: string; status: string; dueDate: string };
@@ -178,7 +179,7 @@ export default function DashboardPage() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const ym = today.slice(0, 7);
 
   // «…» while a list has not answered — a zero here would read as a fact.

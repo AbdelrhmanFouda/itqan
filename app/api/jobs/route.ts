@@ -6,6 +6,7 @@ import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-me
 import { codeKey, machineMatch, parseQuantity, registryLabelsFrom, ISO_DAY } from "@/lib/work-orders";
 import { masterRowForDisplay } from "@/lib/master-lookup";
 import { latinDigits } from "@/lib/dates";
+import { todayIso } from "@/lib/dates";
 
 // Jobs live in the sheet's `jobs` tab (they used to be in Firestore).
 // GET returns jobs with auto-computed production progress.
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
       product: found.row.name || s("product"),
       moldCode: s("moldCode"),
       qty: String(qty.value),
-      startDate: s("startDate") || new Date().toISOString().slice(0, 10),
+      startDate: s("startDate") || todayIso(),
       dueDate: s("dueDate"),
       // «أوامر العمل»!K and !L are validated Arabic lists — translate on the way in.
       status: jobStatusToSheet(status),

@@ -24,6 +24,7 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { fmtNum, numLocale } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
 type Run = { machine: string; date: string; goodUnits: number; scrapUnits: number; downtimeMin: number };
@@ -156,7 +157,7 @@ export default function FinancePage() {
 
   const jobList = jobs ?? [];
   const runList = runs ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const ym = today.slice(0, 7);
   const monthRuns = runList.filter((r) => (r.date || "").startsWith(ym));
   const goodAll = runList.reduce((s, r) => s + (r.goodUnits || 0), 0);

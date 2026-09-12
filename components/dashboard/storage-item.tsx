@@ -23,6 +23,7 @@ import {
   caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
 } from "@/lib/storage-filter";
 import { fill, fmtNum } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 type Strings = (typeof sd)["en"] | (typeof sd)["ar"];
 const fmt = (n: number, isAr: boolean) => fmtNum(n, isAr, 2);
@@ -229,7 +230,7 @@ export function MoveModal({
   // fresh form — no reset effect needed.
   const [toLoc, setToLoc] = useState("");
   const [qty, setQty] = useState(avail > 0 ? String(avail) : "");
-  const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [date, setDate] = useState(todayIso);
   const [notes, setNotes] = useState("");
   const [localErr, setLocalErr] = useState("");
   if (!line) return null;
