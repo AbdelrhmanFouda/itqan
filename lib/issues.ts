@@ -233,14 +233,19 @@ export function matchesIssue(i: IssueLike, f: IssueFilter): boolean {
   return q.split(" ").every((term) => hay.includes(term));
 }
 
-/** «إسطمبة» finds «اسطمبه»: alef and ta-marbuta variants fold together, tatweel and harakat drop. */
+/** «إسطمبة» finds «اسطمبه»: alef, ya/hamza and ta-marbuta variants fold together, tatweel and
+ *  harakat drop, and both Arabic-Indic and Persian digits fold to Latin. Kept in step with
+ *  normalizeText (lib/storage-filter), itemKey (lib/stock) and normalizeArabic (lib/prod-meta)
+ *  by the corpus test in tests/latin-digits.test.ts — the four copies are deliberate (no imports). */
 export function foldArabic(s: string): string {
   return (s || "")
     .replace(/[ً-ْـ]/g, "")
     .replace(/[أإآ]/g, "ا")
     .replace(/ة/g, "ه")
-    .replace(/ى/g, "ي")
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+    .replace(/[ىئ]/g, "ي") // ى ئ → ي
+    .replace(/ؤ/g, "و") // ؤ → و
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)); // Persian ۳ folds too
 }
 
 /** How many issues sit in each status — the three tiles at the top. */

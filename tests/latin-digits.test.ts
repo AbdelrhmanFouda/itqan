@@ -13,6 +13,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { LOCALE_AR, LOCALE_EN, numLocale, fmtInt, hasArabicDigits } from "../lib/format.ts";
+import { latinDigits } from "../lib/dates.ts";
+import { latinDigits as moldDigits } from "../lib/mold-number.ts";
+import { latinDigits as runJoinDigits } from "../lib/run-join.ts";
+import { latinDigits as workOrderDigits } from "../lib/work-orders.ts";
+import { downtimeKey } from "../lib/downtime.ts";
+import { resolveScrap } from "../lib/scrap.ts";
+import { nameKey } from "../lib/master-lookup.ts";
+import { itemKey } from "../lib/stock.ts";
+import { normalizeText } from "../lib/storage-filter.ts";
+import { foldArabic } from "../lib/issues.ts";
+import { normalizeArabic } from "../lib/prod-meta.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -63,4 +74,83 @@ test("no source file formats through a bare \"ar-EG\" any more", () => {
 test("lib/dates.ts (import-free) repeats the same locale literal", () => {
   const src = fs.readFileSync(path.join(ROOT, "lib", "dates.ts"), "utf8");
   assert.ok(src.includes(`"${LOCALE_AR}"`), "lib/dates.ts must format Arabic dates with the Latin-digit locale");
+});
+
+/* ------------------------- the ten latinDigits copies ---------------------- */
+
+/**
+ * Ten modules fold Arabic-Indic and Persian digits to Latin with their own
+ * private copy of the rule. The duplication is DELIBERATE: `npm test` loads
+ * each of these modules directly with node --test, and tsconfig (moduleResolution
+ * bundler, noEmit, no allowImportingTsExtensions) gives no import form that both
+ * tsc and node resolve — so a shared lib/digits.ts would break the suite. This
+ * corpus is what keeps the ten copies honest: every one of the 20 digit
+ * characters must fold the same way lib/dates.ts folds it.
+ */
+const AR_INDIC = [..."٠١٢٣٤٥٦٧٨٩"];
+const PERSIAN = [..."۰۱۲۳۴۵۶۷۸۹"];
+const DIGITS = [...AR_INDIC, ...PERSIAN];
+
+test("all ten latinDigits copies agree with lib/dates.ts over the 20 digit characters", () => {
+  for (const d of DIGITS) {
+    const want = latinDigits(d);
+    assert.match(want, /^[0-9]$/, `lib/dates.ts left «${d}» unfolded`);
+
+    assert.equal(moldDigits(d), want, `lib/mold-number.ts on «${d}»`);
+    assert.equal(runJoinDigits(d), want, `lib/run-join.ts on «${d}»`);
+    assert.equal(workOrderDigits(d), want, `lib/work-orders.ts on «${d}»`);
+    // inline copies, reached through the function that owns each one
+    assert.equal(downtimeKey("2026-09-10", d), `2026-09-10|${want}`, `lib/downtime.ts on «${d}»`);
+    assert.equal(resolveScrap({ scrapUnits: `1${d}` }).scrapUnits, Number(`1${want}`), `lib/scrap.ts on «${d}»`);
+    assert.equal(nameKey(d), want, `lib/master-lookup.ts on «${d}»`);
+    assert.equal(itemKey(d), want, `lib/stock.ts on «${d}»`);
+    assert.equal(normalizeText(d), want, `lib/storage-filter.ts on «${d}»`);
+    assert.equal(foldArabic(d), want, `lib/issues.ts on «${d}»`);
+  }
+});
+
+test("…and on a whole cell, not just single characters", () => {
+  assert.equal(latinDigits("٢٠٢٦/٠٩/١٠"), "2026/09/10");
+  assert.equal(workOrderDigits("۳۱۰۰ كجم"), "3100 كجم");
+  assert.equal(normalizeText("٣ كيلو"), normalizeText("۳ كيلو"));
+});
+
+/* ------------------------- the four Arabic folds --------------------------- */
+
+/**
+ * Four modules fold an Arabic string to a comparison key, again import-free and
+ * again for the node --test reason above: foldArabic (lib/issues.ts),
+ * normalizeArabic (lib/prod-meta.ts), normalizeText (lib/storage-filter.ts) and
+ * itemKey (lib/stock.ts). They must agree on the orthography, so «إسطمبة» finds
+ * «اسطمبه» wherever the user is typing.
+ *
+ * Two differences are deliberate and therefore NOT in the corpus:
+ *   • normalizeArabic uniquely strips bidi/zero-width marks and terminal
+ *     punctuation — it matches sheet cells that carry RTL marks (REASON_BY_TEXT).
+ *   • foldArabic does not lowercase or collapse whitespace; its callers
+ *     lowercase before calling it, so the corpus is already lower-case and
+ *     single-spaced.
+ */
+const FOLD_CORPUS = [
+  "إسطمبة", "اسطمبه", "آلة", "ىوم",   // alef / ya / ta-marbuta spellings
+  "مسئول", "مؤشر",                     // ئ → ي and ؤ → و
+  "تَشْغِيل", "اسـطمبة",                 // harakat and tatweel drop
+  "٣ كيلو", "۳ كيلو",                   // Arabic-Indic and Persian digits
+  "abs اسود", "m50",                   // Latin passes through
+];
+
+test("the four Arabic folds agree on the spellings that matter", () => {
+  for (const s of FOLD_CORPUS) {
+    const want = normalizeText(s);
+    assert.equal(itemKey(s), want, `lib/stock.ts itemKey on «${s}»`);
+    assert.equal(normalizeArabic(s), want, `lib/prod-meta.ts normalizeArabic on «${s}»`);
+    assert.equal(foldArabic(s).toLowerCase(), want, `lib/issues.ts foldArabic on «${s}»`);
+  }
+  // the point of the fold, stated once
+  for (const fold of [normalizeText, itemKey, normalizeArabic, (x: string) => foldArabic(x).toLowerCase()]) {
+    assert.equal(fold("إسطمبة"), fold("اسطمبه"));
+    assert.equal(fold("مسئول"), fold("مسيول"));
+    assert.equal(fold("مؤشر"), fold("موشر"));
+    assert.equal(fold("٣"), fold("۳"));
+  }
 });

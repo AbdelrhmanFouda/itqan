@@ -200,8 +200,11 @@ export function normalizeArabic(s: string | undefined): string {
     .replace(/[ً-ْٰـ]/g, "")     // harakat, superscript alef, tatweel
     .replace(/[​-‏؜﻿]/g, "")     // zero-width + bidi marks
     .replace(/[أإآٱ]/g, "ا") // أ إ آ ٱ → ا
-    .replace(/ى/g, "ي")                  // ى → ي
+    .replace(/[ىئ]/g, "ي")                // ى ئ → ي
+    .replace(/ؤ/g, "و")                  // ؤ → و
     .replace(/ة/g, "ه")                  // ة → ه
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)) // ٠-٩ → 0-9
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)) // Persian ۰-۹ → 0-9
     .replace(/[؟?!.،,;:]/g, "")          // ؟ ? ! . ، , ; :
     .replace(/\s+/g, " ")
     .trim()
