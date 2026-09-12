@@ -26,7 +26,7 @@ import {
   AUDIO_BITS_PER_SECOND, MAX_AUDIO_SECONDS, formatSeconds, pickRecordingMime, type AudioRef,
 } from "@/lib/issues";
 
-export type RecorderStrings = {
+type RecorderStrings = {
   recording: string; tapToStop: string; stopRecording: string; maxHint: string; preview: string;
   deleteRecording: string; rerecord: string; play: string; pause: string; loadingAudio: string;
   cantPlay: string; openInDrive: string; audioLoadFailed: string; voiceNote: string;
@@ -34,8 +34,8 @@ export type RecorderStrings = {
 };
 
 export type Recording = { blob: Blob; mime: string; seconds: number; url: string };
-export type RecorderError = "" | "denied" | "insecure" | "unsupported" | "failed";
-export type RecorderState = "idle" | "requesting" | "recording" | "done";
+type RecorderError = "" | "denied" | "insecure" | "unsupported" | "failed";
+type RecorderState = "idle" | "requesting" | "recording" | "done";
 
 /* ------------------------------- the hook -------------------------------- */
 
@@ -134,7 +134,7 @@ export function useAudioRecorder(maxSeconds: number = MAX_AUDIO_SECONDS) {
 
   return { state, error, seconds, recording, start, stop, reset };
 }
-export type Recorder = ReturnType<typeof useAudioRecorder>;
+type Recorder = ReturnType<typeof useAudioRecorder>;
 
 /* ------------------------------- the player ------------------------------ */
 
@@ -142,7 +142,7 @@ const iconBtn =
   "shrink-0 inline-flex items-center justify-center rounded-full min-w-11 min-h-11 w-11 h-11 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1 transition-colors";
 
-export function Player({
+function Player({
   url, strings, seconds, link, autoPlay,
 }: {
   url: string;

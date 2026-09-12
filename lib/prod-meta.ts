@@ -260,19 +260,6 @@ export const toneClasses: Record<Tone, string> = {
   blue: "bg-blue-50 text-blue-700 border-blue-200",
 };
 
-export function machineTone(s: string): Tone {
-  if (s === "Operational") return "green";
-  if (s === "Under Maintenance") return "amber";
-  if (s === "Out of Service") return "red";
-  return "gray";
-}
-
-export function moldTone(s: string): Tone {
-  if (s === "Active") return "green";
-  if (s === "In Repair") return "amber";
-  return "gray";
-}
-
 // "Delivered" is retained here (and in the DONE sets) only so legacy rows still
 // render correctly — it is not a value the app writes any more.
 export function jobTone(s: string): Tone {

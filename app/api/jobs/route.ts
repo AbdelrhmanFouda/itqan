@@ -23,9 +23,9 @@ export async function GET(req: NextRequest) {
     // the Firestore open-event query are skipped here (2026-09-09, speed):
     // four bridge tabs instead of five on a cold instance. The detail route
     // still joins downtime for its runs table.
-    const { jobs, writable, configured, duplicates, registryLabels, readAt } = await loadJobs({ downtime: false });
+    const { jobs, writable, configured, duplicates, readAt } = await loadJobs({ downtime: false });
     return NextResponse.json({
-      jobs, writable, configured, duplicates, registryLabels,
+      jobs, writable, configured, duplicates,
       // How old the numbers are: a served copy keeps its read time. The page
       // says «البيانات من قبل X» past a minute and refetches once on its own,
       // because the server has already started refreshing the copy.
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ jobs: [], writable: false, configured: false, duplicates: [], registryLabels: [], meta: { dataAgeMs: 0 } });
+    return NextResponse.json({ jobs: [], writable: false, configured: false, duplicates: [], meta: { dataAgeMs: 0 } });
   }
 }
 

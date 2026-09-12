@@ -8,7 +8,7 @@
 import { ReactNode } from "react";
 import { LOCALE_AR } from "@/lib/format";
 
-export const oeeColor = (x: number) => (x >= 0.85 ? "#16a34a" : x >= 0.6 ? "#d97706" : "#dc2626");
+const oeeColor = (x: number) => (x >= 0.85 ? "#16a34a" : x >= 0.6 ? "#d97706" : "#dc2626");
 const AXIS = "#6b7280", GRID = "#f3f4f6";
 
 const fmtLocale = (isAr: boolean) => (isAr ? LOCALE_AR : "en-US");
@@ -47,7 +47,7 @@ export function DonutGauge({
 
 /* ------------------------------- Trend lines ------------------------------ */
 
-export type TrendSeries = { name: string; color: string; values: (number | null)[]; dashed?: boolean };
+type TrendSeries = { name: string; color: string; values: (number | null)[]; dashed?: boolean };
 
 export function TrendChart({
   series, labels, isAr, yMax = 1, yFmt, height = 190,
@@ -159,7 +159,7 @@ export function Pareto({
 
 /* ------------------------- Stacked loss bars/machine ---------------------- */
 
-export type LossRow = { label: string; down: number; perf: number; qual: number };
+type LossRow = { label: string; down: number; perf: number; qual: number };
 
 export function LossBars({
   rows, isAr, names, unit,
@@ -210,8 +210,8 @@ export function LossBars({
 
 /* ------------------------------ Section shell ----------------------------- */
 
-export function ChartCard({ title, hint, isAr, children }: {
-  title: string; hint?: string; isAr: boolean; children: ReactNode;
+export function ChartCard({ title, hint, children }: {
+  title: string; hint?: string; children: ReactNode;
 }) {
   return (
     <div className="mb-10">

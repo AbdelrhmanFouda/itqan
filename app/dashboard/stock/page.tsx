@@ -32,7 +32,7 @@ import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHori
 type Resp = {
   ok: boolean; configured: boolean; jobsOk: boolean; rows: StockRow[];
   meta: {
-    catalog: boolean; catalogRows: number; openOrders: number; asOf: string;
+    catalog: boolean; catalogRows: number; asOf: string;
     dataAgeMs: number; storageAgeMs: number; storageStale: boolean;
   };
 };

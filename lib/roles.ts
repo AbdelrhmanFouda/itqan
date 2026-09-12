@@ -5,7 +5,7 @@
 
 // The single bootstrap owner. This account is always granted the owner role
 // (mirror this value in firestore.rules).
-export const OWNER_EMAIL = "abdelrhman.2003.16@gmail.com";
+const OWNER_EMAIL = "abdelrhman.2003.16@gmail.com";
 
 export type Role =
   | "owner" | "manager" | "worker" | "production" | "quality"
@@ -24,7 +24,7 @@ export const REQUESTABLE_ROLES: Role[] = [
 export const ALL_ROLES: Role[] = ["owner", ...REQUESTABLE_ROLES];
 
 // Roles that can see and do everything: the owner plus any manager.
-export const FULL_ACCESS: Role[] = ["owner", "manager"];
+const FULL_ACCESS: Role[] = ["owner", "manager"];
 export function hasFullAccess(role: Role): boolean {
   return FULL_ACCESS.includes(role);
 }

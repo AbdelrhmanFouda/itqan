@@ -167,10 +167,10 @@ export default function AssistantPage() {
       </div>
 
       {gate === "no-access" ? (
-        <Notice tone="warn">{a.noAccess}</Notice>
+        <Notice>{a.noAccess}</Notice>
       ) : (
         <>
-          {gate === "no-key" && <Notice tone="warn">{a.notConfigured}</Notice>}
+          {gate === "no-key" && <Notice>{a.notConfigured}</Notice>}
 
           {/* messages */}
           <div className="flex-1 overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-4">
@@ -279,7 +279,7 @@ function SystemLine({ text }: { text: string }) {
   );
 }
 
-function Notice({ tone, children }: { tone: "warn"; children: React.ReactNode }) {
+function Notice({ children }: { children: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-start gap-2 text-sm rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-3.5 py-2.5">
       <AlertTriangle size={15} className="mt-0.5 shrink-0" />

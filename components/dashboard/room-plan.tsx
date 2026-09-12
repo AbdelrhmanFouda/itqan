@@ -138,7 +138,7 @@ function chipTone(active: boolean, negative: boolean, count: number): string {
 
 /* --------------------------------- pieces --------------------------------- */
 
-export function LocChip({
+function LocChip({
   label, count, negative, active, onClick,
 }: {
   label: string; count: number; negative: boolean; active: boolean; onClick: () => void;

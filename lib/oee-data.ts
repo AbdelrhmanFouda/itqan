@@ -1,4 +1,4 @@
-import { getRecords, missingTabs, type SheetRecord } from "@/lib/sheets";
+import { getRecords, missingTabs } from "@/lib/sheets";
 import {
   computeOEE, oeeBy, oeeByMachine, weakestFactor, topLoss, suspectStandards,
   type RunInput, type MoldStandard,

@@ -52,7 +52,7 @@ type Job = {
 };
 type Duplicate = { key: string; code: string; ids: string[] };
 type Data = {
-  jobs: Job[]; writable: boolean; configured: boolean; duplicates: Duplicate[]; registryLabels: string[];
+  jobs: Job[]; writable: boolean; configured: boolean; duplicates: Duplicate[];
   /** Age of the sheet copy behind the numbers; absent on a device snapshot. */
   meta?: { dataAgeMs: number };
 };

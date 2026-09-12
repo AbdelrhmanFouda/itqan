@@ -12,7 +12,7 @@ import { navFor, canAccess, landingFor, type NavKey } from "@/lib/roles";
 import { Spinner } from "@/components/dashboard/ui";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
-  BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Clock, Warehouse,
+  BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Warehouse,
   TimerOff, Boxes,
 } from "lucide-react";
 

@@ -215,8 +215,6 @@ export function oeeBy(
 
 export const oeeByMachine = (runs: RunInput[], standards: Map<string, MoldStandard>) =>
   oeeBy(runs, (r) => r.machine, standards);
-export const oeeByMold = (runs: RunInput[], standards: Map<string, MoldStandard>) =>
-  oeeBy(runs, (r) => r.mold, standards);
 
 /** Name the weakest OEE factor — the thing to attack first. Used by the bottleneck view. */
 export function weakestFactor(o: OEEResult): "availability" | "performance" | "quality" | null {

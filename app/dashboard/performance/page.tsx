@@ -634,7 +634,7 @@ export default function PerformancePage() {
 
           {/* Daily trend — availability / quality / OEE */}
           {data.trend.length > 1 && (
-            <ChartCard title={t.trend} hint={t.trendHint} isAr={isAr}>
+            <ChartCard title={t.trend} hint={t.trendHint}>
               <TrendChart
                 isAr={isAr}
                 labels={trendLabels}
@@ -649,7 +649,7 @@ export default function PerformancePage() {
 
           {/* Where capacity is lost — stacked minutes per machine */}
           {lossRows.length > 0 && (
-            <ChartCard title={t.lossTitle} hint={t.lossHint} isAr={isAr}>
+            <ChartCard title={t.lossTitle} hint={t.lossHint}>
               <LossBars rows={lossRows} isAr={isAr} unit={t.min} names={t.lossNames} />
             </ChartCard>
           )}
@@ -691,7 +691,7 @@ export default function PerformancePage() {
 
           {/* Downtime Pareto */}
           {data.downtime.length > 0 && (
-            <ChartCard title={t.downtime} isAr={isAr}>
+            <ChartCard title={t.downtime}>
               <Pareto
                 isAr={isAr}
                 unit={t.min}
@@ -702,7 +702,7 @@ export default function PerformancePage() {
 
           {/* Scrap-rate trend */}
           {data.trend.length > 1 && r && r.withScrap > 0 && (
-            <ChartCard title={t.scrapTrend} isAr={isAr}>
+            <ChartCard title={t.scrapTrend}>
               <TrendChart
                 isAr={isAr}
                 labels={trendLabels}

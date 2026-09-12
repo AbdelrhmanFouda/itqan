@@ -39,7 +39,7 @@ import {
 /** A stoppage as «التوقفات» records it. Structurally a superset of
  *  `DowntimeEvent`, so consumers that were typed against the Firestore shape
  *  keep working unchanged. */
-export type DowntimeRecord = {
+type DowntimeRecord = {
   id: string;
   /** the 1-based «التوقفات» row, so a wrong figure can be pointed at its cell. */
   row: number;
@@ -58,7 +58,7 @@ export type DowntimeRecord = {
   notes: string;
 };
 
-export type DowntimeTotals = {
+type DowntimeTotals = {
   /** `date|machine` → stopped minutes. */
   byKey: Map<string, number>;
   /** `date|machine` → the reason with the most minutes that day. */
@@ -89,7 +89,7 @@ export const EMPTY_DOWNTIME: DowntimeTotals = {
 };
 
 /** Inclusive date bounds covering a whole month, or a wide window when unscoped. */
-export function monthRange(month: string | null): { from: string; to: string } {
+function monthRange(month: string | null): { from: string; to: string } {
   if (month && /^\d{4}-\d{2}$/.test(month)) return { from: `${month}-01`, to: `${month}-31` };
   return { from: "0000-01-01", to: "9999-12-31" };
 }
@@ -112,7 +112,7 @@ const num = (v: string | undefined): number => {
  * N/A» into "" — which for the minutes column means "not recorded", and the row
  * is dropped by `countsTowardDowntime` rather than counted as a zero.
  */
-export function shapeDowntimeRow(r: SheetRecord): DowntimeRecord {
+function shapeDowntimeRow(r: SheetRecord): DowntimeRecord {
   const date = normalizeDate(r.date);
   const startClockMin = parseClockMinutes(r.start);
   // Both clock times resolved as a PAIR — see factoryDaySpan() for why an end
@@ -223,7 +223,7 @@ export async function loadDowntimeTotals(month: string | null = null): Promise<D
 /* -------------------------------- writing --------------------------------- */
 
 /** What a finished stoppage needs to become a «التوقفات» row. */
-export type DowntimeRowInput = {
+type DowntimeRowInput = {
   date: string;            // ISO factory day
   machine: string;         // «الماكينات»!J label
   reason: string;          // canonical key — translated to Arabic on the way in

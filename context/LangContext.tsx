@@ -23,12 +23,12 @@ import { writeLangCookie } from "@/lib/lang-cookie";
  * `LANG_STORAGE_KEY`, the cookie, and the inline script in app/layout.tsx must
  * all agree.
  */
-export const LANG_STORAGE_KEY = "itqan.lang";
+const LANG_STORAGE_KEY = "itqan.lang";
 
 const isLang = (v: unknown): v is Lang => v === "ar" || v === "en";
 
 /** Read the stored choice. Safe on the server, where there is no window. */
-export function storedLang(): Lang | null {
+function storedLang(): Lang | null {
   if (typeof window === "undefined") return null;
   try {
     const v = window.localStorage.getItem(LANG_STORAGE_KEY);

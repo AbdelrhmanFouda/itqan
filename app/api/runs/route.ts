@@ -60,13 +60,7 @@ function shape(r: SheetRecord) {
     rowCheck: r.rowCheck ?? "",
     openCavities: num(r.openCavities),
     downtimeMin: num(r.downtimeMin),
-    // The run's own «زمن التوقف» value, kept after captured minutes are added
-    // to downtimeMin so the join below can still tell the two sources apart.
-    // downtimeSource ("none" | "sheet" | "capture") was the consumer-facing
-    // form of the same distinction; both are internal-only now.
-    sheetDowntimeMin: num(r.downtimeMin),
     downtimeReason: r.downtimeReason || "None",
-    downtimeSource: "none" as "none" | "sheet" | "capture",
     operator: r.operator ?? "",
     note: r.note ?? "",
   };
@@ -77,12 +71,11 @@ function shape(r: SheetRecord) {
 // quality, production; jobs/[id] never reads the GET body at all). Everything
 // else in shape() stays INTERNAL because this route itself still needs it:
 // plannedMin feeds resolvePlannedMin() (the downtime headroom — skip it and
-// every captured minute silently returns as unallocated), sheetDowntimeMin
-// tells sheet minutes from captured ones during the join. So strip HERE, at
+// every captured minute silently returns as unallocated). So strip HERE, at
 // serialization time after the join — never inside shape(). Dropping the
-// seven never-read fields (plannedMin, scrapSource, rowCheck, openCavities,
-// sheetDowntimeMin, downtimeSource, note) cuts the ~593-row payload by
-// roughly a third; restoring one is a one-line addition.
+// five never-read fields (plannedMin, scrapSource, rowCheck, openCavities,
+// note) cuts the ~593-row payload by roughly a third; restoring one is a
+// one-line addition.
 function publicRun(r: ReturnType<typeof shape>) {
   return {
     id: r.id,
@@ -102,8 +95,6 @@ function publicRun(r: ReturnType<typeof shape>) {
 
 export async function GET(req: NextRequest) {
   try {
-    const machine = req.nextUrl.searchParams.get("machine");
-    const mold = req.nextUrl.searchParams.get("mold");
     const [{ records }, machinesTab, captured] = await Promise.all([
       getRecords("production"),
       // Best-effort: a registry or Firestore that is briefly unreachable
@@ -112,10 +103,7 @@ export async function GET(req: NextRequest) {
       getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
       loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
     ]);
-    let runs = records.map(shape).map((r) => ({
-      ...r,
-      downtimeSource: (r.downtimeMin > 0 ? "sheet" : "none") as "none" | "sheet" | "capture",
-    }));
+    const runs = records.map(shape);
 
     // Downtime from «التوقفات», joined on the same way buildOEEData does
     // it. Stub rows are held out of the spread for the reason in isStubRun():
@@ -150,12 +138,9 @@ export async function GET(req: NextRequest) {
         downtimeReason: reasonKnown
           ? r.downtimeReason
           : captured.dominantByKey.get(downtimeKey(r.date, machineKeyOf(r.machineCode, r.machine))) ?? "Other",
-        downtimeSource: r.sheetDowntimeMin > 0 ? "sheet" : "capture",
       };
     });
 
-    if (machine) runs = runs.filter((r) => r.machine === machine);
-    if (mold) runs = runs.filter((r) => r.mold === mold);
     runs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : Number(b.id) - Number(a.id)));
     // Open operational read — a browser may reuse it briefly. The server-side
     // sheet cache (lib/sheets.ts, 45s) is the real one; this only spares a
@@ -178,7 +163,6 @@ export async function POST(req: NextRequest) {
       date: b.date ?? "",
       shift: b.shift ?? "",
       machine: b.machine ?? "",
-      machineCode: b.machineCode ?? "",
       mold: b.mold ?? "",
       product: b.product ?? "",
       plannedMin: String(num(b.plannedMin) || 720),

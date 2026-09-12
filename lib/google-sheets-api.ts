@@ -175,7 +175,7 @@ export async function apiReadTabs(tabs: string[]): Promise<Record<string, ApiTab
 
 /* ---------------------------------- writes --------------------------------- */
 
-export type ApiCell = { row: number; col: number; value: string };
+type ApiCell = { row: number; col: number; value: string };
 
 /** Append one row after the tab's data (RAW: text stays text). Returns the row number. */
 export async function apiAppend(tab: string, row: string[]): Promise<{ row: number }> {

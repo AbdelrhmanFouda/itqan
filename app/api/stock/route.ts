@@ -28,7 +28,6 @@ export type StockResponse = {
     /** The storage bridge serves «كتالوج الخامات» (else no minimums). */
     catalog: boolean;
     catalogRows: number;
-    openOrders: number;
     asOf: string;
     /** Age of the oldest sheet copy behind the orders (ms). */
     dataAgeMs: number;
@@ -74,7 +73,6 @@ export async function GET(req: NextRequest) {
       meta: {
         catalog: storage.supportsCatalog,
         catalogRows: storage.catalog.length,
-        openOrders: orders.filter((o) => isOpenOrder(o.status)).length,
         asOf: new Date().toISOString(),
         dataAgeMs: jobsRes ? Math.max(0, Date.now() - jobsRes.readAt) : 0,
         storageAgeMs: storage.readAt ? Math.max(0, Date.now() - storage.readAt) : 0,
@@ -86,7 +84,7 @@ export async function GET(req: NextRequest) {
     console.error(err);
     return NextResponse.json({
       ok: false, configured: false, jobsOk: false, rows: [],
-      meta: { catalog: false, catalogRows: 0, openOrders: 0, asOf: new Date().toISOString(), dataAgeMs: 0, storageAgeMs: 0, storageStale: false },
+      meta: { catalog: false, catalogRows: 0, asOf: new Date().toISOString(), dataAgeMs: 0, storageAgeMs: 0, storageStale: false },
     });
   }
 }

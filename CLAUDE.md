@@ -866,7 +866,7 @@ just that one, and three of them contradict what the code comments used to claim
    HTML error page. Writing «عطل» (not in the tab's dropdown) into C2 left row 2 holding a
    date, a machine and seven empty cells.
 
-   `updateRecordsInTab()`'s old comment — "the rows land together or not at all" — was
+   The old multi-row writer's comment — "the rows land together or not at all" — was
    therefore false. **A single POST is one request, not one transaction.** Two layers now
    make it nearly true:
 
@@ -1087,7 +1087,6 @@ Two things deliberately survived it, because they were never really part of it:
   ⚠ **`lib/oee-data.ts` does NOT** — it uses a plain `num(m.cavities)`, which reads `4+4` as
   4. Those two disagree on multi-part moulds today. Not fixed here because it moves OEE
   numbers and this pass was required to move none.
-- **`updateRecordsInTab()`** in `lib/sheets.ts` — now called by nothing; see the note on it.
 
 `docs/QUESTIONS-SHEET-OWNER.md` is left in place. It is written in Egyptian Arabic for
 whoever types the sheet and its first question — does the paper count SHOTS and the sheet

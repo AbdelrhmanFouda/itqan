@@ -27,7 +27,7 @@ export async function GET() {
     // anyway when the bridge lacks audio — nothing is lost, only a button
     // appears a moment later on a cold instance.
     const probe = bridgeFeatures();
-    const [{ issues, writable }, features] = await Promise.all([
+    const [{ issues }, features] = await Promise.all([
       loadIssues(),
       Promise.race([probe, new Promise<{ audio: boolean }>((r) => setTimeout(() => r({ audio: false }), 1500))]),
     ]);
@@ -39,7 +39,7 @@ export async function GET() {
     // Open operational read — browsers may reuse it briefly; error responses
     // deliberately carry no cache header.
     return NextResponse.json(
-      { issues, writable, audio: { supported: features.audio } },
+      { issues, audio: { supported: features.audio } },
       { headers: { "Cache-Control": "private, max-age=30" } },
     );
   } catch (err) {

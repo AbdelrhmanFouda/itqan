@@ -78,7 +78,6 @@ const TAB_ALIASES: Record<string, string[]> = {
   "الإنتاج": ["Production", "production"],
   "الماكينات": ["machines", "Machines"],
   "أوامر العمل": ["jobs", "Jobs"],
-  "لوحة البيانات": ["Dashboard"],
 };
 
 /* ------------------------- the read cache ---------------------------------
@@ -103,7 +102,7 @@ const TAB_ALIASES: Record<string, string[]> = {
  *    guarantee and could write onto a row somebody else just filled.
  */
 const SHEET_TTL_SEC = 45;
-export const SHEET_CACHE_TAG = "sheet-read";
+const SHEET_CACHE_TAG = "sheet-read";
 /** The most one bridge GET may take. The bridge has answered in 58 s during a
  *  slow spell, so this is generous — but finite: a hung answer used to hold
  *  the instance's whole read queue until the platform killed the function. */
@@ -145,7 +144,7 @@ export const missingTabs = (): string[] => Array.from(MISSING_TABS);
  * copy read before the write (`writtenAt`). Without a tab — createTab, or a
  * caller that does not know — every tab is treated as written.
  */
-export async function invalidateSheetCache(tab?: string, keepLocal = false): Promise<void> {
+async function invalidateSheetCache(tab?: string, keepLocal = false): Promise<void> {
   sheetInflight.clear();
   const now = Date.now();
   const tabs = tab ? tabsNamed(tab) : Object.values(ENTITIES).map((e) => e.tab);
@@ -289,10 +288,10 @@ function remember(tab: string) {
 }
 
 /** One read per tab at a time — a refresh already in flight is reused. */
-function readOnce(tab: string, fresh: boolean): Promise<SheetRead> {
+function readOnce(tab: string): Promise<SheetRead> {
   const flying = sheetInflight.get(tab);
   if (flying) return flying;
-  const p: Promise<SheetRead> = fetchSheetUncached(tab, fresh)
+  const p: Promise<SheetRead> = fetchSheetUncached(tab)
     .then(remember(tab))
     .finally(() => { if (sheetInflight.get(tab) === p) sheetInflight.delete(tab); });
   sheetInflight.set(tab, p);
@@ -311,7 +310,7 @@ async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
   if (fresh) {
     const c = lastGood.get(tab);
     if (c && now - c.at <= FRESH_REUSE_MS && c.at > fence) return c.value;
-    return fetchSheetUncached(tab, true).then(remember(tab));
+    return fetchSheetUncached(tab).then(remember(tab));
   }
   let verdict = judgeCopy(lastGood.get(tab), now, SHEET_TTL_SEC * 1000, SHEET_STALE_MAX_MS);
   if (verdict.state === "none") {
@@ -328,13 +327,13 @@ async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
     // A no-store read: a Next-cached one would hand back the same stale
     // entry and hold the response for its revalidation — the very wait this
     // layer removes.
-    keepAlive(readOnce(tab, true));
+    keepAlive(readOnce(tab));
     return verdict.value;
   }
   // Nothing to serve yet: read and wait. Two routes reading the same tab in
   // the same instant share one trip (readOnce). If the read gives up, the last
   // good copy — of any age — beats an empty table that looks like an empty tab.
-  const read = await readOnce(tab, false);
+  const read = await readOnce(tab);
   if (read.values.length === 0) {
     const c = lastGood.get(tab);
     if (c && c.at > fence) return c.value;
@@ -503,8 +502,7 @@ async function flushBatch(): Promise<void> {
 
 const breath = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRead> {
-  void fresh; // both paths read the bridge the same way; who asks for `fresh` matters above
+async function fetchSheetUncached(tab: string): Promise<SheetRead> {
   if (SCRIPT_URL && SCRIPT_SECRET) {
     let a = await readViaBatch(tab);
     if (a.kind !== "ok" && a.kind !== "no_tab") {
@@ -543,7 +541,7 @@ async function fetchSheetUncached(tab: string, fresh: boolean): Promise<SheetRea
 }
 
 export type SheetRecord = { row: number } & Record<string, string>;
-export type RecordsResult = {
+type RecordsResult = {
   records: SheetRecord[];
   fields: string[];
   longFields: string[];
@@ -653,7 +651,7 @@ const MASTER_TAB = "الرئيسي"; // resolved through TAB_ALIASES → falls b
 const MASTER_VIEWS = new Set(["molds", "products"]); // entities mirrored from Master
 const ID_KEYWORDS = ["id", "الرقم", "رقم", "no."]; // the key column in Master + its views
 
-export type UpdateOptions = {
+type UpdateOptions = {
   /**
    * The row must still hold `value` in `field`'s column or NOTHING is written.
    * Verified INSIDE the bridge POST (version 7), atomically with the write, so
@@ -688,68 +686,6 @@ export async function updateRecord(
   if ("reason" in plan) return { ok: false, reason: plan.reason };
 
   return postUpdates(plan.tab, plan.updates, plan.before);
-}
-
-/**
- * Update SEVERAL rows of one tab in a SINGLE bridge POST.
- *
- * ⚠ NOTHING CALLS THIS TODAY. Its only caller was the paper-photo import,
- * removed on 2026-08-19. It is kept rather than deleted because the write path
- * for "two numbers per machine per shift" needs exactly this shape — several
- * rows of «تسجيل الإنتاج» filled in one request — and because the semantics
- * below were expensive to establish. If that write path is abandoned too,
- * delete this with it rather than leaving it to rot.
- *
- * The bridge takes `updates:[{row,col,value}]` across arbitrary rows, so a
- * ten-row import is one request instead of ten. That matters here for two
- * reasons: `/exec` returns HTML error pages under load (ten sequential POSTs is
- * ten chances to hit one), and a half-applied import is far worse than a failed
- * one.
- *
- * ⚠️ **This used to claim the rows "land together or not at all". That was only
- * ever true of a network failure.** A single POST is one request, not one
- * transaction: the bridge loops `setValue`, `setValue` enforces data validation,
- * and a rejected cell throws with everything before it already committed —
- * measured on 2026-08-14. `postUpdates()` now snapshots the target cells, and on
- * failure re-reads, rolls back what it can restore honestly and reports the rest
- * as `stranded`. The nearest thing to atomicity available over a bridge that
- * offers none.
- *
- * Master-view entities are refused outright: their writes must go through
- * `mapToMaster`'s identity check, and silently doing the wrong thing in bulk is
- * exactly the failure this codebase has already paid for once.
- */
-export async function updateRecordsInTab(
-  entity: string,
-  edits: { row: number; changes: Record<string, string> }[],
-): Promise<UpdateResult & { cells?: number }> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
-  const cfg = ENTITIES[entity];
-  if (!cfg) return { ok: false, reason: "bad_entity" };
-  if (MASTER_VIEWS.has(entity)) return { ok: false, reason: "master_view_not_supported" };
-  if (edits.length === 0) return { ok: true, cells: 0 };
-  if (edits.some((e) => !Number.isFinite(e.row) || e.row < 2)) return { ok: false, reason: "bad_row" };
-
-  const { values, title } = await fetchSheet(cfg.tab, true);
-  if (values.length < 2) return { ok: false, reason: "empty_sheet" };
-  const headers = values[findHeaderRow(values, cfg.fields)] ?? [];
-
-  const updates: Cell[] = [];
-  for (const { row, changes } of edits) {
-    for (const [field, value] of Object.entries(changes)) {
-      const f = cfg.fields.find((x) => x.key === field);
-      if (!f) return { ok: false, reason: `unknown_field:${field}` };
-      const ci = colIndex(headers, f.keywords);
-      // A field with no column is a silent data loss in bulk — refuse instead.
-      if (ci < 0) return { ok: false, reason: `no_column:${field}` };
-      updates.push({ row, col: ci + 1, value: value ?? "" });
-    }
-  }
-  if (updates.length === 0) return { ok: true, cells: 0 };
-  // The snapshot comes from the SAME fresh read the columns were resolved from,
-  // so a rollback compares like with like.
-  const res = await postUpdates(title, updates, readCells(values, updates));
-  return { ...res, cells: updates.length };
 }
 
 // Locate the edited record's Master row by its ID, then map fields → Master columns.
@@ -1145,7 +1081,7 @@ export async function ensureHeaders(entity: string, headers: string[]): Promise<
 
 /** What the DEPLOYED bridge can do — an older deployment answers no_tab to
  *  `?ping=1` (measured 2026-09-09) and simply has no features. */
-export type BridgeFeatures = { audio: boolean; multi: boolean; expect: boolean };
+type BridgeFeatures = { audio: boolean; expect: boolean };
 let featuresSeen: { value: BridgeFeatures; at: number } | null = null;
 // A deployment does not lose a feature, so a yes can stand for a while; a no
 // must expire quickly so the site lights up minutes after the owner deploys.
@@ -1153,12 +1089,12 @@ const FEATURES_YES_MS = 30 * 60 * 1000;
 const FEATURES_NO_MS = 2 * 60 * 1000;
 
 export async function bridgeFeatures(): Promise<BridgeFeatures> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false, multi: false, expect: false };
+  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false, expect: false };
   const now = Date.now();
   if (featuresSeen && now - featuresSeen.at < (featuresSeen.value.audio ? FEATURES_YES_MS : FEATURES_NO_MS)) {
     return featuresSeen.value;
   }
-  let audio = false, multi = false, expect = false;
+  let audio = false, expect = false;
   try {
     const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
     // Every file call below is bounded: the bridge is ONE serial queue, and a
@@ -1169,20 +1105,19 @@ export async function bridgeFeatures(): Promise<BridgeFeatures> {
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; features?: unknown };
     const feats = json.ok === true && Array.isArray(json.features) ? (json.features as unknown[]) : [];
     audio = feats.includes("audio");
-    multi = feats.includes("multi");
     expect = feats.includes("expect");
   } catch {
     audio = false;
   }
-  // Through the Sheets API both are native: several tabs per call, and the
-  // row check made right before the write (apiUpdate). Audio stays the
-  // bridge's, so its answer still comes from the ping above.
-  if (sheetsApiUsable()) { multi = true; expect = true; }
-  featuresSeen = { value: { audio, multi, expect }, at: now };
+  // Through the Sheets API the row check is native — made right before the
+  // write (apiUpdate). Audio stays the bridge's, so its answer still comes
+  // from the ping above.
+  if (sheetsApiUsable()) { expect = true; }
+  featuresSeen = { value: { audio, expect }, at: now };
   return featuresSeen.value;
 }
 
-export type SavedFile = { ok: true; id: string; url: string } | { ok: false; reason: string };
+type SavedFile = { ok: true; id: string; url: string } | { ok: false; reason: string };
 
 /** Save one file into the recordings folder in the owner's Drive. Bytes go as
  *  base64 inside the JSON the bridge already speaks. Not through postAction:
@@ -1221,7 +1156,7 @@ export async function bridgeSaveFile(file: { name: string; mime: string; base64:
   }
 }
 
-export type ReadFile = { ok: true; mime: string; name: string; base64: string } | { ok: false; reason: string };
+type ReadFile = { ok: true; mime: string; name: string; base64: string } | { ok: false; reason: string };
 
 /** Read one recording back (base64). The bridge serves only files inside the
  *  recordings folder — the id is the caller's only input, and the script can
