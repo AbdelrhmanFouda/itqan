@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(reports);
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ error: "db error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "db error" }, { status: 500 });
   }
 }
 
@@ -31,9 +31,11 @@ export async function POST(req: NextRequest) {
       issues ?? "",
       recommendations ?? ""
     );
-    return NextResponse.json(report);
+    // { ok, id } — the page checks res.ok and needs nothing else; the whole
+    // document used to be returned and read by nobody.
+    return NextResponse.json({ ok: true, id: report.id });
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ error: "db error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "db error" }, { status: 500 });
   }
 }

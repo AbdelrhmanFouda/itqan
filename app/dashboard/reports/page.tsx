@@ -44,6 +44,8 @@ export default function ReportsPage() {
   const [err, setErr] = useState<null | { timedOut: boolean }>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A failed POST used to close the modal and reload as if it had saved.
+  const [saveError, setSaveError] = useState(false);
   const now = new Date();
   const [form, setForm] = useState({
     month: String(now.getMonth() + 1),
@@ -103,13 +105,17 @@ export default function ReportsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await authedFetch("/api/reports", {
+    setSaveError(false);
+    const res = await authedFetch("/api/reports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
-    });
-    setShowForm(false);
+    }).catch(() => null);
     setSaving(false);
+    // The form STAYS open on a failure — the typed narrative is the owner's
+    // work and must not disappear into a closed modal that saved nothing.
+    if (!res || !res.ok) { setSaveError(true); return; }
+    setShowForm(false);
     load();
   }
 
@@ -273,6 +279,11 @@ export default function ReportsPage() {
               dir={isAr ? "rtl" : "ltr"}
             />
           </div>
+          {saveError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {isAr ? "التقرير مااتحفظش — جرّب تاني." : "The report was not saved — try again."}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"
@@ -283,7 +294,7 @@ export default function ReportsPage() {
             </button>
             <button
               type="button"
-              onClick={() => setShowForm(false)}
+              onClick={() => { setSaveError(false); setShowForm(false); }}
               className="inline-flex items-center justify-center text-sm text-gray-700 px-5 py-2 min-h-11 sm:min-h-0 rounded-lg border border-gray-300 hover:bg-gray-50 active:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               {tr.dashboard.cancel}
