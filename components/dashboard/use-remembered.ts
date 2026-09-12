@@ -27,12 +27,14 @@ export function useRemembered<T>(opts: {
   hydrate?: (snap: T) => T;
   /** Called with every LIVE answer, after it is on screen and remembered. */
   onLoaded?: (data: T) => void;
+  /** Called after every read, good or bad — the page's "and then" step. */
+  onSettled?: () => void;
   /** An answer that must not be remembered (a degraded body, say). */
   worthRemembering?: (data: T) => boolean;
   /** Merge the live answer with what is on screen. Default: replace. */
   merge?: (prev: T | null, next: T) => T;
 }) {
-  const { key, read, valid, hydrate, onLoaded, worthRemembering, merge } = opts;
+  const { key, read, valid, hydrate, onLoaded, onSettled, worthRemembering, merge } = opts;
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState<LoadFailure>(null);
@@ -41,8 +43,8 @@ export function useRemembered<T>(opts: {
 
   // The callbacks are read through a ref so a page may pass inline closures
   // without re-running the mount effect on every render.
-  const cbs = useRef({ read, valid, hydrate, onLoaded, worthRemembering, merge });
-  cbs.current = { read, valid, hydrate, onLoaded, worthRemembering, merge };
+  const cbs = useRef({ read, valid, hydrate, onLoaded, onSettled, worthRemembering, merge });
+  cbs.current = { read, valid, hydrate, onLoaded, onSettled, worthRemembering, merge };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -52,6 +54,7 @@ export function useRemembered<T>(opts: {
       // A stall or a refusal keeps what is on screen — a page that blanks
       // itself is worse than one that says it could not refresh.
       setFailed({ timedOut: r.timedOut });
+      cbs.current.onSettled?.();
       return;
     }
     const next = r.data;
@@ -60,6 +63,7 @@ export function useRemembered<T>(opts: {
     setFromSnapshot(false);
     if (!cbs.current.worthRemembering || cbs.current.worthRemembering(next)) writeLastSeen(key, next);
     cbs.current.onLoaded?.(next);
+    cbs.current.onSettled?.();
   }, [key]);
 
   useEffect(() => {

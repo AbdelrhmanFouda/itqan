@@ -1,12 +1,13 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
 import { pd } from "@/lib/i18n.prod";
-import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
-import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered, useVisiblePoll } from "@/components/dashboard/use-remembered";
 
 type Rec = { row: number } & Record<string, string>;
 type Payload = {
@@ -48,50 +49,35 @@ export default function SheetSection({
   const p = pd[lang];
   const isAr = lang === "ar";
 
-  const [data, setData] = useState<Payload | null>(null);
-  /** The last read that did not arrive — null while what is shown is live. */
-  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
-  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Rec | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    // authed: the clients tab (contact/payment data) is signed-in-only server-side
-    const r = await timedJson<Payload>(authedFetch, `/api/sheet/${entity}`);
-    if (r.ok && Array.isArray(r.data?.records)) {
-      const next = r.data;
-      // An empty answer never replaces rows that are on screen — "no records"
-      // read as the truth is exactly the lie this guards against.
-      setData((prev) => (prev && prev.records.length > 0 && next.records.length === 0 ? prev : next));
-      setFailed(null);
-      if (next.records.length > 0) writeLastSeen(`itqan.sheet.${entity}.last`, next);
-    } else if (!r.ok) {
-      setFailed({ timedOut: r.timedOut });
-    }
-    setLoading(false);
-  }, [entity]);
-  useEffect(() => {
-    // Switching entity discards the previous tab's rows, then paints this
-    // tab's remembered ones before the network is touched.
-    setData(null);
-    setFailed(null);
-    const snap = readLastSeen<Payload>(`itqan.sheet.${entity}.last`);
-    if (snap && Array.isArray(snap.records)) setData(snap);
-    load();
-  }, [entity, load]);
+  // authed: the clients tab (contact/payment data) is signed-in-only server-side.
+  // Keying the snapshot by entity is what discards the previous tab's rows when
+  // the section switches. An empty answer never replaces rows that are on
+  // screen — "no records" read as the truth is the lie this guards against.
+  const { data, setData, loading, failed, reload: load } = useRemembered<Payload>({
+    key: `itqan.sheet.${entity}.last`,
+    read: async () => {
+      const r = await timedJson<Payload>(authedFetch, `/api/sheet/${entity}`);
+      return r.ok && !Array.isArray(r.data?.records) ? { ok: false, status: 0, timedOut: false } : r;
+    },
+    valid: (snap) => Array.isArray(snap?.records),
+    merge: (prev, next) => (prev && prev.records.length > 0 && next.records.length === 0 ? prev : next),
+    worthRemembering: (next) => next.records.length > 0,
+  });
   // Auto-refresh so sheet edits appear without a manual reload — paused while
   // editing AND while the tab is hidden (long-lived background tabs otherwise
   // keep fetching and become targets for the browser's memory-saver tab kill).
   // Coming back to the tab refreshes immediately.
+  useVisiblePoll(() => { if (!editing) load(); }, 20000);
   useEffect(() => {
-    const id = setInterval(() => { if (!editing && !document.hidden) load(); }, 20000);
     const onVis = () => { if (!document.hidden && !editing) load(); };
     document.addEventListener("visibilitychange", onVis);
-    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, [editing, load]);
 
   const label = (f: string) => {
@@ -191,16 +177,14 @@ export default function SheetSection({
 
       {/* Rows are on screen and the live read did not arrive: keep them, say so. */}
       {failed && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-5 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>{failed.timedOut ? p.common.timedOut : m.loadError}</span>
-          <button
-            onClick={() => load()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
-          </button>
-        </p>
+        <LoadError
+          className="mb-5"
+          text={failed.timedOut ? p.common.timedOut : m.loadError}
+          retry={p.common.retry}
+          onRetry={() => load()}
+          loading={loading}
+          icon={<RefreshCw size={13} className={loading ? "animate-spin" : ""} />}
+        />
       )}
       {/* A remembered tab is showing while the live read is still in flight. */}
       {!failed && loading && <p className="text-xs text-gray-400 mb-5">{p.common.stillLoading}</p>}

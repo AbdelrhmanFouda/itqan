@@ -40,13 +40,14 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { sd } from "@/lib/i18n.storage";
 import { pd } from "@/lib/i18n.prod";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { useVisiblePoll } from "@/components/dashboard/use-remembered";
 import { hasFullAccess } from "@/lib/roles";
 import {
   NO_LOCATION, buildFloorPlan, collectLocations, compareLocKey, dupKey, duplicateNums,
   historyFor, lineWeightKg, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
   searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LineWeight, type LocationStat,
 } from "@/lib/storage-filter";
-import { Btn, EmptyState, Field, inputCls, Modal, Spinner } from "@/components/dashboard/ui";
+import { Btn, EmptyState, Field, inputCls, Modal, Spinner, LoadError } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
 import { ItemDrawer, MoveModal, type MoveHalf, type MoveRequest } from "@/components/dashboard/storage-item";
 import {
@@ -178,9 +179,10 @@ export default function StoragePage() {
     const snap = readLastSeen<StorageData>(LAST_KEY);
     if (snap && Array.isArray(snap.balance)) setData({ ...snap, readAt: 0, stale: false });
     load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
   }, [load]);
+  // Polls only while the tab is on screen — a phone in a pocket used to keep
+  // asking the storage bridge every 20 s (cleanup batch 7).
+  useVisiblePoll(load, 20000);
 
   const toggleMap = () => setMapOpen((v) => {
     try { localStorage.setItem(MAP_KEY, v ? "0" : "1"); } catch { /* private mode */ }
@@ -516,15 +518,13 @@ export default function StoragePage() {
   /* ------------------------------ render ------------------------------ */
 
   const errorLine = fetchErr ? (
-    <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
-      <span>{fetchErr.timedOut ? p.common.timedOut : s.loadError}</span>
-      <button
-        onClick={load}
-        className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-      >
-        {p.common.retry}
-      </button>
-    </div>
+    <LoadError
+      variant="banner"
+      className="mb-3"
+      text={fetchErr.timedOut ? p.common.timedOut : s.loadError}
+      retry={p.common.retry}
+      onRetry={load}
+    />
   ) : null;
 
   if (!data) {

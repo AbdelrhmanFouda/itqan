@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
-import { Btn, Spinner, EmptyState, Stat } from "@/components/dashboard/ui";
+import { Btn, Spinner, EmptyState, Stat, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { useVisiblePoll } from "@/components/dashboard/use-remembered";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
 import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN } from "@/lib/downtime";
 import { hasFullAccess } from "@/lib/roles";
@@ -245,11 +246,9 @@ export default function DowntimePage() {
   // Re-poll while something is running so a stop from another phone shows here.
   // Stoppages from a previous day count as running too — they keep recording.
   const runningCount = (data?.open.length ?? 0) + (data?.stale.length ?? 0);
-  useEffect(() => {
-    if (!runningCount) return;
-    const id = setInterval(loadQuick, 30_000);
-    return () => clearInterval(id);
-  }, [runningCount, loadQuick]);
+  // Only while the tab is on screen: a phone in a pocket used to keep asking
+  // every 30 s (cleanup batch 7).
+  useVisiblePoll(loadQuick, runningCount ? 30_000 : 0);
 
   async function start(reason: string) {
     if (!machine || busy) return;
@@ -513,16 +512,13 @@ export default function DowntimePage() {
             line says so, and the retry asks for the finished list alone — the
             running stoppages and the start/stop buttons are untouched. */}
         {todayErr && (
-          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-            <span>{todayErr === "timeout" ? p.common.timedOut : p.common.loadError}</span>
-            <button
-              type="button"
-              onClick={() => { setTodayErr(null); void loadFull(); }}
-              className="inline-flex items-center min-h-11 px-2 -mx-2 rounded-lg font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-            >
-              {p.common.retry}
-            </button>
-          </div>
+          <LoadError
+            variant="banner"
+            className="mb-3"
+            text={todayErr === "timeout" ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={() => { setTodayErr(null); void loadFull(); }}
+          />
         )}
         {!todayLoaded && !todayErr && todayShown && (
           <p className="mb-2 text-xs text-gray-500">{p.common.stillLoading}</p>

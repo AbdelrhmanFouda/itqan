@@ -25,8 +25,9 @@ import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { compareByNet, isMaterialType, type StockRow } from "@/lib/stock";
 import { codeKey } from "@/lib/work-orders";
 import { ageLabel, numLocale } from "@/lib/format";
-import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
-import { EmptyState, Pill, Spinner } from "@/components/dashboard/ui";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
+import { EmptyState, Pill, Spinner, LoadError } from "@/components/dashboard/ui";
 import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
 type Resp = {
@@ -54,9 +55,6 @@ export default function StockPage() {
   usePageTitle(s.title);
   const fmtN = useCallback((n: number) => n.toLocaleString(numLocale(isAr), { maximumFractionDigits: 2 }), [isAr]);
 
-  const [data, setData] = useState<Resp | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("");
   const [tile, setTile] = useState<Tile>("");
@@ -67,19 +65,19 @@ export default function StockPage() {
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await timedJson<Resp>(authedFetch, "/api/stock");
-      if (!r.ok) throw new Error(String(r.status));
-      const next = r.data;
-      // The storage bridge answers with nothing when throttled (measured: a
-      // 17s read returning ok:false minutes after a 5s one returned 151 rows).
-      // A refresh that fails must not blank a page that was showing the
-      // balance a moment ago — keep the rows, show the notice.
-      setData((prev) => (!next.ok && prev && prev.rows.length > 0 ? { ...prev, ok: false, meta: next.meta } : next));
-      setError(false);
-      if (next.ok) writeLastSeen(LAST_KEY, next);
+  const { data, loading, failed: error, reload: load } = useRemembered<Resp>({
+    key: LAST_KEY,
+    read: () => timedJson<Resp>(authedFetch, "/api/stock"),
+    valid: (snap) => Array.isArray(snap?.rows) && !!snap.meta,
+    // A snapshot's age is unknown — the spinner is its honest hint.
+    hydrate: (snap) => ({ ...snap, meta: { ...snap.meta, dataAgeMs: 0, storageAgeMs: 0, storageStale: false } }),
+    // The storage bridge answers with nothing when throttled (measured: a 17 s
+    // read returning ok:false minutes after a 5 s one returned 151 rows). A
+    // refresh that fails must not blank a page that was showing the balance a
+    // moment ago — keep the rows, show the notice.
+    merge: (prev, next) => (!next.ok && prev && prev.rows.length > 0 ? { ...prev, ok: false, meta: next.meta } : next),
+    worthRemembering: (next) => next.ok,
+    onLoaded: (next) => {
       // An old copy was served (and is being refreshed server-side): ask once
       // more in a few seconds. Bounded — a bridge that stays down must not
       // turn this into a poll.
@@ -89,22 +87,10 @@ export default function StockPage() {
         staleRefetches.current += 1;
         refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadRef.current(); }, 8000);
       }
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+  });
   loadRef.current = load;
-  useEffect(() => {
-    // Last answer seen on this device, at once; the live one replaces it.
-    const snap = readLastSeen<Resp>(LAST_KEY);
-    if (snap && Array.isArray(snap.rows) && snap.meta) {
-      setData({ ...snap, meta: { ...snap.meta, dataAgeMs: 0, storageAgeMs: 0, storageStale: false } });
-    }
-    load();
-    return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); };
-  }, [load]);
+  useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); }, []);
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const hasMin = !!data?.meta.catalog;
@@ -172,7 +158,13 @@ export default function StockPage() {
     return (
       <div dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{s.title}</h1>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{s.loadError}</div>
+        <LoadError
+          variant="empty"
+          text={error.timedOut ? p.common.timedOut : s.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
       </div>
     );
   }
@@ -210,7 +202,15 @@ export default function StockPage() {
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{s.loadError}</p>}
+      {error && (
+        <LoadError
+          className="mb-3"
+          text={error.timedOut ? p.common.timedOut : s.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
+      )}
       {!data.ok && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">{s.storageDown}</p>}
       {data.ok && data.meta?.storageStale && (
         <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">

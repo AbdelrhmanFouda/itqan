@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { pd } from "@/lib/i18n.prod";
-import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
+import { Btn, EmptyState, Field, Spinner, inputCls, LoadError } from "@/components/dashboard/ui";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -146,15 +146,13 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
 
       {/* The card is showing and a refresh did not arrive — keep the card, say so. */}
       {(state === "failed" || state === "timedOut") && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>{state === "timedOut" ? p.common.timedOut : p.common.loadError}</span>
-          <button
-            onClick={loadMachine}
-            className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-          >
-            <RefreshCw size={13} />{p.common.retry}
-          </button>
-        </p>
+        <LoadError
+          className="mb-4"
+          text={state === "timedOut" ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={loadMachine}
+          icon={<RefreshCw size={13} />}
+        />
       )}
 
       <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">

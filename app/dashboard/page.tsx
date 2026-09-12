@@ -5,7 +5,7 @@ import { pd } from "@/lib/i18n.prod";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, BarChart3, AlertTriangle } from "lucide-react";
-import { Stat, EmptyState, Spinner, Btn } from "@/components/dashboard/ui";
+import { Stat, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { LOCALE_AR } from "@/lib/format";
@@ -151,12 +151,13 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-gray-900 mb-1">{p.overview.title}</h1>
           <p className="text-sm text-gray-500">{p.overview.subtitle}</p>
         </div>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-          <p>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</p>
-          <div className="mt-3 flex justify-center">
-            <Btn variant="outline" onClick={load} disabled={loading}>{p.common.retry}</Btn>
-          </div>
-        </div>
+        <LoadError
+          variant="empty"
+          text={issue === "timeout" ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
       </div>
     );
   }
@@ -224,11 +225,14 @@ export default function DashboardPage() {
       {/* The read stalled but there are numbers on screen — keep them, say why
           they are not moving, and offer the retry. */}
       {issue !== "" && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</span>
-          <span className="text-xs text-red-600/80">{p.common.slowSheet}</span>
-          <Btn variant="outline" onClick={load} disabled={loading} className="ms-auto">{p.common.retry}</Btn>
-        </div>
+        <LoadError
+          className="mb-6"
+          text={issue === "timeout" ? p.common.timedOut : p.common.loadError}
+          note={p.common.slowSheet}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
       )}
       {issue === "" && loading && <p className="mb-6 text-xs text-gray-400">{p.common.stillLoading}</p>}
 

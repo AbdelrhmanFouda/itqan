@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { Stat, Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
+import { Stat, Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import {
   JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
   priorityTone, localize, options, downtimeReasonLabel,
@@ -294,15 +294,13 @@ export default function JobDetailPage() {
     );
   }
   const errorLine = loadErr ? (
-    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
-      <span>{loadErr.timedOut ? p.common.timedOut : p.common.loadError}</span>
-      <button
-        onClick={load}
-        className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-      >
-        {p.common.retry}
-      </button>
-    </div>
+    <LoadError
+      variant="banner"
+      className="mb-4"
+      text={loadErr.timedOut ? p.common.timedOut : p.common.loadError}
+      retry={p.common.retry}
+      onRetry={load}
+    />
   ) : null;
 
   if (!job || runs === null) {

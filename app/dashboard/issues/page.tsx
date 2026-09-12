@@ -27,9 +27,10 @@ import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Plus, Pencil, Mic, ChevronDown, ChevronUp, X } from "lucide-react";
-import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { useVisiblePoll } from "@/components/dashboard/use-remembered";
 import { LOCALE_AR } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
@@ -173,14 +174,9 @@ export default function IssuesPage() {
     return () => { alive = false; };
   }, [load]);
   const modalOpen = adding || openRow !== null;
-  useEffect(() => {
-    // Skip a tick while a read is still in flight — a slow sheet must not
-    // stack polls on top of each other.
-    const id = setInterval(() => {
-      if (!modalOpen && !document.hidden && !inFlight.current) load();
-    }, 30000);
-    return () => clearInterval(id);
-  }, [modalOpen, load]);
+  // Skip a tick while a read is still in flight — a slow sheet must not stack
+  // polls on top of each other. Hidden tabs do not poll at all.
+  useVisiblePoll(() => { if (!modalOpen && !inFlight.current) load(); }, 30000);
 
   const errorText = useCallback((reason: string) =>
     reason === "row_changed" ? t.rowChanged
@@ -349,16 +345,13 @@ export default function IssuesPage() {
       {/* A read that failed with a list already on screen: keep the list, say
           what happened, offer the retry. Never blank, never an empty list. */}
       {loadErr && issues !== null && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-          <span>{loadErr === "timeout" ? p.common.timedOut : p.common.loadError}</span>
-          <button
-            type="button"
-            onClick={() => load()}
-            className="inline-flex items-center min-h-11 sm:min-h-0 px-2 -mx-2 rounded-lg font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-          >
-            {p.common.retry}
-          </button>
-        </div>
+        <LoadError
+          variant="banner"
+          className="mb-4"
+          text={loadErr === "timeout" ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={() => load()}
+        />
       )}
       {/* The device's last answer is showing while the live one is still coming. */}
       {!loadErr && refreshing && issues !== null && (
@@ -367,16 +360,12 @@ export default function IssuesPage() {
 
       {issues === null ? (
         loadErr ? (
-          <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-            <p>{loadErr === "timeout" ? p.common.timedOut : p.common.loadError}</p>
-            <button
-              type="button"
-              onClick={() => load()}
-              className="mt-3 inline-flex items-center justify-center min-h-11 rounded-lg border-2 border-red-300 px-4 font-semibold text-red-700 active:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-            >
-              {p.common.retry}
-            </button>
-          </div>
+          <LoadError
+            variant="empty"
+            text={loadErr === "timeout" ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={() => load()}
+          />
         ) : (
           <div className="flex justify-center py-16">
             <Spinner text={p.common.loading} />

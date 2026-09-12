@@ -2,12 +2,13 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
+import { Stat, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import { DOWNTIME_REASONS, SHIFTS, downtimeReasonLabel, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
-import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
 import { moldKey } from "@/lib/mold-number";
 import { LOCALE_AR } from "@/lib/format";
 
@@ -27,24 +28,18 @@ type Machine = { row: number; code: string; name: string; label: string; product
 
 /** The last «الإنتاج» answer this device saw — painted at once on the next open. */
 const LAST_KEY = "itqan.runs.last";
-/** Why the live read is not moving. Kept as a KIND, so the message follows the language. */
-type Issue = "" | "timeout" | "error";
-
 export default function ProductionPage() {
   const { lang } = useLang();
   const p = pd[lang];
   const isAr = lang === "ar";
   usePageTitle(p.runs.title);
 
-  const [runs, setRuns] = useState<Run[] | null>(null);
   const [molds, setMolds] = useState<Mold[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [period, setPeriod] = useState<"month" | "all">("month");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [issue, setIssue] = useState<Issue>("");
-  const [loading, setLoading] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const ym = today.slice(0, 7);
@@ -75,32 +70,15 @@ export default function ProductionPage() {
     fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    // Bounded (lib last-seen, 90s): the bridge can take 10–160s on a cold
-    // instance and there was NO client timeout — the spinner simply stayed
-    // until the platform killed the function at 300s.
-    const r = await timedJson<Run[]>(fetch, "/api/runs");
-    if (r.ok && Array.isArray(r.data)) {
-      setRuns(r.data);
-      setIssue("");
-      writeLastSeen(LAST_KEY, r.data);
-    } else {
-      // A stall must never replace good numbers: whatever is on screen (the
-      // device snapshot, or the previous live answer) stays, and the page says
-      // why it is not moving instead of showing an empty log.
-      setIssue(!r.ok && r.timedOut ? "timeout" : "error");
-    }
-    setLoading(false);
-    loadLists();
-  }, [loadLists]);
-  useEffect(() => {
-    // What this device saw last time paints at once; the live answer replaces
-    // it. Opening the page used to mean a spinner for the whole round trip.
-    const snap = readLastSeen<Run[]>(LAST_KEY);
-    if (Array.isArray(snap)) setRuns(snap);
-    load();
-  }, [load]);
+  // Snapshot → paint → bounded read (90 s) → keep what is on screen when the
+  // answer fails. One hook for all of it since cleanup batch 7; the bridge can
+  // take 10–160 s on a cold instance and there used to be no client timeout.
+  const { data: runs, loading, failed, reload: load } = useRemembered<Run[]>({
+    key: LAST_KEY,
+    read: () => timedJson<Run[]>(fetch, "/api/runs"),
+    valid: (snap) => Array.isArray(snap),
+    onSettled: loadLists,
+  });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => {
@@ -205,14 +183,17 @@ export default function ProductionPage() {
 
       {/* The read stalled but there are numbers on screen — say so, keep them,
           and offer the retry. Never blank a log that was readable a moment ago. */}
-      {runs !== null && issue !== "" && (
-        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          <span>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</span>
-          <span className="text-xs text-red-600/80">{p.common.slowSheet}</span>
-          <Btn variant="outline" onClick={load} disabled={loading} className="ms-auto">{p.common.retry}</Btn>
-        </div>
+      {runs !== null && failed && (
+        <LoadError
+          className="mb-4"
+          text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+          note={p.common.slowSheet}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
       )}
-      {runs !== null && issue === "" && loading && (
+      {runs !== null && !failed && loading && (
         <p className="mb-4 text-xs text-gray-400">{p.common.stillLoading}</p>
       )}
 
@@ -225,14 +206,15 @@ export default function ProductionPage() {
       </div>
 
       {runs === null ? (
-        issue !== "" ? (
-          // Nothing to show at all — the existing error box, now with a way out.
-          <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-            <p>{issue === "timeout" ? p.common.timedOut : p.common.loadError}</p>
-            <div className="mt-3 flex justify-center">
-              <Btn variant="outline" onClick={load} disabled={loading}>{p.common.retry}</Btn>
-            </div>
-          </div>
+        failed ? (
+          // Nothing to show at all — the error box, with a way out.
+          <LoadError
+            variant="empty"
+            text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={load}
+            loading={loading}
+          />
         ) : (
           <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>
         )

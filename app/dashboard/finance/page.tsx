@@ -22,7 +22,7 @@ import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
-import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { LOCALE_AR } from "@/lib/format";
 
 type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
@@ -143,15 +143,12 @@ export default function FinancePage() {
     return (
       <div dir={isAr ? "rtl" : "ltr"} className="max-w-5xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{a.finance.title}</h1>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600 space-y-3">
-          <p>{failed.timedOut ? p.common.timedOut : p.common.loadError}</p>
-          <button
-            onClick={load}
-            className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 text-xs font-medium hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-          >
-            {p.common.retry}
-          </button>
-        </div>
+        <LoadError
+          variant="empty"
+          text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+        />
       </div>
     );
   }
@@ -218,12 +215,12 @@ export default function FinancePage() {
       {/* A refresh that failed keeps the numbers and says so — it never blanks
           the page, and it never leaves an endless spinner. */}
       {failed && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
-          <button onClick={load} className="font-medium underline underline-offset-2 min-h-8 inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded">
-            {p.common.retry}
-          </button>
-        </p>
+        <LoadError
+          className="mb-3"
+          text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+        />
       )}
       {failed && fromSnapshot && <p className="text-xs text-amber-700 mb-3">{p.common.slowSheet}</p>}
       {loading && fromSnapshot && !failed && <p className="text-xs text-gray-400 mb-3">{p.common.stillLoading}</p>}

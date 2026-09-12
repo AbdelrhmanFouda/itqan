@@ -3,12 +3,13 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { downtimeReasonLabel } from "@/lib/prod-meta";
-import { Stat, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } from "@/components/dashboard/charts";
 import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 import { authedFetch } from "@/lib/authed-fetch";
-import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
 import { LOCALE_AR } from "@/lib/format";
 
 type OEE = {
@@ -196,12 +197,11 @@ const L = {
  * once, every fetch is bounded (`timedJson`), and a failed refresh keeps the
  * numbers and offers a retry instead of blanking or spinning forever.
  *
- * ⚠ The snapshot carries its period. Showing «this month»'s remembered numbers
- * under the «all time» toggle would be a silent lie, so it is adopted only
- * when the periods match.
+ * ⚠ The snapshot is keyed BY PERIOD. Showing «this month»'s remembered numbers
+ * under the «all time» toggle would be a silent lie, so each toggle position
+ * remembers its own answer.
  */
-type Snap = { period: "month" | "all"; data: Data };
-const LAST_KEY = "itqan.performance.last";
+const LAST_KEY = (period: "month" | "all") => `itqan.performance.last.${period}`;
 
 const pf = (x: number) => `${(x * 100).toFixed(1)}%`;
 const oeeText = (x: number) => (x >= 0.85 ? "text-green-600" : x >= 0.6 ? "text-amber-600" : "text-red-600");
@@ -224,40 +224,17 @@ export default function PerformancePage() {
   const thisMonth = new Date().toISOString().slice(0, 7);
 
   const [period, setPeriod] = useState<"month" | "all">("month");
-  const [data, setData] = useState<Data | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
-  /** What is on screen came off this device, not off a live answer. */
-  const [fromSnapshot, setFromSnapshot] = useState(false);
   const [review, setReview] = useState<ReviewPayload | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFailed(null);
-    const q = period === "month" ? `?month=${thisMonth}` : "";
-    const res = await timedJson<Data>(fetch, `/api/oee${q}`);
-    if (res.ok) {
-      setData(res.data);
-      setFromSnapshot(false);
-      writeLastSeen(LAST_KEY, { period, data: res.data } satisfies Snap);
-    } else {
-      // Keep whatever is on screen — a stalled bridge must not turn a page of
-      // real numbers into an empty one.
-      setFailed({ timedOut: res.timedOut });
-    }
-    setLoading(false);
-  }, [period, thisMonth]);
-  useEffect(() => {
-    // The last answer this device saw for this period renders AT ONCE; the
-    // live one replaces it.
-    const snap = readLastSeen<Snap>(LAST_KEY);
-    if (snap && snap.period === period && snap.data && Array.isArray(snap.data.machines)) {
-      setData(snap.data);
-      setFromSnapshot(true);
-    }
-    load();
-  }, [load, period]);
+  // The last answer this device saw FOR THIS PERIOD renders at once; the live
+  // one replaces it. A stalled bridge must not turn a page of real numbers
+  // into an empty one, so a failure keeps what is on screen.
+  const { data, loading, failed, fromSnapshot, reload: load } = useRemembered<Data>({
+    key: LAST_KEY(period),
+    read: () => timedJson<Data>(fetch, `/api/oee${period === "month" ? `?month=${thisMonth}` : ""}`),
+    valid: (snap) => Array.isArray(snap?.machines),
+  });
 
   const loadReview = useCallback(async (refresh = false) => {
     setReviewBusy(true);
@@ -372,12 +349,12 @@ export default function PerformancePage() {
       {/* A refresh that failed keeps the numbers and says so — it never blanks
           the page, and it never leaves an endless spinner. */}
       {failed && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
-          <button onClick={load} className="font-medium underline underline-offset-2 min-h-8 inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded">
-            {p.common.retry}
-          </button>
-        </p>
+        <LoadError
+          className="mb-3"
+          text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+        />
       )}
       {failed && fromSnapshot && <p className="text-xs text-amber-700 mb-3">{p.common.slowSheet}</p>}
       {loading && fromSnapshot && !failed && <p className="text-xs text-gray-400 mb-3">{p.common.stillLoading}</p>}

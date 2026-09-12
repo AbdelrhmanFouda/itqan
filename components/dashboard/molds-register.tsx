@@ -1,14 +1,15 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useLang } from "@/context/LangContext";
 import { mr } from "@/lib/i18n.register";
 import { pd } from "@/lib/i18n.prod";
 import { normalizeArabic } from "@/lib/prod-meta";
 import { moldKey } from "@/lib/mold-number";
-import { Field, inputCls, Btn, Modal, Spinner, EmptyState } from "@/components/dashboard/ui";
+import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
-import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered, useVisiblePoll } from "@/components/dashboard/use-remembered";
 import type { MoldRow } from "@/app/api/molds/route";
 
 /**
@@ -60,10 +61,6 @@ export default function MoldsRegister({ title, subtitle }: {
   const p = pd[lang];
   const isAr = lang === "ar";
 
-  const [data, setData] = useState<Payload | null>(null);
-  /** The last read that did not arrive — null while what is shown is live. */
-  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
-  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [numberFilter, setNumberFilter] = useState<NumberFilter>("all");
   const [category, setCategory] = useState("");
@@ -74,34 +71,25 @@ export default function MoldsRegister({ title, subtitle }: {
 
   // Guarded route, so the token travels — and the read is bounded, so a
   // stalled bridge becomes a line with a retry instead of an endless spinner.
-  const load = useCallback(async () => {
-    setLoading(true);
-    const r = await timedJson<Payload>(authedFetch, "/api/molds");
-    if (r.ok && Array.isArray(r.data?.molds)) {
-      const next = r.data;
-      // A non-2xx (an expired token) or an empty answer must never show as an
-      // empty register — the owner would read "no moulds" as the truth.
-      setData((prev) => (prev && prev.molds.length > 0 && next.molds.length === 0 ? prev : next));
-      setFailed(null);
-      if (next.molds.length > 0) writeLastSeen(LAST_KEY, next);
-    } else if (!r.ok) {
-      setFailed({ timedOut: r.timedOut });
-    }
-    setLoading(false);
-  }, []);
-  useEffect(() => {
-    // What this device saw last time renders at once; the live answer replaces it.
-    const snap = readLastSeen<Payload>(LAST_KEY);
-    if (snap && Array.isArray(snap.molds)) setData(snap);
-    load();
-  }, [load]);
+  // A non-2xx (an expired token) or an empty answer must never show as an
+  // empty register — the owner would read "no moulds" as the truth.
+  const { data, loading, failed, reload: load } = useRemembered<Payload>({
+    key: LAST_KEY,
+    read: async () => {
+      const r = await timedJson<Payload>(authedFetch, "/api/molds");
+      return r.ok && !Array.isArray(r.data?.molds) ? { ok: false, status: 0, timedOut: false } : r;
+    },
+    valid: (snap) => Array.isArray(snap?.molds),
+    merge: (prev, next) => (prev && prev.molds.length > 0 && next.molds.length === 0 ? prev : next),
+    worthRemembering: (next) => next.molds.length > 0,
+  });
   // Refresh while the tab is visible and nothing is open — a Master edit made
   // in the sheet appears without a reload.
+  useVisiblePoll(() => { if (!selected) load(); }, 30000);
   useEffect(() => {
-    const id = setInterval(() => { if (!selected && !document.hidden) load(); }, 30000);
     const onVis = () => { if (!document.hidden && !selected) load(); };
     document.addEventListener("visibilitychange", onVis);
-    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, [selected, load]);
 
   const label = (f: keyof MoldRow): string => {
@@ -227,16 +215,14 @@ export default function MoldsRegister({ title, subtitle }: {
       <p className="text-sm text-gray-500 mb-4">{sub}</p>
       {/* Rows are on screen and the live read did not arrive: keep them, say so. */}
       {failed && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>{failed.timedOut ? p.common.timedOut : m.loadError}</span>
-          <button
-            onClick={() => load()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
-          </button>
-        </p>
+        <LoadError
+          className="mb-4"
+          text={failed.timedOut ? p.common.timedOut : m.loadError}
+          retry={p.common.retry}
+          onRetry={() => load()}
+          loading={loading}
+          icon={<RefreshCw size={13} className={loading ? "animate-spin" : ""} />}
+        />
       )}
       {/* A remembered register is showing while the live read is still in flight. */}
       {!failed && loading && <p className="text-xs text-gray-400 mb-4">{p.common.stillLoading}</p>}

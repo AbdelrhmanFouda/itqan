@@ -2,12 +2,13 @@
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, Circle, RefreshCw } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { pd } from "@/lib/i18n.prod";
-import { Btn, EmptyState, Field, Spinner, inputCls } from "@/components/dashboard/ui";
-import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
+import { Btn, EmptyState, Field, Spinner, inputCls, LoadError } from "@/components/dashboard/ui";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
 import { LOCALE_AR } from "@/lib/format";
 
 /**
@@ -76,10 +77,6 @@ export default function MachinesPage() {
   const isAr = lang === "ar";
   usePageTitle(tr.dashboard.machines);
 
-  const [data, setData] = useState<Data | null>(null);
-  /** The last read that did not arrive — null while the data on screen is live. */
-  const [failed, setFailed] = useState<{ timedOut: boolean } | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(false);
@@ -87,28 +84,19 @@ export default function MachinesPage() {
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   // `/api/machines` is an open read, so a plain bounded fetch is right here.
-  const load = useCallback(async () => {
-    setLoading(true);
-    const r = await timedJson<Data>(fetch, "/api/machines");
-    if (r.ok && Array.isArray(r.data?.machines)) {
-      const next = r.data;
-      // An empty answer never replaces a registry that has rows — "no
-      // machines" read as the truth is the lie this guards against.
-      setData((prev) => (prev && prev.machines.length > 0 && next.machines.length === 0 ? prev : next));
-      setFailed(null);
-      if (next.machines.length > 0) writeLastSeen(LAST_KEY, next);
-    } else if (!r.ok) {
-      // Keep whatever is on screen. A stalled bridge must not blank a
-      // registry the person was reading a second ago.
-      setFailed({ timedOut: r.timedOut });
-    }
-    setLoading(false);
-  }, []);
-  useEffect(() => {
-    const snap = readLastSeen<Data>(LAST_KEY);
-    if (snap && Array.isArray(snap.machines)) setData(snap);
-    load();
-  }, [load]);
+  // A stalled bridge must not blank a registry the person was reading a second
+  // ago, and an EMPTY answer never replaces a registry that has rows — "no
+  // machines" read as the truth is the lie those two rules guard against.
+  const { data, loading, failed, reload: load } = useRemembered<Data>({
+    key: LAST_KEY,
+    read: async () => {
+      const r = await timedJson<Data>(fetch, "/api/machines");
+      return r.ok && !Array.isArray(r.data?.machines) ? { ok: false, status: 0, timedOut: false } : r;
+    },
+    valid: (snap) => Array.isArray(snap?.machines),
+    merge: (prev, next) => (prev && prev.machines.length > 0 && next.machines.length === 0 ? prev : next),
+    worthRemembering: (next) => next.machines.length > 0,
+  });
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -133,16 +121,14 @@ export default function MachinesPage() {
         <p className="text-sm text-gray-500">{l.subtitle}</p>
         {/* A list is on screen and the live read did not arrive: say so, keep the list. */}
         {failed && data && (
-          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>{failed.timedOut ? p.common.timedOut : p.common.loadError}</span>
-            <button
-              onClick={load}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
-            >
-              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{p.common.retry}
-            </button>
-          </p>
+          <LoadError
+            className="mt-2"
+            text={failed.timedOut ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={load}
+            loading={loading}
+            icon={<RefreshCw size={13} className={loading ? "animate-spin" : ""} />}
+          />
         )}
         {/* A remembered list is showing while the live read is still in flight. */}
         {!failed && loading && data && <p className="text-xs text-gray-400 mt-2">{p.common.stillLoading}</p>}
@@ -189,12 +175,14 @@ export default function MachinesPage() {
       )}
 
       {(failed && !data) || (data && !data.configured && data.machines.length === 0) ? (
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">
-          <p>{failed?.timedOut ? p.common.timedOut : l.unreachable}</p>
-          <Btn variant="outline" onClick={load} disabled={loading} className="mt-4">
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{p.common.retry}
-          </Btn>
-        </div>
+        <LoadError
+          variant="empty"
+          text={failed?.timedOut ? p.common.timedOut : l.unreachable}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+          icon={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />}
+        />
       ) : !data ? (
         <div className="flex justify-center py-16">
           <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />

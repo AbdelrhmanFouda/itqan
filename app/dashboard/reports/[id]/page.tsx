@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
-import { Spinner } from "@/components/dashboard/ui";
+import { Spinner, LoadError } from "@/components/dashboard/ui";
 import { LOCALE_AR } from "@/lib/format";
 
 type Report = {
@@ -70,15 +70,12 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
           >
             {isAr ? "→ التقارير" : "← Reports"}
           </Link>
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
-            <span>{err.timedOut ? p.common.timedOut : p.common.loadError}</span>
-            <button
-              onClick={load}
-              className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-            >
-              {p.common.retry}
-            </button>
-          </div>
+          <LoadError
+            variant="banner"
+            text={err.timedOut ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={load}
+          />
         </div>
       );
     }

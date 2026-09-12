@@ -1,6 +1,6 @@
 "use client";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { ad } from "@/lib/i18n.auth";
@@ -8,31 +8,16 @@ import { REQUESTABLE_ROLES, type Role } from "@/lib/roles";
 import {
   listUsers, approveUser, rejectUser, setUserRole, setPending, type UserProfile,
 } from "@/lib/users";
-import { Pill, Btn, Spinner, EmptyState, inputCls } from "@/components/dashboard/ui";
+import { Pill, Btn, Spinner, EmptyState, inputCls, LoadError } from "@/components/dashboard/ui";
 import { pd } from "@/lib/i18n.prod";
-import { readLastSeen, writeLastSeen, LOAD_TIMEOUT_MS } from "@/components/dashboard/last-seen";
+import { bounded } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
 import type { Tone } from "@/lib/prod-meta";
 
 const statusTone = (s: string): Tone => (s === "approved" ? "green" : s === "rejected" ? "red" : "amber");
 
 /** What this device saw last time — the list paints at once on the next open. */
 const LAST_KEY = "itqan.approvals.last";
-
-/**
- * The user list comes from the Firestore SDK, not a route, so `timedJson` does
- * not apply — but the failure mode was the same one every sheet page had: an
- * unresolved promise left the page spinning with no timeout and no error. A
- * lost connection or a denied read now becomes a visible line with a retry.
- */
-function bounded<T>(work: Promise<T>, ms = LOAD_TIMEOUT_MS): Promise<{ ok: true; data: T } | { ok: false; timedOut: boolean }> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ ok: false, timedOut: true }), ms);
-    work.then(
-      (data) => { clearTimeout(timer); resolve({ ok: true, data }); },
-      () => { clearTimeout(timer); resolve({ ok: false, timedOut: false }); },
-    );
-  });
-}
 
 export default function ApprovalsPage() {
   const { lang } = useLang();
@@ -41,10 +26,7 @@ export default function ApprovalsPage() {
   const isAr = lang === "ar";
   usePageTitle(a.approvals.title);
   const { user } = useAuth();
-  const [users, setUsers] = useState<UserProfile[] | null>(null);
   const [sel, setSel] = useState<Record<string, Role>>({});
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<null | { timedOut: boolean }>(null);
 
   /** Seed the per-row role selects without clobbering a choice already made. */
   const seedSel = useCallback((list: UserProfile[]) => {
@@ -62,24 +44,18 @@ export default function ApprovalsPage() {
     });
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const r = await bounded(listUsers());
-    setLoading(false);
-    // A failed read keeps whatever is on screen — an approval queue that
-    // silently empties itself is worse than one that says it could not load.
-    if (!r.ok) { setErr({ timedOut: r.timedOut }); return; }
-    setUsers(r.data);
-    setErr(null);
-    seedSel(r.data);
-    writeLastSeen(LAST_KEY, r.data);
-  }, [seedSel]);
-
-  useEffect(() => {
-    const snap = readLastSeen<UserProfile[]>(LAST_KEY);
-    if (Array.isArray(snap)) { setUsers(snap); seedSel(snap); }
-    load();
-  }, [load, seedSel]);
+  // The list comes from the Firestore SDK, not a route, so `bounded` stands in
+  // for `timedJson` — the failure mode was the same one every sheet page had:
+  // an unresolved promise left the page spinning with no timeout and no error.
+  // A failed read keeps whatever is on screen: an approval queue that silently
+  // empties itself is worse than one that says it could not load.
+  const { data: users, loading, failed: err, reload: load } = useRemembered<UserProfile[]>({
+    key: LAST_KEY,
+    read: () => bounded(listUsers()),
+    valid: (snap) => Array.isArray(snap),
+    hydrate: (snap) => { seedSel(snap); return snap; },
+    onLoaded: seedSel,
+  });
 
   async function approve(uid: string) { await approveUser(uid, sel[uid] ?? REQUESTABLE_ROLES[0]); load(); }
   async function reject(uid: string) { await rejectUser(uid); load(); }
@@ -90,15 +66,13 @@ export default function ApprovalsPage() {
     s === "approved" ? a.approvals.statusApproved : s === "rejected" ? a.approvals.statusRejected : a.approvals.statusPending;
 
   const errorLine = err ? (
-    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
-      <span>{err.timedOut ? p.common.timedOut : p.common.loadError}</span>
-      <button
-        onClick={load}
-        className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-      >
-        {p.common.retry}
-      </button>
-    </div>
+    <LoadError
+      variant="banner"
+      className="mb-4"
+      text={err.timedOut ? p.common.timedOut : p.common.loadError}
+      retry={p.common.retry}
+      onRetry={load}
+    />
   ) : null;
 
   if (users === null) {

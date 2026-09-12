@@ -25,11 +25,12 @@ import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
-import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner } from "@/components/dashboard/ui";
+import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { ageLabel, numLocale } from "@/lib/format";
-import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { nameKey } from "@/lib/master-lookup";
 import {
@@ -80,9 +81,6 @@ export default function JobsPage() {
   const today = todayIso();
   const fmt = useCallback((n: number) => Number(n || 0).toLocaleString(numLocale(isAr), { maximumFractionDigits: 2 }), [isAr]);
 
-  const [data, setData] = useState<Data | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [master, setMaster] = useState<MasterRow[]>([]);
   const [machines, setMachines] = useState<MachineAgg[]>([]);
   // list state
@@ -101,19 +99,28 @@ export default function JobsPage() {
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      // A non-2xx (401 on a missing/expired token) must land in the ERROR
-      // state — parsed as data it flows into `configured: undefined` and the
-      // page tells the user to go add a `jobs` tab to the sheet, which is a
-      // lie about what went wrong.
-      const r = await timedJson<Data>(authedFetch, "/api/jobs");
-      if (!r.ok) throw new Error(String(r.status));
-      const json = r.data;
-      setData(json);
-      setError(false);
-      writeLastSeen(LAST_KEY, json);
+  // The two lists that feed the new-order form (Master names + clients, the
+  // registry) are asked for AFTER the order book answers: fired first, their
+  // tab reads sat ahead of «أوامر العمل» in the instance's one serial bridge
+  // queue and delayed the list by a Master read (2026-09-10 audit).
+  const listsStarted = useRef(false);
+  const loadLists = useCallback(() => {
+    if (listsStarted.current) return;
+    listsStarted.current = true;
+    fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+    authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
+  }, []);
+  // Snapshot → paint → bounded read → keep what is on screen when it fails.
+  // A non-2xx (401 on a missing/expired token) must land in the FAILED state —
+  // parsed as data it flows into `configured: undefined` and the page tells the
+  // user to go add a «أوامر العمل» tab, which is a lie about what went wrong.
+  const { data, setData, loading, failed: error, reload: load } = useRemembered<Data>({
+    key: LAST_KEY,
+    read: () => timedJson<Data>(authedFetch, "/api/jobs"),
+    valid: (snap) => Array.isArray(snap?.jobs),
+    // A snapshot carries no server-side age — the spinner is its honest hint.
+    hydrate: (snap) => ({ ...snap, meta: undefined }),
+    onLoaded: (json) => {
       // The server served a copy older than a minute and has already begun
       // refreshing it in the background (lib/sheets.ts): ask once more in a
       // few seconds so the page catches up without anyone pressing anything.
@@ -124,29 +131,11 @@ export default function JobsPage() {
         staleRefetches.current += 1;
         refetchTimer.current = setTimeout(() => { refetchTimer.current = null; loadRef.current(); }, 8000);
       }
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    onSettled: loadLists,
+  });
   loadRef.current = load;
-  useEffect(() => {
-    // What this device saw last time renders AT ONCE (the refresh icon spins);
-    // the live answer replaces it. A phone opening the page after lunch used
-    // to look at a spinner for the whole sheet round trip.
-    const snap = readLastSeen<Data>(LAST_KEY);
-    if (snap && Array.isArray(snap.jobs)) setData({ ...snap, meta: undefined });
-    // The two lists that feed the new-order form (Master names + clients, the
-    // registry) are asked for AFTER the order book answers: fired first, their
-    // tab reads sat ahead of «أوامر العمل» in the instance's one serial bridge
-    // queue and delayed the list by a Master read (2026-09-10 audit).
-    load().then(() => {
-      fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
-      authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
-    });
-    return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); };
-  }, [load]);
+  useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); }, []);
 
   /* ------------------------------- the list -------------------------------- */
 
@@ -279,7 +268,13 @@ export default function JobsPage() {
     return (
       <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{p.jobs.title}</h1>
-        <div className="bg-white border border-dashed border-red-300 rounded-xl p-10 text-center text-sm text-red-600">{p.common.loadError}</div>
+        <LoadError
+          variant="empty"
+          text={error.timedOut ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+          loading={loading}
+        />
       </div>
     );
   }
@@ -306,7 +301,15 @@ export default function JobsPage() {
         </div>
         <p className="text-sm text-gray-500 mt-1">{p.jobs.subtitle} · {p.jobs.listedBy}</p>
         {/* A snapshot is showing and the live read failed: say so, keep the snapshot. */}
-        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2">{p.common.loadError}</p>}
+        {error && (
+          <LoadError
+            className="mt-2"
+            text={error.timedOut ? p.common.timedOut : p.common.loadError}
+            retry={p.common.retry}
+            onRetry={load}
+            loading={loading}
+          />
+        )}
         {dataAge > STALE_AFTER_MS && (
           <p className="text-xs text-amber-700 mt-2">{fill(p.jobs.dataAge, { age: ageLabel(dataAge, isAr) })}</p>
         )}

@@ -3,12 +3,13 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { pd } from "@/lib/i18n.prod";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Plus, FileText, Trash2, Sparkles } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
-import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
-import { EmptyState, inputCls, Spinner } from "@/components/dashboard/ui";
+import { timedJson } from "@/components/dashboard/last-seen";
+import { useRemembered } from "@/components/dashboard/use-remembered";
+import { EmptyState, inputCls, Spinner, LoadError } from "@/components/dashboard/ui";
 import { LOCALE_AR } from "@/lib/format";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
@@ -39,9 +40,6 @@ export default function ReportsPage() {
   usePageTitle(tr.dashboard.reports);
   // null = nothing to show yet. A failed refresh must never turn a filled list
   // into an empty one — the list only ever moves forward on a good answer.
-  const [reports, setReports] = useState<Report[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<null | { timedOut: boolean }>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   // A failed POST used to close the modal and reload as if it had saved.
@@ -62,25 +60,15 @@ export default function ReportsPage() {
   const [drafted, setDrafted] = useState<DraftMeta | null>(null);
   const [draftError, setDraftError] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    // Bounded: this route reads the sheet, which has answered in 160 s on a
-    // cold instance. Without a timeout the page span until the platform killed
-    // the function; now a stall becomes a line with a retry.
-    const r = await timedJson<Report[]>(authedFetch, "/api/reports");
-    setLoading(false);
-    if (!r.ok) { setErr({ timedOut: r.timedOut }); return; }
-    const list = Array.isArray(r.data) ? r.data : [];
-    setReports(list);
-    setErr(null);
-    writeLastSeen(LAST_KEY, list);
-  }, []);
-
-  useEffect(() => {
-    const snap = readLastSeen<Report[]>(LAST_KEY);
-    if (Array.isArray(snap)) setReports(snap);
-    load();
-  }, [load]);
+  // Bounded: this route reads the sheet, which has answered in 160 s on a cold
+  // instance. Without a timeout the page span until the platform killed the
+  // function; now a stall becomes a line with a retry, and the list only ever
+  // moves forward on a good answer.
+  const { data: reports, loading, failed: err, reload: load } = useRemembered<Report[]>({
+    key: LAST_KEY,
+    read: () => timedJson<Report[]>(authedFetch, "/api/reports"),
+    valid: (snap) => Array.isArray(snap),
+  });
 
   /**
    * Pre-fill the form from the month's real numbers + the shared AI review.
@@ -153,15 +141,13 @@ export default function ReportsPage() {
       </div>
 
       {err && (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-red-700">
-          <span>{err.timedOut ? p.common.timedOut : p.common.loadError}</span>
-          <button
-            onClick={load}
-            className="inline-flex items-center min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-          >
-            {p.common.retry}
-          </button>
-        </div>
+        <LoadError
+          variant="banner"
+          className="mb-4"
+          text={err.timedOut ? p.common.timedOut : p.common.loadError}
+          retry={p.common.retry}
+          onRetry={load}
+        />
       )}
       {/* A snapshot is on screen and the live answer is still coming. */}
       {loading && reports !== null && (
