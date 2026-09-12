@@ -116,12 +116,14 @@ test("every authedFetch targets /api", () => {
 });
 
 test("the pages that read Master for the mould number use the guarded route with a token", () => {
-  // The register, production and quality pages (2026-09-04).
+  // The register, production and quality pages (2026-09-04); the jobs list and
+  // the job detail joined them in cleanup batch 7 — the detail was the last
+  // page reading the «الاسطمبات» formula view CLAUDE.md warns about.
   const users = CALLS.filter((c) => c.url === "/api/molds");
   assert.ok(users.length >= 3, `expected the register + production + quality, found ${users.length}`);
   for (const c of users) assert.ok(c.authed, `${c.file}:${c.line} must use authedFetch for /api/molds`);
   const files = new Set(users.map((c) => c.file));
-  for (const f of ["components/dashboard/molds-register.tsx", "app/dashboard/production/page.tsx", "app/dashboard/quality/page.tsx"]) {
+  for (const f of ["components/dashboard/molds-register.tsx", "app/dashboard/production/page.tsx", "app/dashboard/quality/page.tsx", "app/dashboard/jobs/[id]/page.tsx"]) {
     assert.ok(files.has(f), `${f} does not read /api/molds`);
   }
 });

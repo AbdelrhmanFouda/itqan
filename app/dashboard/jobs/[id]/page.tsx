@@ -108,8 +108,10 @@ export default function JobDetailPage() {
   const loadLists = useCallback(() => {
     fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
     // A hand-typed product name that doesn't match Master exactly breaks the
-    // join, so offer the real names the same way the add form does.
-    fetch("/api/sheet/molds").then((x) => x.json()).then((mo) => setMolds(mo.records ?? [])).catch(() => {});
+    // join, so offer the real names the same way the add form does — from
+    // MASTER through the guarded /api/molds, not from the «الاسطمبات» formula
+    // view (cleanup batch 7; the production and quality pages already did).
+    authedFetch("/api/molds").then((x) => (x.ok ? x.json() : { molds: [] })).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
   }, []);
   const listsStarted = useRef(false);
 
