@@ -47,7 +47,7 @@ import {
   historyFor, lineWeightKg, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
   searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LineWeight, type LocationStat,
 } from "@/lib/storage-filter";
-import { Btn, EmptyState, Field, inputCls, Modal, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
+import { Btn, EmptyState, Field, inputCls, Modal, Spinner, LoadError, StatTile, iconBtnCls, filterCls } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
 import { ItemDrawer, MoveModal, type MoveHalf, type MoveRequest } from "@/components/dashboard/storage-item";
 import {
@@ -557,18 +557,6 @@ export default function StoragePage() {
     { key: "balance", label: s.tabs.balance },
     ...(canWrite ? ([{ key: "in", label: s.tabs.in }, { key: "out", label: s.tabs.out }] as { key: Tab; label: string }[]) : []),
   ];
-  // NOT `inputCls`: that starts with w-full, and a select stretched to the full
-  // width puts each filter on its own row of a phone. `w-auto` cannot fix it —
-  // Tailwind resolves the two by stylesheet order, and w-full wins. Grow to
-  // share a row instead, two per line at 375px.
-  const selCls =
-    "border border-gray-300 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 text-base sm:text-sm " +
-    "text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 " +
-    "focus:border-blue-400 flex-1 min-w-[8.5rem] sm:flex-none sm:w-auto sm:max-w-[12rem]";
-  const iconBtn =
-    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 " +
-    "hover:bg-gray-100 active:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 " +
-    "focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
   const bigBtn =
     "flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-12 sm:min-h-10 rounded-xl " +
     "text-base sm:text-sm font-semibold text-white shadow-sm transition-colors focus-visible:outline-none " +
@@ -599,15 +587,15 @@ export default function StoragePage() {
             </>
           )}
           <div className="flex items-center gap-0.5 ms-auto">
-            <button onClick={load} className={iconBtn} title={s.refresh} aria-label={s.refresh} disabled={loading}>
+            <button onClick={load} className={iconBtnCls} title={s.refresh} aria-label={s.refresh} disabled={loading}>
               <RefreshCw size={15} className={loading ? "animate-spin" : ""} /><span className="hidden sm:inline">{s.refresh}</span>
             </button>
             {canWrite && (
               <>
-                <button onClick={handleRefreshLists} className={iconBtn} title={s.refreshLists} aria-label={s.refreshLists}>
+                <button onClick={handleRefreshLists} className={iconBtnCls} title={s.refreshLists} aria-label={s.refreshLists}>
                   <ListRestart size={15} /><span className="hidden sm:inline">{s.refreshLists}</span>
                 </button>
-                <a href={SHEET_URL} target="_blank" rel="noreferrer" className={iconBtn} title={s.openSheet} aria-label={s.openSheet}>
+                <a href={SHEET_URL} target="_blank" rel="noreferrer" className={iconBtnCls} title={s.openSheet} aria-label={s.openSheet}>
                   <ExternalLink size={15} /><span className="hidden sm:inline">{s.openSheet}</span>
                 </a>
               </>
@@ -693,7 +681,7 @@ export default function StoragePage() {
             value={locFilter}
             onChange={(e) => setLocFilter(e.target.value)}
             aria-label={s.filters.location}
-            className={`${selCls} ${locFilter ? "border-blue-400 text-blue-700" : ""}`}
+            className={`${filterCls} ${locFilter ? "border-blue-400 text-blue-700" : ""}`}
           >
             <option value="">{s.filters.allLocations}</option>
             {locGroups.map(([g, items]) => (
@@ -711,7 +699,7 @@ export default function StoragePage() {
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as ItemType)}
             aria-label={s.filters.itemType}
-            className={`${selCls} ${typeFilter ? "border-blue-400 text-blue-700" : ""}`}
+            className={`${filterCls} ${typeFilter ? "border-blue-400 text-blue-700" : ""}`}
           >
             <option value="">{s.filters.allTypes}</option>
             <option value="منتج">{s.itemTypes.product}</option>
@@ -724,7 +712,7 @@ export default function StoragePage() {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as Status)}
                 aria-label={s.filters.status}
-                className={`${selCls} ${statusFilter ? "border-blue-400 text-blue-700" : ""}`}
+                className={`${filterCls} ${statusFilter ? "border-blue-400 text-blue-700" : ""}`}
               >
                 <option value="">{s.filters.allStatus}</option>
                 <option value="in">{s.filters.inStock}</option>
@@ -735,7 +723,7 @@ export default function StoragePage() {
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as Sort)}
                 aria-label={s.filters.sort}
-                className={selCls}
+                className={filterCls}
               >
                 <option value="sheet">{s.filters.sortSheet}</option>
                 <option value="item">{s.filters.sortItem}</option>

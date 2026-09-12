@@ -52,6 +52,26 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 export const inputCls =
   "w-full border border-gray-300 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 text-base sm:text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 disabled:bg-gray-50 disabled:text-gray-400";
 
+/**
+ * A small square-ish icon button in a header or a filter row (refresh, clear,
+ * open-the-sheet). Rebuilt inside three render bodies on every render before
+ * cleanup batch 7 — jobs, stock and storage held byte-identical copies.
+ */
+export const iconBtnCls =
+  "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 " +
+  "active:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
+
+/**
+ * A filter control in a wrapping row. NOT `inputCls`: that starts with w-full,
+ * and a select stretched to the full width puts each filter on its own row of
+ * a phone. `w-auto` cannot fix it — Tailwind resolves the two by stylesheet
+ * order and w-full wins. This grows to share a row instead, two per line at
+ * 375px.
+ */
+export const filterCls =
+  "border border-gray-300 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 text-base sm:text-sm text-gray-900 bg-white " +
+  "focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 flex-1 min-w-[8.5rem] sm:flex-none sm:w-auto sm:max-w-[12rem]";
+
 export function Btn({
   children,
   onClick,

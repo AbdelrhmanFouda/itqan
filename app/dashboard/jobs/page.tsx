@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
-import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
+import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError, StatTile, iconBtnCls } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { ageLabel, fill, numLocale } from "@/lib/format";
@@ -279,17 +279,13 @@ export default function JobsPage() {
   if (!data) return <div className="flex justify-center py-16"><Spinner text={p.common.loading} /></div>;
   const dataAge = data.meta?.dataAgeMs ?? 0;
 
-  const iconBtn =
-    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 " +
-    "active:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
-
   return (
     <div className="max-w-5xl" dir={isAr ? "rtl" : "ltr"}>
       <div className="mb-5 sm:mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-gray-900">{p.jobs.title}</h1>
           <div className="flex items-center gap-1.5">
-            <button onClick={load} className={iconBtn} title={p.common.loading} aria-label={isAr ? "تحديث" : "Refresh"} disabled={loading}>
+            <button onClick={load} className={iconBtnCls} title={p.common.loading} aria-label={isAr ? "تحديث" : "Refresh"} disabled={loading}>
               <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             </button>
             {data.writable && data.configured && (
@@ -354,7 +350,7 @@ export default function JobsPage() {
               )}
             </label>
             {filtered && (
-              <button onClick={() => { setTile(""); setSearch(""); }} className={iconBtn}><X size={14} /> {p.common.all}</button>
+              <button onClick={() => { setTile(""); setSearch(""); }} className={iconBtnCls}><X size={14} /> {p.common.all}</button>
             )}
           </div>
 

@@ -138,7 +138,8 @@ type Recorder = ReturnType<typeof useAudioRecorder>;
 
 /* ------------------------------- the player ------------------------------ */
 
-const iconBtn =
+/** The round play/stop button in the audio player — unrelated to ui.tsx iconBtnCls. */
+const roundIconBtn =
   "shrink-0 inline-flex items-center justify-center rounded-full min-w-11 min-h-11 w-11 h-11 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1 transition-colors";
 
@@ -203,7 +204,7 @@ function Player({
         type="button"
         onClick={toggle}
         aria-label={playing ? strings.pause : strings.play}
-        className={`${iconBtn} ${playing ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
+        className={`${roundIconBtn} ${playing ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
       >
         {playing ? <Pause size={18} /> : <Play size={18} className="ms-0.5" />}
       </button>

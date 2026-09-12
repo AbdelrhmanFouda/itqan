@@ -27,7 +27,7 @@ import { codeKey } from "@/lib/work-orders";
 import { ageLabel, fill, numLocale } from "@/lib/format";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { EmptyState, Pill, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
+import { EmptyState, Pill, Spinner, LoadError, StatTile, iconBtnCls, filterCls } from "@/components/dashboard/ui";
 import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
 type Resp = {
@@ -177,12 +177,6 @@ export default function StockPage() {
     );
   }
 
-  const selCls =
-    "border border-gray-300 rounded-lg px-3 py-2 min-h-11 sm:min-h-0 text-base sm:text-sm text-gray-900 bg-white " +
-    "focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 flex-1 min-w-[8.5rem] sm:flex-none sm:w-auto sm:max-w-[12rem]";
-  const iconBtn =
-    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 sm:min-h-0 rounded-lg text-sm text-gray-600 hover:bg-gray-100 " +
-    "active:bg-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
   const asOf = new Date(data.meta.asOf).toLocaleTimeString(numLocale(isAr), { hour: "2-digit", minute: "2-digit" });
 
   return (
@@ -190,7 +184,7 @@ export default function StockPage() {
       <div className="mb-5 sm:mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-gray-900">{s.title}</h1>
-          <button onClick={load} className={iconBtn} title={s.refresh} aria-label={s.refresh} disabled={loading}>
+          <button onClick={load} className={iconBtnCls} title={s.refresh} aria-label={s.refresh} disabled={loading}>
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} /><span className="hidden sm:inline">{s.refresh}</span>
           </button>
         </div>
@@ -260,18 +254,18 @@ export default function StockPage() {
         </button>
       </div>
       <div className={`${filtersOpen ? "flex" : "hidden sm:flex"} flex-wrap items-center gap-2 mb-3`}>
-        <select className={selCls} value={type} onChange={(e) => setType(e.target.value as TypeFilter)} aria-label={s.filters.type}>
+        <select className={filterCls} value={type} onChange={(e) => setType(e.target.value as TypeFilter)} aria-label={s.filters.type}>
           <option value="">{s.filters.all}</option>
           <option value="منتج">{s.filters.products}</option>
           <option value="خامة">{s.filters.materials}</option>
         </select>
-        <select className={selCls} value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label={s.filters.sort}>
+        <select className={filterCls} value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label={s.filters.sort}>
           <option value="net">{s.filters.sortNet}</option>
           <option value="available">{s.filters.sortAvailable}</option>
           <option value="item">{s.filters.sortItem}</option>
         </select>
         {filtered && (
-          <button onClick={clearFilters} className={iconBtn}><X size={14} /> {s.filters.clear}</button>
+          <button onClick={clearFilters} className={iconBtnCls}><X size={14} /> {s.filters.clear}</button>
         )}
         <span className="text-xs text-gray-400 ms-auto">{fill(s.filters.showing, { n: shown.length, total: rows.length })}</span>
       </div>
