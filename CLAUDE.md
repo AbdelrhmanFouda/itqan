@@ -1133,9 +1133,16 @@ own «المتوقع». It is a domain question that outlived the feature.
   and their stocks)**, verifies the Firebase ID token via `lib/api-guard.ts`
   `requireRole(req[, allowed])` (owner/manager always pass; any approved role by default).
   Client side, those calls go through `lib/authed-fetch.ts`. A NEW mutating route/caller must
-  follow the same pair. Operational reads (sheet molds/products/machines/runs/oee/issues
-  list) stay open deliberately — **that list is exhaustive: a read not on it is either
-  guarded or it is a leak**, which is exactly how jobs and storage sat open for weeks.
+  follow the same pair. The open reads stay open deliberately, and **that list is
+  exhaustive: a read not on it is either guarded or it is a leak**, which is exactly how
+  jobs and storage sat open for weeks. The list lives in ONE place — `DOCUMENTED_OPEN`
+  in `tests/api-guards.test.ts`, checked against every route file on disk; today it is
+  `google/callback`, `google/connect`, `health`, `issues`, `machines`, `machines/[id]`,
+  `machines/[id]/notes`, `oee`, `public/showcase`, `runs`, `warm`. The entity reads on
+  `/api/sheet/[entity]` are the conditional case: `lib/open-reads.ts` holds `OPEN_READS`
+  (molds, products, machines, issues) and `WRITABLE_ENTITIES` (products, clients), both
+  DENY-BY-DEFAULT and pinned by `tests/open-reads.test.ts`. Quote no other list here —
+  two copies is how this one drifted.
   `/api/molds` (Master for the register, 2026-09-04) is GUARDED — any approved role
   reads and writes (owner's word). `tests/api-guards.test.ts` pins every route file and
   handler's classification against its own source, and `tests/page-fetches.test.ts`

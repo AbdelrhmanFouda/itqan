@@ -74,8 +74,10 @@ export type NavKey =
  * reintroduce the coupling by accident.
  *
  * ⚠ This table is UX gating: it decides what a role SEES and can navigate to.
- * It is not a security boundary. The operational read APIs (molds, products,
- * machines, runs, oee, issues) stay deliberately open — see CLAUDE.md.
+ * It is not a security boundary. Some operational read APIs stay deliberately
+ * open; the exhaustive list is DOCUMENTED_OPEN in tests/api-guards.test.ts
+ * (with lib/open-reads.ts for /api/sheet/[entity]) — never repeated here,
+ * because a second copy of it is a copy that drifts.
  * Removing a page from a role hides it; it does not classify the data.
  */
 export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
