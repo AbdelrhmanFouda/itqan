@@ -22,16 +22,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Mic, Pause, Play, Square, Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
+import { inputCls } from "@/components/dashboard/ui";
 import {
   AUDIO_BITS_PER_SECOND, MAX_AUDIO_SECONDS, formatSeconds, pickRecordingMime, type AudioRef,
 } from "@/lib/issues";
+import type { pd } from "@/lib/i18n.prod";
 
-type RecorderStrings = {
-  recording: string; tapToStop: string; stopRecording: string; maxHint: string; preview: string;
-  deleteRecording: string; rerecord: string; play: string; pause: string; loadingAudio: string;
-  cantPlay: string; openInDrive: string; audioLoadFailed: string; voiceNote: string;
-  micDenied: string; micInsecure: string; micUnsupported: string; micFailed: string;
-};
+/**
+ * The strings these controls need, taken FROM pd.issues rather than restated.
+ * It was an eighteen-field structural copy until cleanup batch 7, so renaming
+ * a key in lib/i18n.prod.ts failed here at the call site instead of at the
+ * declaration — and the eighteen keys read as orphans to a grep.
+ */
+export type RecorderStrings = Pick<
+  (typeof pd)["en"]["issues"],
+  | "recording" | "tapToStop" | "stopRecording" | "maxHint" | "preview"
+  | "deleteRecording" | "rerecord" | "play" | "pause" | "loadingAudio"
+  | "cantPlay" | "openInDrive" | "audioLoadFailed" | "voiceNote"
+  | "micDenied" | "micInsecure" | "micUnsupported" | "micFailed"
+>;
 
 export type Recording = { blob: Blob; mime: string; seconds: number; url: string };
 type RecorderError = "" | "denied" | "insecure" | "unsupported" | "failed";
@@ -392,5 +401,74 @@ export function SavedClip({
         : <Play size={compact ? 14 : 16} className="ms-0.5" />}
       {state === "loading" ? strings.loadingAudio : strings.voiceNote}
     </button>
+  );
+}
+
+/* ------------------------ record-or-type, in one place -------------------- */
+
+/**
+ * «سجّل المشكلة بصوتك» + the textarea under it. The new-issue form and the
+ * issue drawer each wrote this block twice (problem and solution) before
+ * cleanup batch 7 — same RecordControl, same saved clip, same
+ * `audioOk ? typeX : x` label rule, four occurrences that could drift.
+ *
+ * The textarea stays: words are OPTIONAL once a clip exists, never forbidden.
+ */
+export function AudioField({
+  recorder,
+  audioOk,
+  recordLabel,
+  rerecordLabel,
+  textLabel,
+  value,
+  onChange,
+  rows = 3,
+  disabled,
+  strings,
+  saved,
+  noAudioNote,
+}: {
+  recorder: Recorder;
+  /** The bridge really serves audio — probed by the page. */
+  audioOk: boolean;
+  recordLabel: string;
+  /** Shown instead of `recordLabel` when a clip is already saved. */
+  rerecordLabel?: string;
+  textLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  disabled?: boolean;
+  strings: RecorderStrings;
+  /** A clip already in Drive — hidden while a new one is being recorded over it. */
+  saved?: AudioRef | null;
+  /** The line that explains why there is no microphone here. */
+  noAudioNote?: string;
+}) {
+  return (
+    <>
+      {saved && !recorder.recording && (
+        <div className="mb-2"><SavedClip clip={saved} strings={strings} /></div>
+      )}
+      {audioOk ? (
+        <RecordControl
+          recorder={recorder}
+          label={saved && rerecordLabel ? rerecordLabel : recordLabel}
+          strings={strings}
+          disabled={disabled}
+        />
+      ) : noAudioNote ? (
+        <p className="text-xs text-gray-500 mb-1">{noAudioNote}</p>
+      ) : null}
+      <label className="block mt-3">
+        <span className="block text-xs font-medium text-gray-600 mb-1">{textLabel}</span>
+        <textarea
+          className={`${inputCls} resize-none`}
+          rows={rows}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </label>
+    </>
   );
 }

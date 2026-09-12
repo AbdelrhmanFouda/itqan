@@ -38,7 +38,7 @@ import {
   cairoToday, countByStatus, dayLabel, diffIssue, extFor, hasProblem, matchesIssue,
   type AudioRef, type IssueStatus,
 } from "@/lib/issues";
-import { RecordControl, SavedClip, useAudioRecorder, type Recording } from "@/components/dashboard/audio-recorder";
+import { AudioField, SavedClip, useAudioRecorder, type Recording } from "@/components/dashboard/audio-recorder";
 
 type Issue = {
   row: number; date: string; machine: string; product: string; category: string;
@@ -619,16 +619,18 @@ function NewIssueSheet({
         {/* THE PROBLEM — the big button first; words are optional once it is recorded. */}
         <div className="mb-3 rounded-2xl border border-gray-200 bg-gray-50/60 p-3">
           <span className="block text-xs font-semibold text-gray-700 mb-2">{t.problem}</span>
-          {audioOk ? (
-            <RecordControl recorder={issueRec} label={t.recordProblem} strings={t} disabled={saving} />
-          ) : (
-            <p className="text-xs text-gray-500 mb-1">{t.audioNeedsBridge}</p>
-          )}
-          <label className="block mt-3">
-            <span className="block text-xs font-medium text-gray-600 mb-1">{audioOk ? t.typeProblem : t.description}</span>
-            <textarea className={`${inputCls} resize-none`} rows={3} value={form.description}
-              onChange={(e) => set("description", e.target.value)} />
-          </label>
+          <AudioField
+            recorder={issueRec}
+            audioOk={audioOk}
+            recordLabel={t.recordProblem}
+            textLabel={audioOk ? t.typeProblem : t.description}
+            value={form.description}
+            onChange={(v) => set("description", v)}
+            rows={3}
+            disabled={saving}
+            strings={t}
+            noAudioNote={t.audioNeedsBridge}
+          />
         </div>
 
         {/* THE SOLUTION — folded: most faults are logged before they are fixed. */}
@@ -649,12 +651,17 @@ function NewIssueSheet({
                 <X size={16} />
               </button>
             </div>
-            {audioOk && <RecordControl recorder={solRec} label={t.recordSolution} strings={t} disabled={saving} />}
-            <label className="block mt-3">
-              <span className="block text-xs font-medium text-gray-600 mb-1">{audioOk ? t.typeSolution : t.action}</span>
-              <textarea className={`${inputCls} resize-none`} rows={2} value={form.action}
-                onChange={(e) => set("action", e.target.value)} />
-            </label>
+            <AudioField
+              recorder={solRec}
+              audioOk={audioOk}
+              recordLabel={t.recordSolution}
+              textLabel={audioOk ? t.typeSolution : t.action}
+              value={form.action}
+              onChange={(v) => set("action", v)}
+              rows={2}
+              disabled={saving}
+              strings={t}
+            />
           </div>
         )}
 
@@ -858,42 +865,36 @@ function IssueDrawer({
           </div>
 
           <Section title={t.problem}>
-            {issue.issueAudio && !issueRec.recording && (
-              <div className="mb-2"><SavedClip clip={issue.issueAudio} strings={t} /></div>
-            )}
-            {audioOk && (
-              <RecordControl
-                recorder={issueRec}
-                label={issue.issueAudio ? t.rerecord : t.recordProblem}
-                strings={t}
-                disabled={saving}
-              />
-            )}
-            <label className="block mt-3">
-              <span className="block text-xs font-medium text-gray-600 mb-1">{audioOk ? t.typeProblem : t.description}</span>
-              <textarea className={`${inputCls} resize-none`} rows={3} value={draft.description}
-                onChange={(e) => set("description", e.target.value)} />
-            </label>
+            <AudioField
+              recorder={issueRec}
+              audioOk={audioOk}
+              saved={issue.issueAudio}
+              recordLabel={t.recordProblem}
+              rerecordLabel={t.rerecord}
+              textLabel={audioOk ? t.typeProblem : t.description}
+              value={draft.description}
+              onChange={(v) => set("description", v)}
+              rows={3}
+              disabled={saving}
+              strings={t}
+            />
           </Section>
 
           <div ref={solutionRef}>
             <Section title={t.solution}>
-              {issue.solutionAudio && !solRec.recording && (
-                <div className="mb-2"><SavedClip clip={issue.solutionAudio} strings={t} /></div>
-              )}
-              {audioOk && (
-                <RecordControl
-                  recorder={solRec}
-                  label={issue.solutionAudio ? t.rerecord : t.recordSolution}
-                  strings={t}
-                  disabled={saving}
-                />
-              )}
-              <label className="block mt-3">
-                <span className="block text-xs font-medium text-gray-600 mb-1">{audioOk ? t.typeSolution : t.action}</span>
-                <textarea className={`${inputCls} resize-none`} rows={2} value={draft.action}
-                  onChange={(e) => set("action", e.target.value)} />
-              </label>
+              <AudioField
+                recorder={solRec}
+                audioOk={audioOk}
+                saved={issue.solutionAudio}
+                recordLabel={t.recordSolution}
+                rerecordLabel={t.rerecord}
+                textLabel={audioOk ? t.typeSolution : t.action}
+                value={draft.action}
+                onChange={(v) => set("action", v)}
+                rows={2}
+                disabled={saving}
+                strings={t}
+              />
             </Section>
           </div>
 
