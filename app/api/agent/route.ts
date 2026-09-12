@@ -386,7 +386,10 @@ export async function GET(req: NextRequest) {
   }
   const role = await roleFor(user, token);
   const allowed = !!role && ALLOWED.includes(role);
-  if (!allowed) return NextResponse.json({ allowed: false, role });
+  // A refusal is an HTTP refusal (2026-09-10) — it used to answer 200 with
+  // { allowed:false }. The assistant page reads `allowed`, which is undefined
+  // in this body, so it takes the same "no access" branch.
+  if (!allowed) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   const usage: UsageState = await peekUsage(user.uid, role);
   return NextResponse.json({
     allowed: true,
