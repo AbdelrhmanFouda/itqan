@@ -23,7 +23,7 @@ import { pd } from "@/lib/i18n.prod";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum, numLocale } from "@/lib/format";
 
 type Job = { id: string; client: string; status: string; dueDate: string; produced: number };
 type Run = { machine: string; date: string; goodUnits: number; scrapUnits: number; downtimeMin: number };
@@ -47,7 +47,7 @@ function Bars({
   pending?: boolean;
   pendingText?: string;
 }) {
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const fmt = (n: number) => fmtNum(n, isAr);
   if (pending)
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 flex justify-center">
@@ -134,7 +134,7 @@ export default function FinancePage() {
     load();
   }, [load]);
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const fmt = (n: number) => fmtNum(n, isAr);
   /** A figure whose source is still out reads «…», never 0. */
   const fmtOr = (n: number, have: boolean) => (have ? fmt(n) : PENDING);
 
@@ -179,7 +179,7 @@ export default function FinancePage() {
   const months = Object.keys(monthMap).sort().slice(-6);
   // Presentation only: "2026-08" → "Aug 2026" / "أغسطس ٢٠٢٦"
   const monthLabel = (k: string) =>
-    new Date(k + "-01T00:00").toLocaleDateString(isAr ? LOCALE_AR : "en-US", { month: "short", year: "numeric" });
+    new Date(k + "-01T00:00").toLocaleDateString(numLocale(isAr), { month: "short", year: "numeric" });
   const goodByMonth = months.map((k) => ({ label: monthLabel(k), value: monthMap[k].good }));
   const scrapByMonth = months.map((k) => {
     const tot = monthMap[k].good + monthMap[k].scrap;

@@ -22,7 +22,7 @@ import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { Pill, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum, numLocale } from "@/lib/format";
 
 type Inquiry = {
   id: string; name: string; company: string; phone: string;
@@ -100,8 +100,8 @@ export default function SalesPage() {
     load();
   }, [load]);
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
-  const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(isAr ? LOCALE_AR : "en-US") : "—");
+  const fmt = (n: number) => fmtNum(n, isAr);
+  const recv = (ms: number) => (ms ? new Date(ms).toLocaleDateString(numLocale(isAr)) : "—");
   const produced = useMemo(() => {
     const by: Record<string, number> = {};
     for (const jb of jobs ?? []) by[jb.id] = jb.produced || 0;

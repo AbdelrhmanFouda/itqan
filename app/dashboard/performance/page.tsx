@@ -4,13 +4,13 @@ import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { downtimeReasonLabel } from "@/lib/prod-meta";
 import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
-import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard, fmtPct, fmtNum } from "@/components/dashboard/charts";
+import { DonutGauge, TrendChart, Pareto, LossBars, ChartCard } from "@/components/dashboard/charts";
 import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum, fmtPct, numLocale } from "@/lib/format";
 
 type OEE = {
   availability: number; performance: number; quality: number; oee: number;
@@ -498,7 +498,7 @@ export default function PerformancePage() {
               <span className="text-xs text-indigo-400">· {t.aiDaily}</span>
               {review?.generatedAt && (
                 <span className="text-xs text-gray-400">
-                  {t.aiUpdated}: {new Date(review.generatedAt).toLocaleString(isAr ? LOCALE_AR : "en-US", { dateStyle: "medium", timeStyle: "short" })}
+                  {t.aiUpdated}: {new Date(review.generatedAt).toLocaleString(numLocale(isAr), { dateStyle: "medium", timeStyle: "short" })}
                 </span>
               )}
               <span className="flex-1" />

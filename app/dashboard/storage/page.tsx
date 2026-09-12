@@ -55,7 +55,7 @@ import {
   ListRestart, MapPin, Pencil, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import type { StorageBalance, StorageData, StorageMovement } from "@/lib/storage";
-import { LOCALE_AR, fill } from "@/lib/format";
+import { fill, fmtNum } from "@/lib/format";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
 const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
@@ -100,7 +100,7 @@ export default function StoragePage() {
   const { user, profile } = useAuth();
   const role = profile?.role ?? null;
   const canWrite = role !== null && (role === "storage" || hasFullAccess(role));
-  const fmtN = useCallback((n: number) => n.toLocaleString(isAr ? LOCALE_AR : "en-US"), [isAr]);
+  const fmtN = useCallback((n: number) => fmtNum(n, isAr), [isAr]);
 
   const [data, setData] = useState<StorageData | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -244,7 +244,7 @@ export default function StoragePage() {
   );
   // the number alone («≈ 339.5») — the unit is added where the header does not carry it
   const fmtKg = useCallback(
-    (w: LineWeight) => `${w.approx ? "≈ " : ""}${w.kg.toLocaleString(isAr ? LOCALE_AR : "en-US", { maximumFractionDigits: 2 })}`,
+    (w: LineWeight) => `${w.approx ? "≈ " : ""}${fmtNum(w.kg, isAr, 2)}`,
     [isAr],
   );
 

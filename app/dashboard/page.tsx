@@ -8,7 +8,7 @@ import { Plus, BarChart3, AlertTriangle } from "lucide-react";
 import { Stat, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 
 type Machine = { name: string; status: string };
 type Job = { id: string; code: string; status: string; dueDate: string };
@@ -138,7 +138,7 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
-  const fmt = (n: number) => n.toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const fmt = (n: number) => fmtNum(n, isAr);
 
   // Checked BEFORE the loading gate: a failed runs fetch leaves `runs` null,
   // so the spinner below would otherwise spin forever. With a snapshot on the

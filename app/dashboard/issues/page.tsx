@@ -31,7 +31,7 @@ import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError, StatTile, 
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { useVisiblePoll } from "@/components/dashboard/use-remembered";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
   ISSUE_CATEGORIES, ISSUE_STATUSES, NEXT_STATUS, MAX_REQUEST_BYTES,
@@ -250,7 +250,7 @@ export default function IssuesPage() {
     return d === "today" ? t.today : d === "yesterday" ? t.yesterday : formatDate(iso, lang) || iso;
   };
   const catText = (c: string) => (c ? t.catLabels[c] || c : "");
-  const n = (v: number) => v.toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const n = (v: number) => fmtNum(v, isAr);
 
   const cycle = (issue: Issue) => setStatus(issue, NEXT_STATUS[issue.status] || "مفتوح");
   const signedIn = !authLoading && Boolean(user);

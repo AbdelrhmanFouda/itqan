@@ -10,7 +10,7 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { EmptyState, inputCls, Spinner, LoadError } from "@/components/dashboard/ui";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 
 type Report = { id: string; month: number; year: number; jobs_completed: number | null; notes: string };
 /** What this device saw last time — painted at once so the first open is not a spinner. */
@@ -311,7 +311,7 @@ export default function ReportsPage() {
                   </p>
                   {r.jobs_completed != null && (
                     <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
-                      {r.jobs_completed.toLocaleString(isAr ? LOCALE_AR : "en-US")} {tr.dashboard.reportJobs.toLowerCase()}
+                      {fmtNum(r.jobs_completed, isAr)} {tr.dashboard.reportJobs.toLowerCase()}
                     </p>
                   )}
                 </div>

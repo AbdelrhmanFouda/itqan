@@ -11,7 +11,7 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { moldKey } from "@/lib/mold-number";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 
 type Run = {
   id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
@@ -119,7 +119,7 @@ export default function QualityPage() {
     }
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const fmt = (n: number) => fmtNum(n, isAr);
   const moldLabel = (key: string) =>
     molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
   // The product name is what the sheet fills in (mold is empty on every row,

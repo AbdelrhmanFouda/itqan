@@ -9,7 +9,7 @@ import { pd } from "@/lib/i18n.prod";
 import { Btn, EmptyState, Field, Spinner, inputCls, LoadError } from "@/components/dashboard/ui";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 
 /**
  * Machine registry — read from the sheet's `machines` tab (one row per
@@ -200,7 +200,7 @@ export default function MachinesPage() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     {[
                       m.manufacturer,
-                      m.shiftLength > 0 ? `${m.shiftLength.toLocaleString(isAr ? LOCALE_AR : "en-US")} ${l.min}` : "",
+                      m.shiftLength > 0 ? `${fmtNum(m.shiftLength, isAr)} ${l.min}` : "",
                       m.product || (!m.code ? l.noCode : ""),
                     ].filter(Boolean).join(" · ")}
                   </p>

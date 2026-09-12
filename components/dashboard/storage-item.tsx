@@ -22,10 +22,10 @@ import type { StorageBalance, StorageMovement } from "@/lib/storage";
 import {
   caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
 } from "@/lib/storage-filter";
-import { LOCALE_AR, fill } from "@/lib/format";
+import { fill, fmtNum } from "@/lib/format";
 
 type Strings = (typeof sd)["en"] | (typeof sd)["ar"];
-const fmt = (n: number, isAr: boolean) => n.toLocaleString(isAr ? LOCALE_AR : "en-US", { maximumFractionDigits: 2 });
+const fmt = (n: number, isAr: boolean) => fmtNum(n, isAr, 2);
 
 /* ------------------------------- the drawer ------------------------------- */
 
@@ -256,7 +256,7 @@ export function MoveModal({
         <Field label={s.move.from}>
           <div className={`${inputCls} bg-gray-50 text-gray-600 flex items-center gap-1.5`}>
             <MapPin size={13} className="text-gray-400" /><span dir={line.loc ? "ltr" : undefined}>{from}</span>
-            <span className="ms-auto tabular-nums text-xs">{avail.toLocaleString(isAr ? LOCALE_AR : "en-US")} {line.unit}</span>
+            <span className="ms-auto tabular-nums text-xs">{fmtNum(avail, isAr)} {line.unit}</span>
           </div>
         </Field>
         <Field label={s.move.to}>

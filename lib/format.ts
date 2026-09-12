@@ -26,6 +26,18 @@ export const LOCALE_EN = "en-US";
 /** The number locale for the current language. */
 export const numLocale = (isAr: boolean): string => (isAr ? LOCALE_AR : LOCALE_EN);
 
+/**
+ * A number with thousands separators, Latin digits in both languages. Pass
+ * `digits` to cap the fraction; without it the value is printed as given.
+ * Eight page-local `const fmt` copies read this since cleanup batch 7.
+ */
+export const fmtNum = (n: number, isAr: boolean, digits?: number): string =>
+  (Number(n) || 0).toLocaleString(numLocale(isAr), digits === undefined ? undefined : { maximumFractionDigits: digits });
+
+/** A ratio (0–1) as a percentage, Latin digits, fixed fraction width. */
+export const fmtPct = (x: number, isAr: boolean, digits = 0): string =>
+  `${(x * 100).toLocaleString(numLocale(isAr), { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+
 /** An integer with thousands separators, Latin digits in both languages. */
 export const fmtInt = (n: number, isAr: boolean): string =>
   Math.round(Number(n) || 0).toLocaleString(numLocale(isAr));

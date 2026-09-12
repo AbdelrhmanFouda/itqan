@@ -10,7 +10,7 @@ import { Trash2 } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { Spinner, LoadError } from "@/components/dashboard/ui";
-import { LOCALE_AR } from "@/lib/format";
+import { LOCALE_AR, fmtNum } from "@/lib/format";
 
 type Report = {
   id: string;
@@ -124,7 +124,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         {report.jobs_completed != null && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 sm:p-5 text-center">
             <p className="text-3xl sm:text-4xl font-bold text-blue-700 tabular-nums">
-              {report.jobs_completed.toLocaleString(isAr ? LOCALE_AR : "en-US")}
+              {fmtNum(report.jobs_completed, isAr)}
             </p>
             <p className="text-sm text-blue-500 mt-1">{tr.dashboard.reportJobs}</p>
           </div>

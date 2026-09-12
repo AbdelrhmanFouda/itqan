@@ -13,7 +13,7 @@ import {
 } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
-import { LOCALE_AR } from "@/lib/format";
+import { fmtNum } from "@/lib/format";
 
 /**
  * One job (sheet row in the `jobs` tab) + the production runs credited to it
@@ -282,7 +282,7 @@ export default function JobDetailPage() {
     router.push("/dashboard/jobs");
   }
 
-  const fmt = (n: number) => Number(n || 0).toLocaleString(isAr ? LOCALE_AR : "en-US");
+  const fmt = (n: number) => fmtNum(n, isAr);
   const startLabel = isAr ? "تاريخ البدء" : "Start date";
 
   if (notFound) {
