@@ -4,26 +4,17 @@ import { useState, useCallback, useMemo, useRef } from "react";
 import { useLang } from "@/context/LangContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
-import { DOWNTIME_REASONS, SHIFTS, downtimeReasonLabel, localize, options } from "@/lib/prod-meta";
-import { Stat, Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
+import { SHIFTS, downtimeReasonLabel, localize } from "@/lib/prod-meta";
+import { Stat, inputCls, Btn, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
 import { Plus } from "lucide-react";
 import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { moldKey } from "@/lib/mold-number";
+import { moldsByName, moldNumberOf, productOf, type MachineRow, type MoldRow, type RunRow } from "@/lib/run-row";
+import { LogRunModal } from "@/components/dashboard/log-run-modal";
 import { fmtNum } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 
-type Run = {
-  id: string; date: string; shift: string; machine: string; machineCode: string; mold: string;
-  // «أسم المنتج» — what the sheet fills in; «كود الاسطمبة» (mold) never is.
-  product: string;
-  plannedMin: number; goodUnits: number; scrapUnits: number;
-  downtimeMin: number; downtimeReason: string; operator: string; note: string;
-};
-type Machine = { row: number; code: string; name: string; label: string; product: string; status: string; shiftLength: number };
-// From GET /api/molds (Master): `number` is the mould number — D, else the notes.
-type Mold = { row: number; code?: string; name?: string; number?: string; notesNumber?: string };
 
 /** The last «الإنتاج» answer this device saw — painted at once on the next open. */
 const LAST_KEY = "itqan.quality.last";
@@ -36,21 +27,10 @@ export default function QualityPage() {
   const today = todayIso();
 
   const [date, setDate] = useState(today);
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [molds, setMolds] = useState<Mold[]>([]);
+  const [machines, setMachines] = useState<MachineRow[]>([]);
+  const [molds, setMolds] = useState<MoldRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const blank = useCallback(
-    () => ({
-      date, shift: SHIFTS[0], machine: "", mold: "", product: "", plannedMin: "720",
-      goodUnits: "", scrapUnits: "", openCavities: "", downtimeMin: "", downtimeReason: "None",
-      operator: "", note: "",
-    }),
-    [date]
-  );
-  const [form, setForm] = useState(blank());
 
   // The registry and the mould numbers only feed the log form, so they are
   // started AFTER the day's entries have answered, and only once: the bridge
@@ -69,70 +49,29 @@ export default function QualityPage() {
   // Snapshot → paint → bounded read (90 s) → keep what is on screen when the
   // answer fails: a failed read must not read as «no entries today», which is
   // a different and much worse statement. One hook since cleanup batch 7.
-  const { data: runs, loading, failed, reload: load } = useRemembered<Run[]>({
+  const { data: runs, loading, failed, reload: load } = useRemembered<RunRow[]>({
     key: LAST_KEY,
-    read: () => timedJson<Run[]>(fetch, "/api/runs"),
+    read: () => timedJson<RunRow[]>(fetch, "/api/runs"),
     valid: (snap) => Array.isArray(snap),
     onSettled: loadLists,
   });
 
-  function set<K extends keyof typeof form>(k: K, v: string) {
-    setForm((f) => {
-      const next = { ...f, [k]: v };
-      if (k === "machine") {
-        const mc = machines.find((m) => m.label === v);
-        if (mc && mc.shiftLength > 0) next.plannedMin = String(mc.shiftLength);
-      }
-      if (k === "mold") {
-        const md = molds.find((m) => (m.code || m.name) === v);
-        next.product = md?.name ?? "";
-      }
-      return next;
-    });
-  }
-  function openLog() { setForm({ ...blank(), date }); setSaveError(null); setOpen(true); }
-
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    setSaveError(null);
-    if (Number(form.downtimeMin) > 0 && (!form.downtimeReason || form.downtimeReason === "None")) {
-      setSaveError(p.runs.reasonRequired);
-      return;
-    }
-    setSaving(true);
-    try {
-      // machine column = registry label (the machine's identity everywhere)
-      const mac = machines.find((m) => m.label === form.machine);
-      const payload = { ...form, machine: mac ? mac.label : form.machine, machineCode: mac ? mac.label : "" };
-      const res = await authedFetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.ok === false) throw new Error("save_failed");
-      setOpen(false);
-      load();
-    } catch {
-      setSaveError(p.runs.saveFailed);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const fmt = (n: number) => fmtNum(n, isAr);
-  const moldLabel = (key: string) =>
-    molds.find((m) => (m.code || m.name) === key)?.name || key || "—";
-  // The product name is what the sheet fills in (mold is empty on every row,
-  // so moldLabel alone rendered «—» everywhere until 2026-09-04).
-  const productOf = (r: Run) => r.product || moldLabel(r.mold);
-  const numberByName = useMemo(() => {
-    const map = new Map<string, Mold>();
-    for (const m of molds) { const k = moldKey(m.name); if (k && !map.has(k)) map.set(k, m); }
-    return map;
-  }, [molds]);
-  const numberOf = (r: Run) => numberByName.get(moldKey(r.product))?.number || "";
+  const numberByName = useMemo(() => moldsByName(molds), [molds]);
+  const nameOf = (r: RunRow) => productOf(r, molds);
+  const numberOf = (r: RunRow) => moldNumberOf(r, numberByName);
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
+  /** Every label the shared log-run modal prints — one table, two pages. */
+  const logLabels = {
+    title: a.quality.add,
+    date: p.runs.date, shift: p.runs.shift, shifts: p.runs.shifts as unknown as string[],
+    machine: p.runs.machine, mold: p.runs.mold, planned: p.runs.planned,
+    good: p.runs.good, scrap: p.runs.scrap, openCav: p.runs.openCav,
+    downtime: p.runs.downtime, reason: p.runs.reason, reasons: p.runs.reasons as unknown as string[],
+    operator: p.runs.operator, note: p.runs.note,
+    select: p.common.select, save: p.common.save, cancel: p.common.cancel,
+    reasonRequired: p.runs.reasonRequired, saveFailed: p.runs.saveFailed,
+  };
 
   // Nothing on screen and nothing came back — the error box, now with a way out.
   if (runs === null && failed) {
@@ -166,7 +105,7 @@ export default function QualityPage() {
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{a.quality.title}</h1>
         <p className="text-sm text-gray-500">{a.quality.subtitle}</p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Btn onClick={openLog}><Plus size={15} /> {a.quality.add}</Btn>
+          <Btn onClick={() => setOpen(true)}><Plus size={15} /> {a.quality.add}</Btn>
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm text-gray-600">{a.quality.date}</label>
             <input type="date" className={`${inputCls} w-auto`} value={date} onChange={(e) => setDate(e.target.value)} />
@@ -213,7 +152,7 @@ export default function QualityPage() {
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  {productOf(r)}
+                  {nameOf(r)}
                   {numberOf(r) ? <> · {p.runs.moldNumber} <span dir="ltr" className="font-mono">{numberOf(r)}</span></> : null}
                   {r.shift ? ` · ${shiftLabel(r.shift)}` : ""}
                 </div>
@@ -258,7 +197,7 @@ export default function QualityPage() {
                   <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap" dir="ltr">{r.machineCode || r.machine || "—"}</td>
                     <td className="px-4 py-3 text-gray-500">
-                      {productOf(r)}
+                      {nameOf(r)}
                       {numberOf(r) ? <span dir="ltr" className="ms-2 font-mono text-xs text-gray-400">{numberOf(r)}</span> : null}
                     </td>
                     <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
@@ -282,67 +221,17 @@ export default function QualityPage() {
         </>
       )}
 
-      <Modal open={open} title={a.quality.add} onClose={() => setOpen(false)} isAr={isAr}>
-        <form onSubmit={handleAdd}>
-          <div className="grid sm:grid-cols-2 gap-x-4">
-            <Field label={a.quality.date}>
-              <input className={inputCls} type="date" required value={form.date} onChange={(e) => set("date", e.target.value)} />
-            </Field>
-            <Field label={p.runs.shift}>
-              <select className={inputCls} value={form.shift} onChange={(e) => set("shift", e.target.value)}>
-                {options(SHIFTS, p.runs.shifts).map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label={a.quality.machine}>
-              <select className={inputCls} required value={form.machine} onChange={(e) => set("machine", e.target.value)}>
-                <option value="">{p.common.select}</option>
-                {machines.map((m) => (<option key={m.row} value={m.label}>{m.label}{m.product ? ` · ${m.product}` : ""}</option>))}
-              </select>
-            </Field>
-            <Field label={p.runs.mold}>
-              <select className={inputCls} required value={form.mold} onChange={(e) => set("mold", e.target.value)}>
-                <option value="">{p.common.select}</option>
-                {molds.map((m) => {
-                  const v = m.code || m.name || "";
-                  return <option key={m.row} value={v}>{m.name || v}</option>;
-                })}
-              </select>
-            </Field>
-            <Field label={p.runs.planned}>
-              <input className={inputCls} type="number" min="0" value={form.plannedMin} onChange={(e) => set("plannedMin", e.target.value)} />
-            </Field>
-            <Field label={a.quality.good}>
-              <input className={inputCls} type="number" min="0" required value={form.goodUnits} onChange={(e) => set("goodUnits", e.target.value)} />
-            </Field>
-            <Field label={a.quality.scrap}>
-              <input className={inputCls} type="number" min="0" value={form.scrapUnits} onChange={(e) => set("scrapUnits", e.target.value)} />
-            </Field>
-            <Field label={p.runs.openCav}>
-              <input className={inputCls} type="number" min="1" value={form.openCavities} onChange={(e) => set("openCavities", e.target.value)} />
-            </Field>
-            <Field label={a.quality.downtime}>
-              <input className={inputCls} type="number" min="0" value={form.downtimeMin} onChange={(e) => set("downtimeMin", e.target.value)} />
-            </Field>
-            <Field label={a.quality.reason}>
-              <select className={inputCls} value={form.downtimeReason} onChange={(e) => set("downtimeReason", e.target.value)}>
-                {options(DOWNTIME_REASONS, p.runs.reasons).map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label={a.quality.operator}>
-              <input className={inputCls} value={form.operator} onChange={(e) => set("operator", e.target.value)} />
-            </Field>
-          </div>
-          {saveError && <p className="text-xs text-red-600 mt-1">{saveError}</p>}
-          <div className="flex flex-wrap items-center gap-3 mt-2">
-            <Btn type="submit" disabled={saving}>{p.common.save}</Btn>
-            <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
-          </div>
-        </form>
-      </Modal>
+      {/* Log entry modal — shared with the production log (lib/run-row.ts). */}
+      <LogRunModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onSaved={load}
+        machines={machines}
+        molds={molds}
+        defaultDate={date}
+        labels={logLabels}
+        isAr={isAr}
+      />
     </div>
   );
 }
