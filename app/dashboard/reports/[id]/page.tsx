@@ -55,7 +55,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   useEffect(() => { load(); }, [load]);
 
   async function handleDelete() {
-    if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
+    if (!confirm(p.common.confirmDelete)) return;
     await authedFetch(`/api/reports/${id}`, { method: "DELETE" });
     router.push("/dashboard/reports");
   }
@@ -68,7 +68,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
             href="/dashboard/reports"
             className="inline-flex items-center min-h-11 sm:min-h-0 mb-4 sm:mb-6 rounded-lg text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
-            {isAr ? "→ التقارير" : "← Reports"}
+            {tr.dashboard.backToReports}
           </Link>
           <LoadError
             variant="banner"
@@ -81,7 +81,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
     }
     return (
       <div className="flex justify-center py-16">
-        <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+        <Spinner text={p.common.loading} />
       </div>
     );
   }
@@ -94,7 +94,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         href="/dashboard/reports"
         className="inline-flex items-center min-h-11 sm:min-h-0 mb-4 sm:mb-6 rounded-lg text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
       >
-        {isAr ? "→ التقارير" : "← Reports"}
+        {tr.dashboard.backToReports}
       </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
@@ -112,11 +112,11 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
         </div>
         <button
           onClick={handleDelete}
-          title={isAr ? "حذف" : "Delete"}
+          title={p.common.delete}
           className="inline-flex items-center gap-1.5 shrink-0 text-xs text-red-500 hover:text-white hover:bg-red-500 border border-red-200 hover:border-red-500 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 focus-visible:ring-offset-1"
         >
           <Trash2 size={13} />
-          {isAr ? "حذف" : "Delete"}
+          {p.common.delete}
         </button>
       </div>
 

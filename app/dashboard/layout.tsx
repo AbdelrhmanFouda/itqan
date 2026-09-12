@@ -124,7 +124,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         signOutLabel={a.auth.signOut}
         backLabel={a.auth.backToSite}
         onSignOut={handleSignOut}
-        langBtn={isAr ? "EN" : "عربي"}
+        langBtn={p.common.langToggle}
         onLang={() => setLang(isAr ? "en" : "ar")}
       />
     );
@@ -163,7 +163,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-10 sm:min-h-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
               <Globe size={12} />
-              {isAr ? "EN" : "عربي"}
+              {p.common.langToggle}
             </button>
           )}
           <button

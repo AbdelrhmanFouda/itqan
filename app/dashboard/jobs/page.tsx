@@ -285,7 +285,7 @@ export default function JobsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-gray-900">{p.jobs.title}</h1>
           <div className="flex items-center gap-1.5">
-            <button onClick={load} className={iconBtnCls} title={p.common.loading} aria-label={isAr ? "تحديث" : "Refresh"} disabled={loading}>
+            <button onClick={load} className={iconBtnCls} title={p.common.loading} aria-label={p.common.refresh} disabled={loading}>
               <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             </button>
             {data.writable && data.configured && (
@@ -443,7 +443,7 @@ export default function JobsPage() {
               </select>
             </Field>
           </div>
-          <Field label={isAr ? "التعليمات" : "Instructions"}>
+          <Field label={p.jobs.instructions}>
             <textarea className={`${inputCls} resize-none`} rows={2} value={form.instructions} onChange={(e) => set("instructions", e.target.value)} />
           </Field>
           {saveErr && <p className="text-sm text-red-600 mt-1 mb-2">{saveErr}</p>}

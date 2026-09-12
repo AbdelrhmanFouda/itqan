@@ -85,7 +85,7 @@ export default function ApprovalsPage() {
         {errorLine}
         {!err && (
           <div className="flex justify-center py-16">
-            <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+            <Spinner text={p.common.loading} />
           </div>
         )}
       </div>

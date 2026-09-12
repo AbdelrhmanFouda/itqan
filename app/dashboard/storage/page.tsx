@@ -535,7 +535,7 @@ export default function StoragePage() {
         {errorLine}
         {!fetchErr && (
           <div className="flex justify-center py-16">
-            <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+            <Spinner text={p.common.loading} />
           </div>
         )}
       </div>
@@ -1146,8 +1146,8 @@ function MovementsView({
   onDelete: (m: StorageMovement) => void;
 }) {
   if (rows.length === 0) return <EmptyState text={s.empty} />;
-  const editLabel = isAr ? "تعديل" : "Edit";
-  const deleteLabel = isAr ? "حذف" : "Delete";
+  const editLabel = s.item.edit;
+  const deleteLabel = s.item.del;
   // a number the sheet holds twice cannot be edited or deleted from here
   const locked = (m: StorageMovement) => dups.has(dupKey(m));
   const numCell = (m: StorageMovement) => (

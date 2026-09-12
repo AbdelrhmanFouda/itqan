@@ -185,7 +185,7 @@ export default function MachinesPage() {
         />
       ) : !data ? (
         <div className="flex justify-center py-16">
-          <Spinner text={isAr ? "جارٍ التحميل…" : "Loading…"} />
+          <Spinner text={p.common.loading} />
         </div>
       ) : data.machines.length === 0 ? (
         <EmptyState text={l.empty} />

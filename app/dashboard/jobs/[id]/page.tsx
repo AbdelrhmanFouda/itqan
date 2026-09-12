@@ -286,7 +286,7 @@ export default function JobDetailPage() {
   }
 
   const fmt = (n: number) => fmtNum(n, isAr);
-  const startLabel = isAr ? "تاريخ البدء" : "Start date";
+  const startLabel = p.jobs.startDate;
 
   if (notFound) {
     return (
@@ -381,7 +381,7 @@ export default function JobDetailPage() {
       {/* Work order — أمر الشغل (matches the paper form; Master fills the standards) */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mt-4 mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <h2 className="text-sm font-semibold text-gray-900">{isAr ? "أمر الشغل" : "Work Order"}</h2>
+          <h2 className="text-sm font-semibold text-gray-900">{p.jobs.workOrder}</h2>
           {/* flex-wrap: the Arabic edit-standard label is long, and together
               with Print the pair cannot share one phone line. min-h-11 on the
               phone keeps both tappable with a thumb. */}
@@ -398,7 +398,7 @@ export default function JobDetailPage() {
               onClick={() => window.print()}
               className="min-h-11 sm:min-h-9 inline-flex items-center text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 transition-colors print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
             >
-              {isAr ? "طباعة" : "Print"}
+              {p.jobs.print}
             </button>
           </div>
         </div>
@@ -412,7 +412,7 @@ export default function JobDetailPage() {
         )}
         <div className="grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm">
           <Detail label={p.jobs.part} value={job.product || "—"} />
-          <Detail label={isAr ? "كود الاسطمبة" : "Mold code"} value={job.moldCode || "—"} />
+          <Detail label={p.jobs.moldCode} value={job.moldCode || "—"} />
           {/* Master's own number for this product — not the customer's code
               above. From the notes when that is where the sheet keeps it. */}
           <Detail
@@ -437,26 +437,26 @@ export default function JobDetailPage() {
           {/* Ordered is recorded in kg; pieces are derived from Master's piece weight. */}
           <Detail label={p.jobs.qtyOrderedKg} value={`${fmt(Number(job.qtyOrderedKg) || 0)} ${p.jobs.kg}`} />
           <Detail label={p.jobs.qtyOrderedPcs} value={qty > 0 ? `${fmt(qty)} ${p.jobs.pcs}` : "—"} />
-          <Detail label={isAr ? "الخامة المصروفة (كجم)" : "Material issued (kg)"} value={job.materialIssued || "—"} />
-          <Detail label={isAr ? "الماستر باتش" : "Masterbatch"} value={job.masterbatch || "—"} />
+          <Detail label={p.jobs.materialIssued} value={job.materialIssued || "—"} />
+          <Detail label={p.jobs.masterbatch} value={job.masterbatch || "—"} />
           <Detail label={p.jobs.unitsRemaining} value={qty > 0 ? `${fmt(remaining)} ${p.jobs.pcs}` : "—"} />
           {standard ? (
             <>
-              <Detail label={isAr ? "وزن القطعة (جم)" : "Part weight (g)"} value={standard.weight || "—"} />
-              <Detail label={isAr ? "نوع الخامة" : "Material type"} value={standard.material || "—"} />
+              <Detail label={p.jobs.partWeight} value={standard.weight || "—"} />
+              <Detail label={p.jobs.materialType} value={standard.material || "—"} />
               <Detail
-                label={isAr ? "الكافيتي × الدورة (ث)" : "Cavities × cycle (s)"}
+                label={p.jobs.cavitiesXCycle}
                 value={standard.cavities && standard.cycleSec ? `${standard.cavities} × ${standard.cycleSec}` : "—"}
               />
               <Detail
-                label={isAr ? "معدل الإنتاج / الساعة" : "Expected / hour"}
+                label={p.jobs.expectedPerHour}
                 value={standard.ratePerHour ? fmt(standard.ratePerHour) : "—"}
               />
               <Detail
-                label={isAr ? "معدل الوردية (12 س)" : "Expected / 12h shift"}
+                label={p.jobs.expectedPerShift}
                 value={standard.ratePerShift12h ? fmt(standard.ratePerShift12h) : "—"}
               />
-              <Detail label={isAr ? "العيوب المحتملة" : "Possible defects"} value={standard.defects || "—"} />
+              <Detail label={p.jobs.possibleDefects} value={standard.defects || "—"} />
             </>
           ) : (
             <div className="sm:col-span-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -467,7 +467,7 @@ export default function JobDetailPage() {
           )}
           {job.instructions ? (
             <div className="sm:col-span-3">
-              <p className="text-xs text-gray-500 mb-0.5">{isAr ? "التعليمات" : "Instructions"}</p>
+              <p className="text-xs text-gray-500 mb-0.5">{p.jobs.instructions}</p>
               <p className="text-gray-700 whitespace-pre-wrap">{job.instructions}</p>
             </div>
           ) : null}
@@ -662,7 +662,7 @@ export default function JobDetailPage() {
                 {molds.map((m) => (m.name ? <option key={m.row} value={m.name} /> : null))}
               </datalist>
             </Field>
-            <Field label={isAr ? "كود الاسطمبة" : "Mold code"}>
+            <Field label={p.jobs.moldCode}>
               <input className={inputCls} list="edit-job-moldcodes" value={editForm.moldCode ?? ""} onChange={(e) => setEdit("moldCode", e.target.value)} />
               <datalist id="edit-job-moldcodes">
                 {molds.map((m) => (m.code ? <option key={`c${m.row}`} value={m.code} /> : null))}
@@ -672,10 +672,10 @@ export default function JobDetailPage() {
             <Field label={p.jobs.qtyOrderedKg}>
               <input className={inputCls} type="number" min="0" step="any" value={editForm.qtyKg ?? ""} onChange={(e) => setEdit("qtyKg", e.target.value)} />
             </Field>
-            <Field label={isAr ? "الخامة المصروفة (كجم)" : "Material issued (kg)"}>
+            <Field label={p.jobs.materialIssued}>
               <input className={inputCls} value={editForm.materialIssued ?? ""} onChange={(e) => setEdit("materialIssued", e.target.value)} />
             </Field>
-            <Field label={isAr ? "الماستر باتش" : "Masterbatch"}>
+            <Field label={p.jobs.masterbatch}>
               <input className={inputCls} value={editForm.masterbatch ?? ""} onChange={(e) => setEdit("masterbatch", e.target.value)} />
             </Field>
             <Field label={startLabel}>
@@ -715,7 +715,7 @@ export default function JobDetailPage() {
               </select>
             </Field>
           </div>
-          <Field label={isAr ? "التعليمات" : "Instructions"}>
+          <Field label={p.jobs.instructions}>
             <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.instructions ?? ""} onChange={(e) => setEdit("instructions", e.target.value)} />
           </Field>
           <Field label={p.jobs.notes}>
@@ -739,20 +739,20 @@ export default function JobDetailPage() {
               {p.jobs.standardWarning}
             </p>
             <div className="grid sm:grid-cols-2 gap-x-4">
-              <Field label={isAr ? "وزن القطعة (جم)" : "Part weight (g)"}>
+              <Field label={p.jobs.partWeight}>
                 <input className={inputCls} value={stdForm.weight ?? ""} onChange={(e) => setStd("weight", e.target.value)} />
               </Field>
-              <Field label={isAr ? "نوع الخامة" : "Material type"}>
+              <Field label={p.jobs.materialType}>
                 <input className={inputCls} value={stdForm.material ?? ""} onChange={(e) => setStd("material", e.target.value)} />
               </Field>
-              <Field label={isAr ? "عدد الكافيتي" : "Cavities"}>
+              <Field label={p.jobs.cavities}>
                 <input className={inputCls} value={stdForm.cavities ?? ""} onChange={(e) => setStd("cavities", e.target.value)} />
               </Field>
-              <Field label={isAr ? "زمن الدورة (ث)" : "Cycle time (s)"}>
+              <Field label={p.jobs.cycleSec}>
                 <input className={inputCls} value={stdForm.cycle ?? ""} onChange={(e) => setStd("cycle", e.target.value)} />
               </Field>
             </div>
-            <Field label={isAr ? "العيوب المحتملة" : "Possible defects"}>
+            <Field label={p.jobs.possibleDefects}>
               <textarea className={`${inputCls} resize-none`} rows={2} value={stdForm.defects ?? ""} onChange={(e) => setStd("defects", e.target.value)} />
             </Field>
             {stdErr && (

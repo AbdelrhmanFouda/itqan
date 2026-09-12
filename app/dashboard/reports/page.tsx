@@ -108,7 +108,7 @@ export default function ReportsPage() {
   }
 
   async function handleDelete(rid: string) {
-    if (!confirm(isAr ? "حذف هذا التقرير؟" : "Delete this report?")) return;
+    if (!confirm(p.common.confirmDelete)) return;
     await authedFetch(`/api/reports/${rid}`, { method: "DELETE" });
     load();
   }
@@ -126,9 +126,7 @@ export default function ReportsPage() {
             className="inline-flex items-center gap-1.5 border border-blue-600 text-blue-700 hover:bg-blue-50 active:bg-blue-100 disabled:opacity-50 text-sm px-4 py-2 min-h-11 sm:min-h-0 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
           >
             <Sparkles size={15} />
-            {drafting
-              ? (isAr ? "بيجهّز…" : "Preparing…")
-              : (isAr ? "جهّز مسودة" : "Prepare draft")}
+            {drafting ? tr.dashboard.drafting : tr.dashboard.draft}
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
@@ -156,7 +154,7 @@ export default function ReportsPage() {
 
       {draftError && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {isAr ? "مقدرناش نجهّز المسودة — جرّب تاني." : "Could not prepare the draft — try again."}
+          {tr.dashboard.draftFailed}
         </div>
       )}
 
@@ -171,18 +169,18 @@ export default function ReportsPage() {
           </p>
           <ul className="mt-1 space-y-0.5">
             <li>
-              {isAr ? "المصدر: " : "Source: "}
+              {tr.dashboard.source}
               {drafted.provider === "rules"
-                ? (isAr ? "قواعد ثابتة (مفيش مفتاح AI)" : "deterministic rules (no AI key set)")
+                ? tr.dashboard.sourceRules
                 : drafted.provider}
               {" · "}
-              {isAr ? `${drafted.runCount} تشغيلة` : `${drafted.runCount} runs`}
+              {tr.dashboard.runCount.replace("{n}", fmtNum(drafted.runCount, isAr))}
             </li>
             {!drafted.availabilityMeasured && (
-              <li>{isAr ? "⚠ الجاهزية غير مقاسة لهذا الشهر." : "⚠ Availability is not measured for this month."}</li>
+              <li>{tr.dashboard.warnAvailability}</li>
             )}
             {!drafted.qualityMeasured && (
-              <li>{isAr ? "⚠ الجودة غير مقاسة لهذا الشهر." : "⚠ Quality is not measured for this month."}</li>
+              <li>{tr.dashboard.warnQuality}</li>
             )}
             {drafted.staleOpen > 0 && (
               <li>
@@ -267,7 +265,7 @@ export default function ReportsPage() {
           </div>
           {saveError && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {isAr ? "التقرير مااتحفظش — جرّب تاني." : "The report was not saved — try again."}
+              {tr.dashboard.reportSaveFailed}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3">
@@ -322,8 +320,8 @@ export default function ReportsPage() {
                 </Link>
                 <button
                   onClick={() => handleDelete(r.id)}
-                  title={isAr ? "حذف" : "Delete"}
-                  aria-label={isAr ? "حذف" : "Delete"}
+                  title={p.common.delete}
+                  aria-label={p.common.delete}
                   className="p-3 -m-2 min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                 >
                   <Trash2 size={14} />
