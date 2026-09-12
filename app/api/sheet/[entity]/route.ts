@@ -6,7 +6,7 @@ import { requireRole } from "@/lib/api-guard";
 // pinned by tests/open-reads.test.ts — with the full story of why deny-by-
 // default exists (2026-08-28: `sheet/jobs` served the order book past the
 // /api/jobs guard). Changing the set is a publish/unpublish decision.
-import { OPEN_READS } from "@/lib/open-reads";
+import { OPEN_READS, WRITABLE_ENTITIES } from "@/lib/open-reads";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ entity: string }> }) {
   const { entity } = await params;
@@ -28,8 +28,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
     // Only the OPEN reads may sit in the browser cache briefly (the server's
     // own 45s sheet cache is the real one) — never the guarded/clients
     // branches, whose responses depend on who asked.
+    // Projected explicitly so this branch and the catch below answer the same
+    // shape — `{...data}` was leaking readAt on the happy path only.
     return NextResponse.json(
-      { ...data, configured: sheetsConfigured() },
+      {
+        records: data.records, fields: data.fields, longFields: data.longFields,
+        labels: data.labels, writable: data.writable, configured: sheetsConfigured(),
+      },
       OPEN_READS.has(entity)
         ? { headers: { "Cache-Control": "private, max-age=30" } }
         : undefined,
@@ -42,8 +47,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ entity: string }> }) {
   const { entity } = await params;
+  // The guard runs FIRST so an anonymous PATCH answers 401 for any entity
+  // (scripts/smoke.mjs PATCHes sheet/issues|molds|master without a token and
+  // expects exactly that); only then is the entity checked against the
+  // writable set.
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
+  if (!ENTITIES[entity]) return NextResponse.json({ ok: false, reason: "unknown entity" }, { status: 404 });
+  if (!WRITABLE_ENTITIES.has(entity)) {
+    return NextResponse.json({ ok: false, reason: "not_writable_here" }, { status: 403 });
+  }
   try {
     const body = await req.json();
     const result = await updateRecord(entity, Number(body.row), (body.changes ?? {}) as Record<string, string>);

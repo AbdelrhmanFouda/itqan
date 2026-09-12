@@ -22,3 +22,20 @@
  * the same trade lib/run-join.ts and lib/scrap.ts make.
  */
 export const OPEN_READS = new Set(["molds", "products", "machines", "issues"]);
+
+/**
+ * The ONLY entities /api/sheet/[entity]'s generic PATCH may write — the two
+ * tabs components/dashboard/SheetSection.tsx actually edits. Everything else
+ * is DENY-BY-DEFAULT for the same reason the reads are: that PATCH accepted
+ * all nine ENTITIES keys, so a generic row write could reach «الإنتاج»,
+ * «أوامر العمل» or Master past the dedicated routes that verify identity,
+ * diff the changes and refuse a duplicated product name.
+ *
+ * The real writes live on those routes (/api/molds, /api/jobs/[id],
+ * /api/issues/[row], /api/runs, /api/machines), so nothing here removes a
+ * working feature. The check runs AFTER requireRole, so an anonymous PATCH
+ * still answers 401, never 403.
+ *
+ * Pinned by tests/open-reads.test.ts.
+ */
+export const WRITABLE_ENTITIES = new Set(["products", "clients"]);

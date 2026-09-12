@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OPEN_READS } from "../lib/open-reads.ts";
+import { OPEN_READS, WRITABLE_ENTITIES } from "../lib/open-reads.ts";
 
 test("OPEN_READS is exactly the four documented open operational reads", () => {
   // A change here is a decision to publish or unpublish factory data, not
@@ -21,5 +21,18 @@ test("the entities that carry client data or PII are NOT open", () => {
   // staff email («سُجل بواسطة»); clients is contact details, sales-only.
   for (const entity of ["clients", "jobs", "production", "master", "downtime"]) {
     assert.equal(OPEN_READS.has(entity), false, `"${entity}" must stay guarded`);
+  }
+});
+
+test("WRITABLE_ENTITIES is exactly the two tabs SheetSection edits", () => {
+  // The generic PATCH used to accept all nine ENTITIES keys. Adding one here
+  // is a decision to let a generic row write reach that tab past its dedicated
+  // route (identity check, diff-only write, duplicate-name refusal).
+  assert.deepEqual([...WRITABLE_ENTITIES].sort(), ["clients", "products"]);
+});
+
+test("the operational tabs with dedicated write routes are NOT generically writable", () => {
+  for (const entity of ["production", "jobs", "master", "molds", "machines", "issues", "downtime"]) {
+    assert.equal(WRITABLE_ENTITIES.has(entity), false, `"${entity}" must be written by its own route`);
   }
 });
