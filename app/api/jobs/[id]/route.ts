@@ -7,15 +7,12 @@ import { resolveMoldNumber } from "@/lib/mold-number";
 import { masterRowByName, masterRowForDisplay } from "@/lib/master-lookup";
 import { codeKey, machineMatch, parseQuantity } from "@/lib/work-orders";
 import { latinDigits } from "@/lib/dates";
+import { num } from "@/lib/run-join";
 
 // One job (sheet row) + the production runs credited to it + the product's
 // Master standard (weight/material/cycle/defects → expected rates) so the
 // page can render a full أمر شغل (work order).
 
-const num = (v: unknown) => {
-  const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(x) ? x : 0;
-};
 
 // Guarded like the jobs list (2026-08-28): the detail carries the client, the
 // ordered quantity and the Master standard — not an open operational read.

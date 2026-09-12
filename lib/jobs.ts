@@ -5,7 +5,7 @@ import { jobStatusFromSheet, jobPriorityFromSheet } from "@/lib/prod-meta";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
-  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
+  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, num,
 } from "@/lib/run-join";
 import { sumCavities } from "@/lib/cavities";
 import { resolveMoldNumber } from "@/lib/mold-number";
@@ -31,10 +31,6 @@ import {
  * 2026-07-27, so the sheet and the site always agree.
  */
 
-const num = (v: unknown) => {
-  const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(x) ? x : 0;
-};
 
 /**
  * Master's numeric columns are free text: weight reads «15جم», cavities read

@@ -19,6 +19,7 @@ import { buildOEEData } from "@/lib/oee-data";
 import { buildDigest, cairoDay } from "@/lib/ai-review";
 import { latinDigits, normalizeDate } from "@/lib/dates";
 import { hasProblem } from "@/lib/issues";
+import { num } from "@/lib/run-join";
 
 /* ------------------------------ per-request cache ------------------------- */
 // A cache lives for ONE HTTP request (one chat turn or one confirm), so the same
@@ -34,10 +35,6 @@ function cachedRecords(entity: string, ctx: ToolCtx) {
 
 /* --------------------------------- helpers -------------------------------- */
 
-const num = (v: unknown): number => {
-  const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(x) ? x : 0;
-};
 /** Join key: Arabic digits → Latin, lowercase, collapsed spaces (mirrors lib/oee-data). */
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();

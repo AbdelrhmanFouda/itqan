@@ -30,7 +30,14 @@ export const latinDigits = (s: string): string =>
 
 export const DEFAULT_SHIFT_MIN = 720; // 12h shift — also the capture form's default
 
-const num = (v: unknown) => {
+/**
+ * Sheet text → number. Every operational tab stores numbers as free text
+ * («15جم», «720 د»), so strip everything but digits, dot and sign; anything
+ * unreadable is 0. Shared by the run-join paths and the routes that read the
+ * same cells — lib/downtime-data.ts keeps its own copy because it folds
+ * Arabic-Indic digits first, which is a different rule.
+ */
+export const num = (v: unknown) => {
   const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(x) ? x : 0;
 };

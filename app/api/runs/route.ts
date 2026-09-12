@@ -6,7 +6,7 @@ import { resolveScrap } from "@/lib/scrap";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
-  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun,
+  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, num,
 } from "@/lib/run-join";
 
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
@@ -30,10 +30,6 @@ import {
 // own machine key, planned-minutes fallback and stub rule rather than
 // re-deriving them, because that is exactly where the two drifted apart.
 
-function num(v: string | undefined): number {
-  const n = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
 
 function shape(r: SheetRecord) {
   const scrap = resolveScrap(r);

@@ -11,7 +11,7 @@ import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 // The run-join rules are SHARED with /api/runs and lib/jobs.ts — see lib/run-join.ts.
 import {
   DEFAULT_SHIFT_MIN, buildShiftLengthIndex, machineKeyOf, resolvePlannedMin,
-  plannedMinSource, isStubRun,
+  plannedMinSource, isStubRun, num,
 } from "@/lib/run-join";
 
 /**
@@ -33,10 +33,6 @@ import {
 // Re-exported so existing importers of this module keep working.
 export { DEFAULT_SHIFT_MIN };
 
-const num = (v: unknown) => {
-  const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(x) ? x : 0;
-};
 
 /** Join key for molds/machines: Arabic digits → Latin, lowercase, collapsed spaces. */
 const normKey = (s: string | undefined) =>

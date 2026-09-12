@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRecords, appendRecord, sheetsWritable } from "@/lib/sheets";
 import { latinDigits } from "@/lib/dates";
 import { requireRole } from "@/lib/api-guard";
+import { num } from "@/lib/run-join";
 
 /**
  * Machine REGISTRY, read from the sheet's `machines` tab — one row per
@@ -11,10 +12,6 @@ import { requireRole } from "@/lib/api-guard";
  * and the hourly board key on — keep the format in sync with the board.
  */
 
-const num = (v: unknown) => {
-  const x = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(x) ? x : 0;
-};
 
 export type MachineInfo = {
   row: number;
