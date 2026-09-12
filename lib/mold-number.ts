@@ -104,12 +104,6 @@ export function resolveMoldNumber(rec: { code?: string | null; notes?: string | 
   return { number: "", source: "none", code: "", notesNumber: "" };
 }
 
-/** «001 · HD16713» when both exist, else whichever exists, else "". */
-export function moldNumberLabel(m: MoldNumber): string {
-  if (m.code && m.notesNumber) return `${m.code} · ${m.notesNumber}`;
-  return m.number;
-}
-
 /**
  * Join key for a product name, the same normalisation the joins in
  * lib/jobs.ts and lib/oee-data.ts use (Arabic digits → Latin, lowercase,
@@ -119,30 +113,4 @@ export function moldNumberLabel(m: MoldNumber): string {
 export function moldKey(name: string | undefined | null): string {
   // Filler («غير متاح / N/A») folds to "" — nothing may ever join on it.
   return clean(name).toLowerCase();
-}
-
-export type MoldNumberEntry = MoldNumber & {
-  /** The product name appears on more than one Master row — the number shown
-   *  is the FIRST row's and may belong to a different product with the same
-   *  name (26 names were duplicated on 2026-08-27). Say so; never hide it. */
-  ambiguous: boolean;
-};
-
-/**
- * Product name → its mould number, first Master row wins (the same rule as the
- * sheet's own VLOOKUP and lib/jobs.ts), with `ambiguous` set on names that
- * occur more than once. Rows without a name are skipped.
- */
-export function moldNumberIndex(
-  rows: Iterable<{ name?: string | null; code?: string | null; notes?: string | null }>,
-): Map<string, MoldNumberEntry> {
-  const out = new Map<string, MoldNumberEntry>();
-  for (const r of rows) {
-    const key = moldKey(r.name);
-    if (!key) continue;
-    const cur = out.get(key);
-    if (cur) { cur.ambiguous = true; continue; }
-    out.set(key, { ...resolveMoldNumber(r), ambiguous: false });
-  }
-  return out;
 }

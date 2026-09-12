@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  normalizeDate, monthOf, latinDigits, factoryDay,
+  normalizeDate, latinDigits, factoryDay,
   parseClockMinutes, formatClock, factoryDayInstant, factoryDaySpan,
 } from "../lib/dates.ts";
 
@@ -85,12 +85,6 @@ test("factoryDay follows the 08:00 shift start, not the calendar", () => {
   assert.equal(factoryDay(iso("2026-08-08T06:00:00Z")), "2026-08-08");
   // Just before the roll-over, still the 7th.
   assert.equal(factoryDay(iso("2026-08-08T05:59:00Z")), "2026-08-07");
-});
-
-test("monthOf groups August correctly", () => {
-  assert.equal(monthOf(normalizeDate("01/08 /2026")), "2026-08");
-  assert.equal(monthOf(normalizeDate("8/7/2026")), "2026-08");
-  assert.equal(monthOf(""), "");
 });
 
 /* ------------------- «التوقفات» E/F — clock times ------------------------- */

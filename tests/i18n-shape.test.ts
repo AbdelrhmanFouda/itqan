@@ -22,7 +22,7 @@ import { mr } from "../lib/i18n.register.ts";
 import { st } from "../lib/i18n.stock.ts";
 import { ALL_ROLES } from "../lib/roles.ts";
 import {
-  MACHINE_STATUSES, MOLD_STATUSES, JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
+  MACHINE_STATUSES, JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
 } from "../lib/prod-meta.ts";
 
 type Table = { en: unknown; ar: unknown };
@@ -79,7 +79,6 @@ test("localize() label lists are index-aligned with their canonical lists", () =
     assert.equal(pd[lang].runs.shifts.length, SHIFTS.length, `${lang} runs.shifts`);
     assert.equal(pd[lang].jobs.statuses.length, JOB_STATUSES.length, `${lang} jobs.statuses`);
     assert.equal(pd[lang].jobs.priorities.length, JOB_PRIORITIES.length, `${lang} jobs.priorities`);
-    assert.equal(pd[lang].molds.statuses.length, MOLD_STATUSES.length, `${lang} molds.statuses`);
     assert.equal(t[lang].dashboard.machineStatuses.length, MACHINE_STATUSES.length, `${lang} dashboard.machineStatuses`);
   }
   // The English half IS the canonical list, in order — that is what makes the

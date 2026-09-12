@@ -37,35 +37,14 @@ export const isLangValue = (v: unknown): v is LangValue => v === "ar" || v === "
 /**
  * The language from an ALREADY-EXTRACTED cookie value.
  *
- * This is the server's entry point, and it is a different shape from
- * `parseLangCookie`: Next's `cookies().get(name)` hands back `{name, value}`,
- * so what arrives here is a bare `"ar"`, not `"itqan.lang=ar"`. Passing that to
- * the header parser silently yields null and the whole site renders in English
- * while every unit test still passes — which is exactly what happened on the
- * first attempt at this, on 2026-08-17.
+ * This is the server's entry point. Next's `cookies().get(name)` hands back
+ * `{name, value}`, so what arrives here is a bare `"ar"`, never a whole
+ * `"itqan.lang=ar"` header — treating one as the other silently yields null and
+ * renders the entire site in English while every unit test still passes, which
+ * is exactly what happened on the first attempt at this, on 2026-08-17.
  */
 export const langFromValue = (v: string | null | undefined): LangValue | null =>
   isLangValue(v) ? v : null;
-
-/**
- * Pull the language out of a raw `Cookie:` header, or out of `document.cookie`.
- *
- * Matches only a whole cookie name — a stray `my.itqan.lang=en` must not be
- * mistaken for ours — and ignores any value that is not one of the two known
- * languages, so a corrupted or hand-edited cookie falls back rather than
- * rendering a page in nothing.
- */
-export function parseLangCookie(header: string | null | undefined): LangValue | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq < 0) continue;
-    if (part.slice(0, eq).trim() !== LANG_COOKIE) continue;
-    const v = part.slice(eq + 1).trim();
-    if (isLangValue(v)) return v;
-  }
-  return null;
-}
 
 /**
  * The `document.cookie` string that stores a choice.

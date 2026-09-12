@@ -5,7 +5,6 @@
  */
 
 export const MACHINE_STATUSES = ["Operational", "Under Maintenance", "Idle", "Out of Service"];
-export const MOLD_STATUSES = ["Active", "In Repair", "Retired"];
 // «أوامر العمل»!K is a validated list of EXACTLY these four Arabic values, and
 // !L (priority) is Arabic too — verified live on 2026-08-09. The app previously
 // wrote five English tokens that matched none of them, so every job read back

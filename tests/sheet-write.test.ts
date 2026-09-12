@@ -104,17 +104,18 @@ test("a clean failure reports nothing to undo", () => {
 });
 
 test("an all-numeric row rolls back fully — no date or time columns", () => {
-  // The paper import writes hour counts and «الفعلي», none of which is a date
-  // or a time, so an update to an EXISTING row is fully recoverable too.
-  const targets = [cell(212, 16), cell(212, 17), cell(212, 18), cell(212, 29)];
+  // «الإنتاج» H/I/J — سليم, الأجمالي سستم, هالك — are plain counts, none of
+  // them a date or a time, so an update to an EXISTING row is fully
+  // recoverable too.
+  const targets = [cell(212, 8), cell(212, 9), cell(212, 10)];
   const plan = planRollback(
     targets,
-    ["652", "652", "648", "22609"],
-    ["660", "660", "648", "22609"],
+    ["652", "22609", "300"],
+    ["660", "22609", "292"],
   );
   assert.equal(plan.applied, 2, "the two that actually changed");
   assert.equal(plan.stranded.length, 0);
-  assert.deepEqual(plan.restore.map((c) => c.value), ["652", "652"]);
+  assert.deepEqual(plan.restore.map((c) => c.value), ["652", "300"]);
 });
 
 test("a short `after` row is treated as blank, not as unchanged", () => {

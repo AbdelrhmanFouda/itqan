@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  moldNumberFromNotes, resolveMoldNumber, moldNumberLabel, moldNumberIndex, moldKey, latinDigits,
+  moldNumberFromNotes, resolveMoldNumber, moldKey, latinDigits,
 } from "../lib/mold-number.ts";
 
 /* ------------------------- notes that ARE a number ------------------------ */
@@ -97,49 +97,25 @@ test("the code wins, and the notes number rides beside it", () => {
   // r156 «ضهر عداد ثلاثي»: code 001, note HD16713.
   const m = resolveMoldNumber({ code: "001", notes: "HD16713" });
   assert.deepEqual(m, { number: "001", source: "code", code: "001", notesNumber: "HD16713" });
-  assert.equal(moldNumberLabel(m), "001 · HD16713");
 });
 
 test("with no code, the notes number IS the mould number", () => {
   // r383 «مديول عداد جديد (جولد دايموند)»: no code, note 201907.
   const m = resolveMoldNumber({ code: "", notes: "201907" });
   assert.deepEqual(m, { number: "201907", source: "notes", code: "", notesNumber: "201907" });
-  assert.equal(moldNumberLabel(m), "201907");
 });
 
 test("filler in the code cell is blank, not a number", () => {
   assert.equal(resolveMoldNumber({ code: "غير متاح / N/A", notes: "" }).source, "none");
   assert.equal(resolveMoldNumber({ code: "غير متاح / N/A", notes: "201907" }).number, "201907");
   assert.equal(resolveMoldNumber({ code: undefined, notes: undefined }).number, "");
-  assert.equal(moldNumberLabel(resolveMoldNumber({})), "");
+  assert.equal(resolveMoldNumber({}).number, "");
 });
 
 test("a code typed with Arabic digits is the same code", () => {
   const m = resolveMoldNumber({ code: "٥٠", notes: "قديم" });
   assert.equal(m.number, "50");
   assert.equal(m.notesNumber, "");
-  assert.equal(moldNumberLabel(m), "50");
-});
-
-/* -------------------------------- the index ------------------------------- */
-
-test("the index is keyed by the normalised product name, first row wins, duplicates flagged", () => {
-  const idx = moldNumberIndex([
-    { name: "ضهر عداد ثلاثي", code: "001", notes: "HD16713" },
-    { name: "زراير\t", code: "6", notes: "وزن الحبة: 5 قطع = 18 جم" },
-    { name: "سماعة اريون", code: "332", notes: "" },
-    { name: "سماعة  اريون ", code: "", notes: "201999" }, // same name, different spacing — a duplicate
-    { name: "", code: "999", notes: "" },                 // nameless rows are skipped
-    { name: "غير متاح / N/A", code: "", notes: "" },      // filler names are skipped too
-  ]);
-  assert.equal(idx.get(moldKey("ضهر عداد ثلاثي"))?.number, "001");
-  assert.equal(idx.get(moldKey("زراير"))?.number, "6", "a trailing tab must not split the name");
-  const dup = idx.get(moldKey("سماعة اريون"));
-  assert.equal(dup?.number, "332", "first row wins");
-  assert.equal(dup?.ambiguous, true, "…and the duplicate is flagged");
-  assert.equal(idx.get(moldKey("ضهر عداد ثلاثي"))?.ambiguous, false);
-  assert.equal(idx.has(""), false);
-  assert.equal(idx.has(moldKey("غير متاح / N/A")), false);
 });
 
 test("moldKey folds digits, case and whitespace the way the other joins do", () => {

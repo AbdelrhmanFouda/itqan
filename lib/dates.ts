@@ -103,11 +103,6 @@ export function normalizeDate(raw: string | number | undefined | null): string {
   return "";
 }
 
-/** "2026-06-30" → "2026-06"; "" stays "". */
-export function monthOf(iso: string): string {
-  return iso ? iso.slice(0, 7) : "";
-}
-
 /* --------------------------- the factory's day ---------------------------- */
 
 /** Cairo is UTC+2 year-round (Egypt dropped DST again in 2015 → reinstated 2023;

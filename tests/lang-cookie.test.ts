@@ -10,50 +10,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  LANG_COOKIE, LANG_COOKIE_MAX_AGE, parseLangCookie, langCookieString, isLangValue,
+  LANG_COOKIE, LANG_COOKIE_MAX_AGE, langCookieString, isLangValue,
   langFromValue,
 } from "../lib/lang-cookie.ts";
 
 test("THE SERVER'S SHAPE: cookies().get() hands back a bare value, not a pair", () => {
-  // The bug this test exists for: the root layout passed `.value` — "ar" — to
-  // parseLangCookie, which looks for `name=value`, found none, and returned
-  // null. Every other test in this file stayed green while the entire site
-  // rendered in English. Two shapes, two functions, and this pins which is which.
+  // The bug this test exists for: the root layout passed a whole `Cookie:`
+  // header — "itqan.lang=ar" — where a bare value belongs. langFromValue
+  // returns null for it, and the entire site rendered in English while every
+  // other test stayed green. This pins the shape the server must hand over.
   assert.equal(langFromValue("ar"), "ar");
   assert.equal(langFromValue("en"), "en");
-  assert.equal(parseLangCookie("ar"), null, "a bare value is NOT a cookie header");
   assert.equal(langFromValue("itqan.lang=ar"), null, "a header is NOT a bare value");
-  for (const v of ["", "fr", "AR", null, undefined]) assert.equal(langFromValue(v), null);
-});
-
-test("reads the choice out of a Cookie header", () => {
-  assert.equal(parseLangCookie("itqan.lang=ar"), "ar");
-  assert.equal(parseLangCookie("itqan.lang=en"), "en");
-  assert.equal(parseLangCookie("a=1; itqan.lang=ar; b=2"), "ar", "among other cookies");
-  assert.equal(parseLangCookie("a=1;itqan.lang=ar;b=2"), "ar", "no spaces after the semicolons");
-  assert.equal(parseLangCookie("  itqan.lang = ar  "), "ar", "whitespace around the pair");
-});
-
-test("only a WHOLE cookie name counts", () => {
-  // A cookie that merely ends with our name is somebody else's.
-  assert.equal(parseLangCookie("my.itqan.lang=en"), null);
-  assert.equal(parseLangCookie("itqan.language=ar"), null);
-  assert.equal(parseLangCookie("xitqan.lang=ar"), null);
-  // …but ours still wins when it is genuinely present alongside one.
-  assert.equal(parseLangCookie("my.itqan.lang=en; itqan.lang=ar"), "ar");
-});
-
-test("a value that is not a language is ignored, never rendered", () => {
   // A hand-edited or corrupted cookie must fall back, not put the page into a
   // language that does not exist.
-  for (const raw of ["itqan.lang=fr", "itqan.lang=", "itqan.lang=AR", "itqan.lang=ar,en", "itqan.lang"]) {
-    assert.equal(parseLangCookie(raw), null, `${raw} should not resolve`);
-  }
-});
-
-test("no header, no cookie, no crash", () => {
-  for (const v of ["", null, undefined, ";", "=", "; ;"]) {
-    assert.equal(parseLangCookie(v as string), null);
+  for (const v of ["", "fr", "AR", "ar,en", " ar", null, undefined]) {
+    assert.equal(langFromValue(v), null, `${v} should not resolve`);
   }
 });
 
@@ -62,7 +34,7 @@ test("the cookie it writes is the cookie it reads", () => {
   // silently ignores every choice, which is the bug this replaced.
   for (const l of ["ar", "en"] as const) {
     const s = langCookieString(l);
-    assert.equal(parseLangCookie(s.split(";")[0]), l);
+    assert.equal(langFromValue(s.split(";")[0].split("=")[1]), l);
   }
 });
 

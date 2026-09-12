@@ -4,7 +4,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import { LangProvider } from "@/context/LangContext";
 import { AuthProvider } from "@/context/AuthContext";
-import { LANG_COOKIE, langFromValue } from "@/lib/lang-cookie";
+import { LANG_COOKIE, LANG_COOKIE_MAX_AGE, langFromValue } from "@/lib/lang-cookie";
 
 const geist = Geist({ subsets: ["latin"] });
 
@@ -62,6 +62,9 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
+/** The cookie name as a regex literal, for the inline script below. */
+const LANG_COOKIE_RE = LANG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
  * One job: MIGRATE a choice that predates the cookie. Anyone who picked a
  * language before 2026-08-17 has it in localStorage only, which the server
@@ -74,14 +77,15 @@ export async function generateMetadata(): Promise<Metadata> {
  * is ARABIC — owner's word, 2026-08-28 — matching RootLayout and LangContext.
  * (The script used to also FORCE Arabic on /dashboard/downtime; that forcing
  * was removed the same day, at the owner's word — see lib/arabic-only.ts.)
- * Kept in sync with LANG_STORAGE_KEY and lib/lang-cookie.ts.
+ * The cookie name and its lifetime come from lib/lang-cookie.ts, so each has
+ * one definition; the localStorage key is deliberately the same string.
  */
 const LANG_BOOTSTRAP = `(function(){try{
-var m=document.cookie.match(/(?:^|;\\s*)itqan\\.lang=(ar|en)(?:;|$)/);
+var m=document.cookie.match(/(?:^|;\\s*)${LANG_COOKIE_RE}=(ar|en)(?:;|$)/);
 var c=m?m[1]:null;
-var s=localStorage.getItem("itqan.lang");
+var s=localStorage.getItem("${LANG_COOKIE}");
 if(s!=="ar"&&s!=="en")s=null;
-if(!c&&s){document.cookie="itqan.lang="+s+"; path=/; max-age=31536000; SameSite=Lax";c=s;}
+if(!c&&s){document.cookie="${LANG_COOKIE}="+s+"; path=/; max-age=${LANG_COOKIE_MAX_AGE}; SameSite=Lax";c=s;}
 var l=s||c||"ar";
 document.documentElement.lang=l;
 document.documentElement.dir=l==="ar"?"rtl":"ltr";

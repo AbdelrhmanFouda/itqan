@@ -12,8 +12,8 @@
  * lib/oee-data.ts itself cannot be imported here (it pulls in "@/lib/sheets",
  * and Node's test runner does not resolve the @/ alias), so the wiring is
  * pinned two ways: the standard is built below exactly as oee-data builds it,
- * and the module's source is asserted directly — the same duplication-pinning
- * trick tests/arabic-only.test.ts uses on app/layout.tsx.
+ * and the module's source is asserted directly — the same source-scanning
+ * trick tests/latin-digits.test.ts and tests/api-guards.test.ts use.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
