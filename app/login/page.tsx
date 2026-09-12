@@ -13,7 +13,7 @@ import { Field, inputCls, Btn, Spinner } from "@/components/dashboard/ui";
 
 type AuthErrStrings = {
   errInvalid: string; errEmailInUse: string; errWeakPassword: string;
-  errPopupClosed: string; errGeneric: string;
+  errPopupClosed: string; errUnauthorizedDomain: string; errGeneric: string;
 };
 
 function mapError(code: string | undefined, e: AuthErrStrings): string {
@@ -26,6 +26,8 @@ function mapError(code: string | undefined, e: AuthErrStrings): string {
       return e.errEmailInUse;
     case "auth/weak-password":
       return e.errWeakPassword;
+    case "auth/unauthorized-domain":
+      return e.errUnauthorizedDomain;
     case "auth/popup-closed-by-user":
     case "auth/cancelled-popup-request":
       return e.errPopupClosed;
