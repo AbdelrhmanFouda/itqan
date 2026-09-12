@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import MoldsRegister from "@/components/dashboard/molds-register";
 import { LANG_COOKIE, langFromValue } from "@/lib/lang-cookie";
+import { mr } from "@/lib/i18n.register";
 
-// The one heading this page shows — reused for the tab title so they can't drift.
-const TITLE = { en: "Molds Register", ar: "حصر الاسطمبات" };
+// The one heading this page shows — reused for the tab title so they can't
+// drift. Both halves come from mr, the register's own table (2026-09-12);
+// mr.subtitle carried the pre-2026-09-04 wording until then.
+const TITLE = { en: mr.en.title, ar: mr.ar.title };
+const SUBTITLE = { en: mr.en.subtitle, ar: mr.ar.subtitle };
 
 // A server component (unlike the rest of the dashboard), so the tab title can
 // come from real metadata; the root layout's template appends the brand suffix.
@@ -20,7 +24,7 @@ export default function MoldsPage() {
   return (
     <MoldsRegister
       title={TITLE}
-      subtitle={{ en: "Every mould and its number — live from Master", ar: "كل اسطمبة ورقمها — مباشرةً من الرئيسي" }}
+      subtitle={SUBTITLE}
     />
   );
 }

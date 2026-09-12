@@ -4,7 +4,7 @@ import type { Lang } from "./i18n";
 export const mr = {
   en: {
     title: "Molds Register",
-    subtitle: "Live from your molds sheet",
+    subtitle: "Every mould and its number — live from Master",
     search: "Search code or name…",
     allCategories: "All categories",
     details: "View / Edit",
@@ -51,7 +51,7 @@ export const mr = {
   },
   ar: {
     title: "حصر الاسطمبات",
-    subtitle: "مباشرةً من جدول الاسطمبات",
+    subtitle: "كل اسطمبة ورقمها — مباشرةً من الرئيسي",
     search: "ابحث بالكود أو الاسم…",
     allCategories: "كل الفئات",
     details: "عرض / تعديل",
