@@ -16,7 +16,7 @@
  */
 
 import { revalidateTag } from "next/cache";
-import { after } from "next/server";
+import { keepAlive } from "@/lib/keep-alive";
 import { planRollback, cellRef, type WriteCell } from "@/lib/sheet-write";
 import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
 import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-copy";
@@ -285,11 +285,6 @@ function readOnce(tab: string): Promise<SheetRead> {
   return p;
 }
 
-/** Keep a background read alive past the response (a no-op outside a request). */
-function keepAlive(p: Promise<unknown>): void {
-  const quiet = p.then(() => undefined, () => undefined);
-  try { after(quiet); } catch { /* outside a request scope — nothing to hold open */ }
-}
 
 async function fetchSheet(tab: string, fresh = false): Promise<SheetRead> {
   const now = Date.now();

@@ -9,7 +9,7 @@
  *   STORAGE_APPS_SCRIPT_URL, STORAGE_APPS_SCRIPT_SECRET
  */
 
-import { after } from "next/server";
+import { keepAlive } from "@/lib/keep-alive";
 import { judgeCopy, type StaleCopy } from "@/lib/stale-copy";
 import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-copy";
 
@@ -175,11 +175,6 @@ let lastGoodStorage: StaleCopy<StorageData> | undefined;
 let storageWrittenAt = 0;
 let storageInflight: Promise<StorageData | null> | null = null;
 
-/** Keep a background read alive past the response (a no-op outside a request). */
-function keepAlive(p: Promise<unknown>): void {
-  const quiet = p.then(() => undefined, () => undefined);
-  try { after(quiet); } catch { /* outside a request scope — nothing to hold open */ }
-}
 
 function rememberStorage(d: StorageData): void {
   const copy = { value: d, at: d.readAt };
