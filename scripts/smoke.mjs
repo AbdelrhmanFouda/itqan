@@ -43,7 +43,7 @@ const TIMEOUT_MS = Number(args.timeout || 60000);
 const results = [];
 let current = "";
 
-async function req(path, { method = "GET", headers = {}, body, cookie, token } = {}) {
+async function req(path, { method = "GET", headers = {}, body, cookie, token, redirect = "follow" } = {}) {
   const h = { ...headers };
   if (cookie) h["Cookie"] = cookie;
   if (token) h["Authorization"] = `Bearer ${token}`;
@@ -52,11 +52,12 @@ async function req(path, { method = "GET", headers = {}, body, cookie, token } =
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   const t0 = Date.now();
   try {
-    const res = await fetch(BASE + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "follow", signal: ctl.signal });
+    const res = await fetch(BASE + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect, signal: ctl.signal });
+    const location = res.headers.get("location") || "";
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch { /* not JSON */ }
-    return { status: res.status, type: res.headers.get("content-type") || "", text, json, ms: Date.now() - t0 };
+    return { status: res.status, type: res.headers.get("content-type") || "", text, json, location, ms: Date.now() - t0 };
   } finally {
     clearTimeout(timer);
   }
@@ -169,6 +170,38 @@ await check("GET /api/public/showcase → three counts and nothing else", async 
   expect(Object.keys(r.json.stats).sort().join() === "clients,machines,molds", `stats keys: ${Object.keys(r.json.stats)}`);
   expect(!/records|names/.test(r.text), "the showcase body carries names");
   return JSON.stringify(r.json.stats);
+});
+// The four zero-data routes of 2026-09-10 — the fastest way to tell from
+// outside WHICH build is serving and whether the transport is the Sheets API
+// or the bridge, and the only place the OAuth handshake is exercised.
+await check("GET /api/health → the build, the region and the live transport", async () => {
+  const r = await req("/api/health");
+  expect(r.status === 200 && r.json?.ok === true, `HTTP ${r.status}`);
+  expect(typeof r.json.build === "string" && r.json.build, "no build");
+  expect(r.json.transport === "api" || r.json.transport === "bridge", `transport: ${r.json.transport}`);
+  return `build ${r.json.build} · ${r.json.transport}${r.json.region ? ` · ${r.json.region}` : ""} · sharedCopy ${r.json.sharedCopy} · ${r.ms}ms`;
+});
+await check("GET /api/warm → {ok:true} at once, and no data in the body", async () => {
+  const r = await req("/api/warm");
+  expect(r.status === 200 && r.json?.ok === true, `HTTP ${r.status}`);
+  expect(!("records" in r.json) && !("runs" in r.json) && !("machines" in r.json), "the warm answer carries data");
+  return `${r.ms}ms`;
+});
+await check("GET /api/google/connect → a redirect to Google's consent screen", async () => {
+  const r = await req("/api/google/connect", { redirect: "manual" });
+  // 503 not_configured is a legitimate answer on an environment with no OAuth
+  // client — it is the one thing this route may say without redirecting.
+  if (r.status === 503) return "not configured here (no GOOGLE_OAUTH_CLIENT_ID)";
+  expect(r.status === 302 || r.status === 307, `HTTP ${r.status}`);
+  expect(r.location.startsWith("https://accounts.google.com/"), `redirects to ${r.location.slice(0, 60)}`);
+  expect(!/client_secret|refresh_token/.test(r.location), "the redirect carries a secret");
+  return `${r.status} → accounts.google.com`;
+});
+await check("GET /api/google/callback without a code → refused, and no token in the page", async () => {
+  const r = await req("/api/google/callback");
+  expect(r.status !== 200, `HTTP ${r.status} — a codeless callback must not succeed`);
+  expect(!/refresh_token|(^|[^\w])1\/\/[\w-]{20,}/.test(r.text), "the callback page carries a token");
+  return `HTTP ${r.status}`;
 });
 await check("GET /api/sheet/nope → 404 (unknown entity)", async () => { const r = await req("/api/sheet/nope"); expect(r.status === 404, `HTTP ${r.status}`); });
 await check("GET /api/contact → 405 (no read; the form only POSTs)", async () => { const r = await req("/api/contact"); expect(r.status === 405, `HTTP ${r.status}`); });

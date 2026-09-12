@@ -37,6 +37,9 @@ const PAGES = [
   "/dashboard/approvals",
 ];
 const OPEN_APIS = [
+  // First on purpose: /api/health touches nothing (no sheet, no Firebase), so
+  // it is the zero-dependency baseline every other number is read against.
+  "/api/health",
   "/api/machines", "/api/runs", "/api/oee", "/api/issues", "/api/sheet/molds", "/api/sheet/products",
   "/api/public/showcase",
 ];
