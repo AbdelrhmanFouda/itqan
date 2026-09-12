@@ -13,7 +13,7 @@ import { useRemembered } from "@/components/dashboard/use-remembered";
 import { moldsByName, moldNumberOf, productOf, type MachineRow, type MoldRow, type RunRow } from "@/lib/run-row";
 import { LogRunModal } from "@/components/dashboard/log-run-modal";
 import { fmtNum } from "@/lib/format";
-import { todayIso } from "@/lib/dates";
+import { factoryDay } from "@/lib/dates";
 
 
 /** The last «الإنتاج» answer this device saw — painted at once on the next open. */
@@ -24,7 +24,7 @@ export default function QualityPage() {
   const p = pd[lang];
   const isAr = lang === "ar";
   usePageTitle(a.quality.title);
-  const today = todayIso();
+  const today = factoryDay();
 
   const [date, setDate] = useState(today);
   const [machines, setMachines] = useState<MachineRow[]>([]);

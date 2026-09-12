@@ -12,7 +12,7 @@ import { useRemembered } from "@/components/dashboard/use-remembered";
 import { moldsByName, moldNumberOf, productOf, type MachineRow, type MoldRow, type RunRow } from "@/lib/run-row";
 import { LogRunModal } from "@/components/dashboard/log-run-modal";
 import { fmtNum } from "@/lib/format";
-import { todayIso } from "@/lib/dates";
+import { factoryDay } from "@/lib/dates";
 
 
 /** The last «الإنتاج» answer this device saw — painted at once on the next open. */
@@ -28,7 +28,7 @@ export default function ProductionPage() {
   const [period, setPeriod] = useState<"month" | "all">("month");
   const [open, setOpen] = useState(false);
 
-  const today = todayIso();
+  const today = factoryDay();
   const ym = today.slice(0, 7);
 
 

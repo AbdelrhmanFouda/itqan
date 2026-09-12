@@ -163,7 +163,10 @@ export async function POST(req: NextRequest) {
       product: b.product ?? "",
       plannedMin: String(num(b.plannedMin) || 720),
       goodUnits: String(num(b.goodUnits)),
-      scrapUnits: String(num(b.scrapUnits)),
+      // Blank means NOT COUNTED YET, not zero. resolveScrap() reads «هالك» first
+      // and calls it source "logged", so a "0" here would record an uncounted
+      // shift as having no scrap at all and overstate quality with no flag.
+      scrapUnits: b.scrapUnits === "" || b.scrapUnits == null ? "" : String(num(b.scrapUnits)),
       // Optional — left blank (not 0) when the crew doesn't record it.
       openCavities: num(b.openCavities) > 0 ? String(num(b.openCavities)) : "",
       downtimeMin: String(num(b.downtimeMin)),

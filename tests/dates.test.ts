@@ -195,3 +195,20 @@ test("lib/issues.ts cairoToday and lib/dates.ts todayIso agree", () => {
     assert.equal(cairoToday(at), todayIso(at));
   }
 });
+
+test("todayIso is NOT the factory day — the night shift is the difference", () => {
+  // The floor's day runs 08:00→07:00 (FACTORY_DAY_START_HOUR), and downtime
+  // capture dates its rows with factoryDay(). The log-production form must use
+  // the same rule: at 02:00 Cairo the shift still belongs to YESTERDAY, and a
+  // production row dated a day ahead of its own stoppages joins to nothing in
+  // distributeDowntime() — availability reads 100% for a night the machine
+  // stood still, with no error raised anywhere.
+  const night = Date.parse("2026-09-12T23:30:00Z"); // 02:30 Cairo on the 13th
+  assert.equal(todayIso(night), "2026-09-13");
+  assert.equal(factoryDay(night), "2026-09-12");
+  assert.notEqual(todayIso(night), factoryDay(night));
+
+  // After 08:00 Cairo the two agree, which is why this hid for a month.
+  const morning = Date.parse("2026-09-13T07:00:00Z"); // 10:00 Cairo
+  assert.equal(todayIso(morning), factoryDay(morning));
+});

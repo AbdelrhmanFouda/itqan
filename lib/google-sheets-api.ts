@@ -180,7 +180,7 @@ type ApiCell = { row: number; col: number; value: string };
 /** Append one row after the tab's data (RAW: text stays text). Returns the row number. */
 export async function apiAppend(tab: string, row: string[]): Promise<{ row: number }> {
   const json = await call<{ updates?: { updatedRange?: string } }>(
-    `/values/${encodeURIComponent(tabRange(tab))}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `/values/${encodeURIComponent(tabRange(tab))}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     { method: "POST", body: JSON.stringify({ majorDimension: "ROWS", values: [row] }) },
   );
   const m = (json.updates?.updatedRange ?? "").match(/!([A-Z]+)(\d+)(?::[A-Z]+(\d+))?$/);
