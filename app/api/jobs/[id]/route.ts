@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecords, updateRecord, deleteRecord, bridgeFeatures } from "@/lib/sheets";
+import { getRecords, updateRecord, deleteRecord, expectSupported } from "@/lib/sheets";
 import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
@@ -145,12 +145,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (expect && typeof expect === "object") {
       // Bridge version 7 checks the row INSIDE the write (one round trip);
       // an older bridge gets the fresh read here, as before (two).
-      const feats = await bridgeFeatures();
-      const copy = await getRecords("jobs", { fresh: !feats.expect });
+      const canExpect = await expectSupported();
+      const copy = await getRecords("jobs", { fresh: !canExpect });
       const rec = copy.records.find((r) => r.row === Number(id));
       const want = codeKey(String((expect as { code?: unknown }).code ?? ""));
       if (!rec || !want || codeKey(rec.code) !== want) return bad("row_changed", 409);
-      if (feats.expect) expectOpt = { field: "code", value: rec.code };
+      if (canExpect) expectOpt = { field: "code", value: rec.code };
     }
 
     const changes: Record<string, string> = {};

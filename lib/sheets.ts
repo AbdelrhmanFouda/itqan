@@ -1,14 +1,18 @@
 /**
  * Google Sheets integration — generic, config-driven.
  *
- * Two ways to reach the sheet:
- *   • Apps Script web app (preferred) — reads AND writes, works on a PRIVATE
- *     sheet, no service-account key (org policy blocks those). Runs as you.
- *   • API key (fallback, read-only) — needs the sheet shared "Anyone with link".
+ * Two ways to reach the sheet, in order:
+ *   • Google Sheets REST API (primary since 2026-09-10) — reads AND writes as
+ *     the owner through his one-time OAuth consent. See lib/google-sheets-api.ts.
+ *   • Apps Script web app (fallback) — reads AND writes on the PRIVATE sheet,
+ *     runs as the owner. It is ALSO the only path to Drive (the voice notes),
+ *     whichever transport is carrying the sheet itself.
+ * No service-account key anywhere: the org policy blocks those.
  *
  * Env (server-side only):
- *   GOOGLE_SHEETS_ID, GOOGLE_SHEETS_API_KEY            (API-key read fallback)
- *   GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_SECRET  (Apps Script read+write)
+ *   GOOGLE_SHEETS_ID                                   (both transports)
+ *   GOOGLE_OAUTH_CLIENT_ID/_SECRET/_REFRESH_TOKEN      (Sheets API)
+ *   GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_SECRET  (bridge, + Drive files)
  */
 
 import { revalidateTag } from "next/cache";
@@ -21,7 +25,7 @@ import { dropSharedCopies, readSharedCopy, writeSharedCopy } from "@/lib/shared-
 // Apps Script bridge below remains the fallback and still carries the voice
 // notes. See lib/google-sheets-api.ts for the semantics kept identical.
 import {
-  SheetsApiError, apiAppend, apiCreateTab, apiDeleteRow, apiReadTabs, apiUpdate, sheetsApiUsable,
+  SheetsApiError, apiAppend, apiCreateTab, apiDeleteRow, apiReadTabs, apiUpdate, sheetsApiConfigured, sheetsApiUsable,
   type ApiTabAnswer,
 } from "@/lib/google-sheets-api";
 import {
@@ -32,40 +36,23 @@ import {
 // 2026-09-04. Re-exported so every importer of ENTITIES keeps working.
 export { ENTITIES, type EntityConfig } from "@/lib/sheet-entities";
 
-const BASE = "https://sheets.googleapis.com/v4/spreadsheets";
-const SHEET_ID = process.env.GOOGLE_SHEETS_ID;
-const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
 const SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL;
 const SCRIPT_SECRET = process.env.GOOGLE_APPS_SCRIPT_SECRET;
 
+/** The Apps Script bridge is reachable (its URL and token are both set). */
+const bridgeEnv = (): boolean => Boolean(SCRIPT_URL && SCRIPT_SECRET);
+
+// Either transport is enough. A deployment carrying only the OAuth trio used
+// to report every tab unconfigured and read-only — it worked solely because
+// the bridge env happened to be set too.
 export function sheetsConfigured(): boolean {
-  return Boolean((SCRIPT_URL && SCRIPT_SECRET) || (SHEET_ID && API_KEY));
+  return bridgeEnv() || sheetsApiConfigured();
 }
 export function sheetsWritable(): boolean {
-  return Boolean(SCRIPT_URL && SCRIPT_SECRET);
+  return bridgeEnv() || sheetsApiUsable();
 }
 
 /* ------------------------------ reading ------------------------------ */
-
-async function resolveTabTitle(want: string): Promise<string> {
-  if (!SHEET_ID || !API_KEY) return want;
-  try {
-    const res = await fetch(`${BASE}/${SHEET_ID}?key=${API_KEY}&fields=sheets.properties.title`, {
-      next: { revalidate: 300 },
-    });
-    if (!res.ok) return want;
-    const json = (await res.json()) as { sheets?: { properties?: { title?: string } }[] };
-    const titles = (json.sheets ?? []).map((s) => s.properties?.title ?? "").filter(Boolean);
-    const lc = want.trim().toLowerCase();
-    return (
-      titles.find((t) => t.toLowerCase() === lc) ||
-      titles.find((t) => t.toLowerCase().includes(lc)) ||
-      (titles.length === 1 ? titles[0] : want)
-    );
-  } catch {
-    return want;
-  }
-}
 
 // Tabs were renamed to Arabic (2026-07-15). The OLD English names stay as
 // fallbacks so the site keeps working whether the sheet-side rename has run
@@ -441,6 +428,7 @@ async function readViaApi(names: string[]): Promise<Record<string, Answer> | nul
 async function readOneTab(name: string): Promise<Answer> {
   const viaApi = await readViaApi([name]);
   if (viaApi) return viaApi[name];
+  if (!bridgeEnv()) return { kind: "error", detail: `"${name}" no transport configured` };
   const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tab=${encodeURIComponent(name)}`;
   return classify(name, await bridgeText(u));
 }
@@ -471,7 +459,7 @@ async function flushBatch(): Promise<void> {
 
   const viaApi = await readViaApi(names);
   if (viaApi) { for (const n of names) settle(n, viaApi[n]); return; }
-  if (names.length === 1 || Date.now() < multiUnsupportedUntil) return oneByOne(names);
+  if (!bridgeEnv() || names.length === 1 || Date.now() < multiUnsupportedUntil) return oneByOne(names);
 
   const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&tabs=${encodeURIComponent(names.join(","))}`;
   const r = await bridgeText(u);
@@ -503,7 +491,10 @@ async function flushBatch(): Promise<void> {
 const breath = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchSheetUncached(tab: string): Promise<SheetRead> {
-  if (SCRIPT_URL && SCRIPT_SECRET) {
+  // Either transport can answer: the Sheets API (readViaApi, inside the batch)
+  // or the bridge. Gating this on the bridge env alone left an OAuth-only
+  // deployment reading nothing at all.
+  if (sheetsApiUsable() || bridgeEnv()) {
     let a = await readViaBatch(tab);
     if (a.kind !== "ok" && a.kind !== "no_tab") {
       await breath(1500);
@@ -525,19 +516,7 @@ async function fetchSheetUncached(tab: string): Promise<SheetRead> {
     // both arrive as [] — and fetchSheet serves the last good copy instead.
     console.error(`[sheets] every attempt failed for tab "${tab}" (last: ${a.detail})`);
   }
-  // Fallback: public read via API key.
-  if (!SHEET_ID || !API_KEY) return { title: tab, values: [] };
-  const title = await resolveTabTitle(tab);
-  const range = `'${title.replace(/'/g, "''")}'`;
-  const url = `${BASE}/${SHEET_ID}/values/${encodeURIComponent(range)}?key=${API_KEY}&majorDimension=ROWS`;
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return { title, values: [] };
-    const json = (await res.json()) as { values?: string[][] };
-    return { title, values: json.values ?? [] };
-  } catch {
-    return { title, values: [] };
-  }
+  return { title: tab, values: [] };
 }
 
 export type SheetRecord = { row: number } & Record<string, string>;
@@ -647,7 +626,7 @@ export type UpdateResult = {
 
 type Cell = { row: number; col: number; value: string };
 
-const MASTER_TAB = "الرئيسي"; // resolved through TAB_ALIASES → falls back to "Master"
+const MASTER_TAB = "الرئيسي"; // the pre-2026-07 English name is tried via TAB_ALIASES
 const MASTER_VIEWS = new Set(["molds", "products"]); // entities mirrored from Master
 const ID_KEYWORDS = ["id", "الرقم", "رقم", "no."]; // the key column in Master + its views
 
@@ -666,7 +645,7 @@ type UpdateOptions = {
 export async function updateRecord(
   entity: string, row: number, changes: Record<string, string>, opts: UpdateOptions = {},
 ): Promise<UpdateResult> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  if (!sheetsWritable()) return { ok: false, reason: "not_writable" };
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   if (!Number.isFinite(row) || row < 2) return { ok: false, reason: "bad_row" };
@@ -674,7 +653,7 @@ export async function updateRecord(
 
   if (opts.expect) {
     if (MASTER_VIEWS.has(entity)) return { ok: false, reason: "master_view_not_supported" };
-    if (!(await bridgeFeatures()).expect) return { ok: false, reason: "expect_unsupported" };
+    if (!(await expectSupported())) return { ok: false, reason: "expect_unsupported" };
     const plan = await mapInTab(cfg, row, changes, opts.expect);
     if ("reason" in plan) return { ok: false, reason: plan.reason };
     return postUpdates(plan.tab, plan.updates, plan.before, plan.expect);
@@ -922,6 +901,9 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
       }
     }
   }
+  // Only the bridge is left — an API-only deployment whose token was refused
+  // has nowhere to write.
+  if (!bridgeEnv()) return { ok: false, reason: "not_writable" };
   try {
     const res = await fetch(SCRIPT_URL!, {
       method: "POST",
@@ -998,7 +980,7 @@ async function postAction(payload: Record<string, unknown>): Promise<UpdateResul
 // real header columns, so it survives column reordering in the sheet.
 
 export async function appendRecord(entity: string, values: Record<string, string>): Promise<UpdateResult> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  if (!sheetsWritable()) return { ok: false, reason: "not_writable" };
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
 
@@ -1024,12 +1006,12 @@ export async function appendRecord(entity: string, values: Record<string, string
 // Requires the createTab action in apps-script.gs (deploy a New version to enable);
 // on an older deployment this returns no_tab and callers fall back gracefully.
 export async function ensureTab(tab: string, headers: string[]): Promise<UpdateResult> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  if (!sheetsWritable()) return { ok: false, reason: "not_writable" };
   return postAction({ createTab: tab, headers });
 }
 
 export async function deleteRecord(entity: string, row: number): Promise<UpdateResult> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  if (!sheetsWritable()) return { ok: false, reason: "not_writable" };
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   if (!Number.isFinite(row) || row < 2) return { ok: false, reason: "bad_row" };
@@ -1056,7 +1038,7 @@ export async function deleteRecord(entity: string, row: number): Promise<UpdateR
  * no cell to hold its link would be an orphan nobody could find.
  */
 export async function ensureHeaders(entity: string, headers: string[]): Promise<UpdateResult> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  if (!sheetsWritable()) return { ok: false, reason: "not_writable" };
   const cfg = ENTITIES[entity];
   if (!cfg) return { ok: false, reason: "bad_entity" };
   const { values, title } = await fetchSheet(cfg.tab, true);
@@ -1088,15 +1070,23 @@ let featuresSeen: { value: BridgeFeatures; at: number } | null = null;
 const FEATURES_YES_MS = 30 * 60 * 1000;
 const FEATURES_NO_MS = 2 * 60 * 1000;
 
+/** Can a write verify the row's identity inside the write itself? Native
+ *  through the Sheets API; on the bridge it needs version 7 — which costs a
+ *  ping, so the API transport answers without touching the bridge at all. */
+export async function expectSupported(): Promise<boolean> {
+  if (sheetsApiUsable()) return true;
+  return (await bridgeFeatures()).expect;
+}
+
 export async function bridgeFeatures(): Promise<BridgeFeatures> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { audio: false, expect: false };
+  if (!bridgeEnv()) return { audio: false, expect: sheetsApiUsable() };
   const now = Date.now();
   if (featuresSeen && now - featuresSeen.at < (featuresSeen.value.audio ? FEATURES_YES_MS : FEATURES_NO_MS)) {
     return featuresSeen.value;
   }
   let audio = false, expect = false;
   try {
-    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&ping=1`;
+    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&ping=1`;
     // Every file call below is bounded: the bridge is ONE serial queue, and a
     // call that never returns would hold every sheet read behind it.
     // NOT queued (2026-09-10): the probe used to sit in the serial read queue
@@ -1123,10 +1113,11 @@ type SavedFile = { ok: true; id: string; url: string } | { ok: false; reason: st
  *  base64 inside the JSON the bridge already speaks. Not through postAction:
  *  a saved file changes no cell, so the sheet cache must NOT be dropped. */
 export async function bridgeSaveFile(file: { name: string; mime: string; base64: string }): Promise<SavedFile> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_writable" };
+  // Drive is the bridge's alone, whichever transport carries the sheet.
+  if (!bridgeEnv()) return { ok: false, reason: "not_writable" };
   try {
     const res = await queued(() =>
-      fetch(SCRIPT_URL, {
+      fetch(SCRIPT_URL!, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: SCRIPT_SECRET, saveAudio: { name: file.name, mime: file.mime, data: file.base64 } }),
@@ -1162,9 +1153,9 @@ type ReadFile = { ok: true; mime: string; name: string; base64: string } | { ok:
  *  recordings folder — the id is the caller's only input, and the script can
  *  see the owner's whole Drive. */
 export async function bridgeReadFile(id: string): Promise<ReadFile> {
-  if (!SCRIPT_URL || !SCRIPT_SECRET) return { ok: false, reason: "not_configured" };
+  if (!bridgeEnv()) return { ok: false, reason: "not_configured" };
   try {
-    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET)}&audio=${encodeURIComponent(id)}`;
+    const u = `${SCRIPT_URL}?token=${encodeURIComponent(SCRIPT_SECRET!)}&audio=${encodeURIComponent(id)}`;
     const res = await queued(() => fetch(u, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(60_000) }));
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
     const text = await res.text();

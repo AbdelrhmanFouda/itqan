@@ -37,7 +37,7 @@ export const mr = {
     empty: "No molds match your filters.",
     notConfigured: "Molds sheet not connected yet",
     notConfiguredBody:
-      "Set GOOGLE_SHEETS_ID and GOOGLE_SHEETS_API_KEY in .env.local (see SHEETS_SETUP.md), then refresh — your molds will appear here.",
+      "Set GOOGLE_SHEETS_ID plus one transport — the OAuth trio (GOOGLE_OAUTH_CLIENT_ID / _SECRET / _REFRESH_TOKEN) or the Apps Script bridge (GOOGLE_APPS_SCRIPT_URL / _SECRET) — then refresh and your molds will appear here.",
     loading: "Loading…",
     refresh: "Refresh",
     // editing
@@ -47,7 +47,7 @@ export const mr = {
     saveFailed: "Couldn't save",
     writeDisabledTitle: "Editing is read-only",
     writeDisabledBody:
-      "To edit molds from here, connect a Google service account with edit access to the sheet (see SHEETS_SETUP.md). For now you can edit directly in the sheet.",
+      "Editing needs a working transport: the OAuth trio, or the Apps Script bridge. Neither is answering, so for now edit in the sheet itself.",
   },
   ar: {
     title: "حصر الاسطمبات",
@@ -82,7 +82,7 @@ export const mr = {
     empty: "لا توجد اسطمبات مطابقة للتصفية.",
     notConfigured: "لم يتم ربط جدول الاسطمبات بعد",
     notConfiguredBody:
-      "اضبط GOOGLE_SHEETS_ID و GOOGLE_SHEETS_API_KEY في .env.local (انظر SHEETS_SETUP.md)، ثم حدّث الصفحة.",
+      "اضبط GOOGLE_SHEETS_ID مع أحد طريقي الاتصال: مفاتيح OAuth (GOOGLE_OAUTH_CLIENT_ID / _SECRET / _REFRESH_TOKEN) أو جسر Apps Script (GOOGLE_APPS_SCRIPT_URL / _SECRET)، ثم حدّث الصفحة.",
     loading: "جارٍ التحميل…",
     refresh: "تحديث",
     // editing
@@ -92,6 +92,6 @@ export const mr = {
     saveFailed: "تعذّر الحفظ",
     writeDisabledTitle: "التعديل للقراءة فقط",
     writeDisabledBody:
-      "لتعديل الاسطمبات من هنا، اربط حساب خدمة Google له صلاحية التعديل على الجدول (انظر SHEETS_SETUP.md). حالياً يمكنك التعديل في الجدول مباشرةً.",
+      "التعديل يحتاج اتصالاً يعمل: مفاتيح OAuth أو جسر Apps Script. لا يستجيب أيٌّ منهما الآن، لذا عدّل في الجدول مباشرةً.",
   },
 } satisfies Record<Lang, unknown>;
