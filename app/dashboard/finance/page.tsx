@@ -23,6 +23,7 @@ import { pd } from "@/lib/i18n.prod";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, timedJson, writeLastSeen } from "@/components/dashboard/last-seen";
 import { Stat, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
+import { Pareto } from "@/components/dashboard/charts";
 import { fmtNum, numLocale } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 
@@ -36,43 +37,6 @@ const LAST_KEY = "itqan.finance.last";
 /** A figure whose source has not answered yet. Never rendered as 0. */
 const PENDING = "…";
 
-function Bars({
-  data, isAr, unit, percent, empty, pending, pendingText,
-}: {
-  data: { label: string; value: number }[];
-  isAr: boolean;
-  unit?: string;
-  percent?: boolean;
-  empty: string;
-  /** The source behind this chart has not answered yet — «no data» would lie. */
-  pending?: boolean;
-  pendingText?: string;
-}) {
-  const fmt = (n: number) => fmtNum(n, isAr);
-  if (pending)
-    return (
-      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 flex justify-center">
-        <Spinner text={pendingText ?? ""} />
-      </div>
-    );
-  if (data.length === 0) return <EmptyState text={empty} />;
-  const max = data.reduce((m, d) => Math.max(m, d.value), 0);
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 space-y-3">
-      {data.map((d) => (
-        <div key={d.label}>
-          <div className="flex items-center justify-between gap-3 text-xs mb-1">
-            <span className="font-medium text-gray-700 min-w-0 truncate">{d.label}</span>
-            <span className="text-gray-500 tabular-nums shrink-0">{percent ? `${fmt(d.value)}%` : `${fmt(d.value)}${unit ? ` ${unit}` : ""}`}</span>
-          </div>
-          <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden" dir="ltr">
-            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${max ? (d.value / max) * 100 : 0}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function FinancePage() {
   const { lang } = useLang();
@@ -238,19 +202,19 @@ export default function FinancePage() {
       <div className="grid lg:grid-cols-2 gap-6">
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.finance.byMonth}</h2>
-          <Bars data={goodByMonth} isAr={isAr} unit={a.finance.units} empty={a.finance.noData} pending={runs === null} pendingText={p.common.loading} />
+          <Pareto items={goodByMonth} isAr={isAr} cumulative={false} card unit={a.finance.units} empty={<EmptyState text={a.finance.noData} />} pending={runs === null} pendingText={p.common.loading} />
         </div>
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.finance.scrapByMonth}</h2>
-          <Bars data={scrapByMonth} isAr={isAr} percent empty={a.finance.noData} pending={runs === null} pendingText={p.common.loading} />
+          <Pareto items={scrapByMonth} isAr={isAr} cumulative={false} card percent empty={<EmptyState text={a.finance.noData} />} pending={runs === null} pendingText={p.common.loading} />
         </div>
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.finance.byClient}</h2>
-          <Bars data={byClient} isAr={isAr} unit={a.finance.units} empty={a.finance.noData} pending={jobs === null} pendingText={p.common.loading} />
+          <Pareto items={byClient} isAr={isAr} cumulative={false} card unit={a.finance.units} empty={<EmptyState text={a.finance.noData} />} pending={jobs === null} pendingText={p.common.loading} />
         </div>
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">{a.finance.byMachine}</h2>
-          <Bars data={byMachine} isAr={isAr} unit={a.finance.units} empty={a.finance.noData} pending={runs === null} pendingText={p.common.loading} />
+          <Pareto items={byMachine} isAr={isAr} cumulative={false} card unit={a.finance.units} empty={<EmptyState text={a.finance.noData} />} pending={runs === null} pendingText={p.common.loading} />
         </div>
       </div>
     </div>

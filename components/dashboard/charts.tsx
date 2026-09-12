@@ -7,6 +7,7 @@
 
 import { ReactNode } from "react";
 import { fmtNum, fmtPct } from "@/lib/format";
+import { Spinner } from "@/components/dashboard/ui";
 
 const oeeColor = (x: number) => (x >= 0.85 ? "#16a34a" : x >= 0.6 ? "#d97706" : "#dc2626");
 const AXIS = "#6b7280", GRID = "#f3f4f6";
@@ -125,34 +126,62 @@ export function TrendChart({
 
 /* ----------------------------- Pareto (bars) ------------------------------ */
 
+/**
+ * A ranked bar list. The performance page reads it as a true Pareto (running
+ * share on every row); the finance page had grown its own byte-identical copy
+ * with `cumulative={false}` behaviour and a card around it, folded in here in
+ * cleanup batch 7. The bar track is `dir="ltr"` on purpose — a bar grows from
+ * the same side in both languages.
+ */
 export function Pareto({
-  items, unit, isAr,
+  items, unit, isAr, cumulative = true, percent, card, empty, pending, pendingText,
 }: {
-  items: { label: string; value: number }[]; unit: string; isAr: boolean;
+  items: { label: string; value: number }[];
+  unit?: string;
+  isAr: boolean;
+  /** Show the running share («Σ 62%»). Off for a plain ranked list. */
+  cumulative?: boolean;
+  /** The values ARE percentages — print «12.5%» instead of a unit. */
+  percent?: boolean;
+  /** Wrap in the white card the finance page draws around each chart. */
+  card?: boolean;
+  /** Rendered instead of the bars when there is nothing to show. */
+  empty?: ReactNode;
+  /** The source behind this chart has not answered yet — «no data» would lie. */
+  pending?: boolean;
+  pendingText?: string;
 }) {
+  const box = (children: ReactNode) =>
+    card ? <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 space-y-3">{children}</div> : <div className="space-y-3">{children}</div>;
+  if (pending)
+    return (
+      <div className={card ? "bg-white border border-gray-200 rounded-xl p-4 sm:p-5 flex justify-center" : "flex justify-center"}>
+        <Spinner text={pendingText ?? ""} />
+      </div>
+    );
+  if (items.length === 0 && empty !== undefined) return <>{empty}</>;
   const total = items.reduce((a, b) => a + b.value, 0) || 1;
   const max = Math.max(...items.map((i) => i.value), 1);
   let cum = 0;
-  return (
-    <div className="space-y-3">
-      {items.map((it) => {
-        cum += it.value;
-        const share = cum / total;
-        return (
-          <div key={it.label}>
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-gray-600">{it.label}</span>
-              <span className="text-gray-400 whitespace-nowrap">
-                {fmtNum(it.value, isAr)} {unit} · Σ {fmtPct(share, isAr)}
-              </span>
-            </div>
-            <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden" dir="ltr">
-              <div className="h-full rounded-full bg-blue-500" style={{ width: `${(it.value / max) * 100}%` }} />
-            </div>
+  return box(
+    items.map((it) => {
+      cum += it.value;
+      const share = cum / total;
+      return (
+        <div key={it.label}>
+          <div className="flex items-center justify-between gap-3 text-xs mb-1">
+            <span className="text-gray-600 min-w-0 truncate">{it.label}</span>
+            <span className="text-gray-400 whitespace-nowrap tabular-nums shrink-0">
+              {percent ? `${fmtNum(it.value, isAr)}%` : `${fmtNum(it.value, isAr)}${unit ? ` ${unit}` : ""}`}
+              {cumulative ? ` · Σ ${fmtPct(share, isAr)}` : ""}
+            </span>
           </div>
-        );
-      })}
-    </div>
+          <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden" dir="ltr">
+            <div className="h-full rounded-full bg-blue-500" style={{ width: `${max ? (it.value / max) * 100 : 0}%` }} />
+          </div>
+        </div>
+      );
+    }),
   );
 }
 
