@@ -27,7 +27,7 @@ import { codeKey } from "@/lib/work-orders";
 import { ageLabel, fill, numLocale } from "@/lib/format";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { EmptyState, Pill, Spinner, LoadError } from "@/components/dashboard/ui";
+import { EmptyState, Pill, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
 import { ChevronDown, ChevronRight, Lock, MapPin, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 
 type Resp = {
@@ -469,20 +469,3 @@ function RowDetails({ r, s, p, isAr, fmtN }: {
 }
 
 /** A number that is also a filter. */
-function StatTile({ label, value, tone, active, onClick }: {
-  label: string; value: string; tone?: "red" | "amber"; active?: boolean; onClick: () => void;
-}) {
-  const valueCls = tone === "red" ? "text-red-600" : tone === "amber" ? "text-amber-700" : "text-gray-900";
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`text-start bg-white border rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 transition-colors hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-        active ? "border-blue-400 ring-2 ring-blue-500/20" : "border-gray-200"
-      }`}
-    >
-      <p className="text-[11px] sm:text-xs text-gray-500 truncate">{label}</p>
-      <p className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${valueCls}`}>{value}</p>
-    </button>
-  );
-}

@@ -47,7 +47,7 @@ import {
   historyFor, lineWeightKg, locKey, matchesTerms, movePayloads, sameLine, sameLocation, sameOwnerItem,
   searchTerms, storageDate, sumNet, toNumber as num, whereIs, type LineWeight, type LocationStat,
 } from "@/lib/storage-filter";
-import { Btn, EmptyState, Field, inputCls, Modal, Spinner, LoadError } from "@/components/dashboard/ui";
+import { Btn, EmptyState, Field, inputCls, Modal, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
 import { FilteredEmpty, RoomPlan } from "@/components/dashboard/room-plan";
 import { ItemDrawer, MoveModal, type MoveHalf, type MoveRequest } from "@/components/dashboard/storage-item";
 import {
@@ -1030,28 +1030,6 @@ export default function StoragePage() {
 /* --------------------------------- pieces --------------------------------- */
 
 /** A number that is also a filter. Plain when it has no onClick. */
-function StatTile({
-  label, value, tone, active, onClick,
-}: {
-  label: string; value: string; tone?: "red" | "green"; active?: boolean; onClick?: () => void;
-}) {
-  const valueCls = tone === "red" ? "text-red-600" : tone === "green" ? "text-emerald-700" : "text-gray-900";
-  const box = `text-start bg-white border rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 transition-colors ${
-    active ? "border-blue-400 ring-2 ring-blue-500/20" : "border-gray-200"
-  }`;
-  const inner = (
-    <>
-      <p className="text-[11px] sm:text-xs text-gray-500 truncate">{label}</p>
-      <p className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${valueCls}`}>{value}</p>
-    </>
-  );
-  if (!onClick) return <div className={box}>{inner}</div>;
-  return (
-    <button onClick={onClick} aria-pressed={active} className={`${box} hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40`}>
-      {inner}
-    </button>
-  );
-}
 
 /* ------------------------------ balance view ------------------------------ */
 

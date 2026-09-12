@@ -228,3 +228,53 @@ export function LoadError({
     </p>
   );
 }
+
+/** The value colours a stat tile can take. Named, so a page never hands in a raw class. */
+export type TileTone = "red" | "amber" | "green";
+const tileValueCls: Record<TileTone, string> = {
+  red: "text-red-600",
+  amber: "text-amber-700",
+  green: "text-emerald-700",
+};
+
+/**
+ * A number with a label that FILTERS the list below it when tapped (jobs,
+ * stock, storage, issues — four copies before cleanup batch 7). Without
+ * `onClick` it is a plain tile, which is what the storage page's «مواقع» and
+ * «أصناف» counts are. `Stat` above is the bigger, never-clickable twin.
+ */
+export function StatTile({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  tone?: TileTone;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const valueCls = tone ? tileValueCls[tone] : "text-gray-900";
+  const box = `text-start bg-white border rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 transition-colors ${
+    active ? "border-blue-400 ring-2 ring-blue-500/20" : "border-gray-200"
+  }`;
+  const inner = (
+    <>
+      <p className="text-[11px] sm:text-xs text-gray-500 truncate">{label}</p>
+      <p className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${valueCls}`}>{value}</p>
+    </>
+  );
+  if (!onClick) return <div className={box}>{inner}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`${box} min-h-11 hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40`}
+    >
+      {inner}
+    </button>
+  );
+}

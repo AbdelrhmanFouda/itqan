@@ -27,7 +27,7 @@ import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { Plus, Pencil, Mic, ChevronDown, ChevronUp, X } from "lucide-react";
-import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError } from "@/components/dashboard/ui";
+import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError, StatTile, type TileTone } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { useVisiblePoll } from "@/components/dashboard/use-remembered";
@@ -70,7 +70,7 @@ const statusCls = (s: string) =>
     : s === "قيد التنفيذ"
     ? "border-amber-300 bg-amber-50 text-amber-700"
     : "border-red-200 bg-red-50 text-red-700";
-const statusTone = (s: string) => (s === "تم" ? "text-green-700" : s === "قيد التنفيذ" ? "text-amber-700" : "text-red-700");
+const statusTone = (s: string): TileTone => (s === "تم" ? "green" : s === "قيد التنفيذ" ? "amber" : "red");
 
 const CHIP =
   "inline-flex items-center min-h-11 sm:min-h-9 rounded-full border px-3.5 text-sm font-medium whitespace-nowrap transition-colors " +
@@ -293,7 +293,7 @@ export default function IssuesPage() {
       {/* The three tiles filter — tap «مفتوح» and the list is the open faults. */}
       <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4 max-w-xl">
         {ISSUE_STATUSES.map((s) => (
-          <Tile
+          <StatTile
             key={s}
             label={t.statusLabels[s] || s}
             value={n(counts[s])}
@@ -531,25 +531,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/* --------------------------------- tiles --------------------------------- */
-
-function Tile({ label, value, tone, active, onClick }: {
-  label: string; value: string; tone: string; active: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`text-start bg-white border rounded-xl p-3 sm:p-5 min-h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-        active ? "border-blue-500 ring-2 ring-blue-500/30" : "border-gray-200 hover:border-gray-300"
-      }`}
-    >
-      <p className="text-xs text-gray-500 mb-1 truncate">{label}</p>
-      <p className={`text-2xl sm:text-3xl font-bold tracking-tight tabular-nums ${tone}`}>{value}</p>
-    </button>
-  );
-}
 
 /* ------------------------------ category chips --------------------------- */
 

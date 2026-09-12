@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
 import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
-import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
+import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError, StatTile } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { ageLabel, fill, numLocale } from "@/lib/format";
@@ -591,20 +591,3 @@ function OrderCard({ j, p, isAr, today, fmt, acting, busy, onAct }: {
 }
 
 /** A number that is also a filter. */
-function StatTile({ label, value, tone, active, onClick }: {
-  label: string; value: string; tone?: "red" | "amber"; active?: boolean; onClick: () => void;
-}) {
-  const valueCls = tone === "red" ? "text-red-600" : tone === "amber" ? "text-amber-700" : "text-gray-900";
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`text-start bg-white border rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 transition-colors hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-        active ? "border-blue-400 ring-2 ring-blue-500/20" : "border-gray-200"
-      }`}
-    >
-      <p className="text-[11px] sm:text-xs text-gray-500 truncate">{label}</p>
-      <p className={`text-xl sm:text-2xl font-bold tracking-tight tabular-nums ${valueCls}`}>{value}</p>
-    </button>
-  );
-}
