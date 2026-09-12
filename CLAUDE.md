@@ -41,7 +41,6 @@ npm run smoke        # HTTP smoke against a RUNNING site (default localhost:3000
                      # read and every write, and (with a token) the signed-in half
 npm run speed        # speed report against a RUNNING site: every page's HTML and
                      # every API, first (cold) and warm, the JS a page ships
-npm run seed         # (legacy Firestore seed — rarely needed now)
 ```
 
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
@@ -897,8 +896,8 @@ just that one, and three of them contradict what the code comments used to claim
 3. **The bridge is AT-LEAST-ONCE.** An append that answered with an HTML error page had
    already written its row; the retry wrote it again, and one 14-minute stoppage became two
    rows and 28 minutes. **A failed-looking write is not evidence that nothing happened.**
-   Any retry must re-read and check first — `flushPendingDowntime()` does, and so does
-   `scripts/migrate-downtime-to-sheet.mjs`.
+   Any retry must re-read and check first — `flushPendingDowntime()` does, and so did the
+   one-off downtime migration (ran 2026-08-14; script removed, recoverable at c4b6a12).
 
 4. **Sheets renders a time cell without a leading zero.** Write `08:00`, read back `8:00`;
    `00:54` comes back `0:54`. Exactly the trap that dropped two hour columns from

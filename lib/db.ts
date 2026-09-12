@@ -31,7 +31,6 @@ const COL = {
   notes: "machineNotes",
   reports: "monthlyReports",
   inquiries: "contactInquiries",
-  clients: "clients",
 } as const;
 
 function rows<T extends object = DocumentData>(
@@ -45,45 +44,11 @@ function rows<T extends object = DocumentData>(
 type MachineDoc = { name: string; type: string; status: string; createdAt?: number };
 type NoteDoc = { machineId: string; note: string; noteDate: string; createdAt?: number };
 
-export async function getMachines() {
-  const [mSnap, nSnap] = await Promise.all([
-    getDocs(collection(db, COL.machines)),
-    getDocs(collection(db, COL.notes)),
-  ]);
-  const machines = rows<MachineDoc>(mSnap).sort(
-    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
-  );
-  const notes = rows<NoteDoc>(nSnap);
-
-  return machines.map((m) => {
-    const last = notes
-      .filter((n) => n.machineId === m.id)
-      .sort((a, b) => (a.noteDate < b.noteDate ? 1 : -1))[0];
-    return {
-      id: m.id,
-      name: m.name,
-      type: m.type,
-      status: m.status,
-      last_note_date: last?.noteDate ?? null,
-    };
-  });
-}
-
 export async function getMachine(id: string) {
   const snap = await getDoc(doc(db, COL.machines, id));
   if (!snap.exists()) return null;
   const d = snap.data() as MachineDoc;
   return { id: snap.id, name: d.name, type: d.type, status: d.status };
-}
-
-export async function addMachine(name: string, type: string, status: string) {
-  const ref = await addDoc(collection(db, COL.machines), {
-    name,
-    type,
-    status,
-    createdAt: Date.now(),
-  });
-  return { id: ref.id, name, type, status };
 }
 
 export async function updateMachineStatus(id: string, status: string) {
@@ -235,262 +200,19 @@ export async function getInquiries() {
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
-/* ------------------------------ Clients ----------------------------- */
-
-type ClientDoc = {
-  name: string;
-  industry?: string;
-  logo?: string;
-  order?: number;
-  createdAt?: number;
-};
-
-export async function getClients() {
-  const snap = await getDocs(collection(db, COL.clients));
-  return rows<ClientDoc>(snap)
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      industry: c.industry ?? "",
-      logo: c.logo ?? "",
-      order: c.order ?? 0,
-    }))
-    .sort((a, b) => a.order - b.order);
-}
-
-export async function addClient(name: string, industry: string, logo: string) {
-  const ref = await addDoc(collection(db, COL.clients), {
-    name,
-    industry,
-    logo,
-    order: Date.now(),
-    createdAt: Date.now(),
-  });
-  return { id: ref.id, name, industry, logo };
-}
-
-export async function deleteClient(id: string) {
-  await deleteDoc(doc(db, COL.clients, id));
-  return { ok: true };
-}
-
 /* ===================================================================
- * PHASE 1 — PRODUCTION SPINE
- * Collections: molds, jobs (work orders), productionRuns.
+ * DOWNTIME CAPTURE
+ * The one operational collection left in Firestore: the stoppage a
+ * machine is in RIGHT NOW. Everything else (molds, work orders,
+ * production runs, clients) lives in the workbook and was removed here
+ * on 2026-09-12 — recoverable from git at 0fa42b6.
  * Same conventions as above: string ids, createdAt epoch ms,
  * dates as "YYYY-MM-DD", in-memory sort/filter (no composite indexes).
  * =================================================================== */
 
 const PCOL = {
-  molds: "molds",
-  jobs: "jobs",
-  runs: "productionRuns",
   downtime: "downtimeEvents",
 } as const;
-
-/* ------------------------------- Molds ------------------------------ */
-
-export type Mold = {
-  id: string;
-  code: string;
-  partName: string;
-  client: string;
-  cavities: number;
-  material: string;
-  cycleTimeSec: number;
-  status: string; // Active | In Repair | Retired
-  location: string;
-};
-type MoldDoc = Omit<Mold, "id"> & { createdAt?: number };
-
-function shapeMold(id: string, d: Partial<MoldDoc>): Mold {
-  return {
-    id,
-    code: d.code ?? "",
-    partName: d.partName ?? "",
-    client: d.client ?? "",
-    cavities: d.cavities ?? 0,
-    material: d.material ?? "",
-    cycleTimeSec: d.cycleTimeSec ?? 0,
-    status: d.status ?? "Active",
-    location: d.location ?? "",
-  };
-}
-
-export async function getMolds(): Promise<Mold[]> {
-  const snap = await getDocs(collection(db, PCOL.molds));
-  return rows<MoldDoc>(snap)
-    .map((m) => shapeMold(m.id, m))
-    .sort((a, b) => (a.code < b.code ? -1 : 1));
-}
-
-export async function getMold(id: string): Promise<Mold | null> {
-  const snap = await getDoc(doc(db, PCOL.molds, id));
-  if (!snap.exists()) return null;
-  return shapeMold(snap.id, snap.data() as MoldDoc);
-}
-
-export async function addMold(input: Omit<Mold, "id">) {
-  const ref = await addDoc(collection(db, PCOL.molds), {
-    ...input,
-    createdAt: Date.now(),
-  });
-  return { id: ref.id, ...input };
-}
-
-export async function updateMold(id: string, patch: Partial<Omit<Mold, "id">>) {
-  await updateDoc(doc(db, PCOL.molds, id), patch);
-  return { ok: true };
-}
-
-export async function deleteMold(id: string) {
-  await deleteDoc(doc(db, PCOL.molds, id));
-  return { ok: true };
-}
-
-/* ----------------------------- Jobs / WOs --------------------------- */
-
-export type Job = {
-  id: string;
-  code: string;
-  client: string;
-  partName: string;
-  moldId: string;
-  machineId: string;
-  qtyOrdered: number;
-  dueDate: string; // YYYY-MM-DD
-  status: string; // Quoted | In Production | Completed | Delivered | On Hold
-  priority: string; // Low | Normal | High
-  notes: string;
-  createdAt?: number;
-};
-type JobDoc = Omit<Job, "id">;
-
-function shapeJob(id: string, d: Partial<JobDoc>): Job {
-  return {
-    id,
-    code: d.code ?? "",
-    client: d.client ?? "",
-    partName: d.partName ?? "",
-    moldId: d.moldId ?? "",
-    machineId: d.machineId ?? "",
-    qtyOrdered: d.qtyOrdered ?? 0,
-    dueDate: d.dueDate ?? "",
-    status: d.status ?? "Quoted",
-    priority: d.priority ?? "Normal",
-    notes: d.notes ?? "",
-    createdAt: d.createdAt,
-  };
-}
-
-export async function getJobs(): Promise<Job[]> {
-  const snap = await getDocs(collection(db, PCOL.jobs));
-  return rows<JobDoc>(snap)
-    .map((j) => shapeJob(j.id, j))
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-}
-
-export async function getJob(id: string): Promise<Job | null> {
-  const snap = await getDoc(doc(db, PCOL.jobs, id));
-  if (!snap.exists()) return null;
-  return shapeJob(snap.id, snap.data() as JobDoc);
-}
-
-export async function addJob(input: Omit<Job, "id" | "createdAt">) {
-  const ref = await addDoc(collection(db, PCOL.jobs), {
-    ...input,
-    createdAt: Date.now(),
-  });
-  return { id: ref.id, ...input };
-}
-
-export async function updateJob(id: string, patch: Partial<Omit<Job, "id">>) {
-  await updateDoc(doc(db, PCOL.jobs, id), patch);
-  return { ok: true };
-}
-
-export async function deleteJob(id: string) {
-  // cascade: remove production runs that belong to this job
-  const runSnap = await getDocs(
-    query(collection(db, PCOL.runs), where("jobId", "==", id))
-  );
-  await Promise.all(runSnap.docs.map((d) => deleteDoc(d.ref)));
-  await deleteDoc(doc(db, PCOL.jobs, id));
-  return { ok: true };
-}
-
-/* -------------------------- Production runs ------------------------- */
-
-export type Run = {
-  id: string;
-  jobId: string;
-  machineId: string;
-  date: string; // YYYY-MM-DD
-  goodUnits: number;
-  scrapUnits: number;
-  downtimeMin: number;
-  downtimeReason: string;
-  operator: string;
-  note: string;
-  createdAt?: number;
-};
-type RunDoc = Omit<Run, "id">;
-
-function shapeRun(id: string, d: Partial<RunDoc>): Run {
-  return {
-    id,
-    jobId: d.jobId ?? "",
-    machineId: d.machineId ?? "",
-    date: d.date ?? "",
-    goodUnits: d.goodUnits ?? 0,
-    scrapUnits: d.scrapUnits ?? 0,
-    downtimeMin: d.downtimeMin ?? 0,
-    downtimeReason: d.downtimeReason ?? "",
-    operator: d.operator ?? "",
-    note: d.note ?? "",
-    createdAt: d.createdAt,
-  };
-}
-
-export async function getRuns(): Promise<Run[]> {
-  const snap = await getDocs(collection(db, PCOL.runs));
-  return rows<RunDoc>(snap)
-    .map((r) => shapeRun(r.id, r))
-    .sort((a, b) =>
-      a.date < b.date ? 1 : a.date > b.date ? -1 : (b.createdAt ?? 0) - (a.createdAt ?? 0)
-    );
-}
-
-export async function getRunsForJob(jobId: string): Promise<Run[]> {
-  const snap = await getDocs(
-    query(collection(db, PCOL.runs), where("jobId", "==", jobId))
-  );
-  return rows<RunDoc>(snap)
-    .map((r) => shapeRun(r.id, r))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-export async function getRunsForMachine(machineId: string): Promise<Run[]> {
-  const snap = await getDocs(
-    query(collection(db, PCOL.runs), where("machineId", "==", machineId))
-  );
-  return rows<RunDoc>(snap)
-    .map((r) => shapeRun(r.id, r))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-export async function addRun(input: Omit<Run, "id" | "createdAt">) {
-  const ref = await addDoc(collection(db, PCOL.runs), {
-    ...input,
-    createdAt: Date.now(),
-  });
-  return { id: ref.id, ...input };
-}
-
-export async function deleteRun(id: string) {
-  await deleteDoc(doc(db, PCOL.runs, id));
-  return { ok: true };
-}
 
 /* -------------------------- Downtime events ------------------------- */
 
@@ -528,7 +250,7 @@ export type DowntimeEvent = {
   id: string;
   date: string;        // YYYY-MM-DD, factory day (08:00→07:00)
   machine: string;     // «الماكينات»!J label, e.g. "PQ 7 — 100"
-  reason: string;      // one of DOWNTIME_REASONS (Arabic, see lib/prod-meta.ts)
+  reason: string;      // a DOWNTIME_CAPTURE_REASONS key (see lib/prod-meta.ts)
   minutes: number;     // 0 while running; set on stop
   startedAt: number;   // epoch ms
   endedAt: number | null; // epoch ms, null while running
@@ -585,35 +307,6 @@ function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
 
 const byDateDesc = (a: DowntimeEvent, b: DowntimeEvent) =>
   a.date < b.date ? 1 : a.date > b.date ? -1 : (b.startedAt ?? 0) - (a.startedAt ?? 0);
-
-/**
- * Events within an inclusive "YYYY-MM-DD" range.
- *
- * Bounded on purpose: the OEE engine recomputes this on every request, and an
- * unbounded read of the whole collection would cost a full scan that grows
- * without limit as stoppages accumulate. Both constraints are a range on the
- * SAME field, so Firestore serves it from the automatic single-field index —
- * still no composite index, which is the rule this file is built around.
- */
-export async function getDowntimeEventsBetween(from: string, to: string): Promise<DowntimeEvent[]> {
-  const snap = await getDocs(
-    query(collection(db, PCOL.downtime), where("date", ">=", from), where("date", "<=", to)),
-  );
-  return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
-}
-
-/**
- * Every document, including the pre-cutover archive.
- *
- * NOT the CSV export any more — that reads «التوقفات», the source of truth.
- * This is the migration's safety net: the 2026-08 events that were copied into
- * the sheet by hand are still here, unaltered, if the copy ever has to be
- * checked or redone.
- */
-export async function getDowntimeEvents(): Promise<DowntimeEvent[]> {
-  const snap = await getDocs(collection(db, PCOL.downtime));
-  return rows<DowntimeDoc>(snap).map((r) => shapeDowntime(r.id, r)).sort(byDateDesc);
-}
 
 /**
  * Stoppages that were stopped but whose row never reached the sheet.
@@ -695,11 +388,6 @@ export async function stopDowntimeEvent(
   };
 }
 
-export async function deleteDowntimeEvent(id: string) {
-  await deleteDoc(doc(db, PCOL.downtime, id));
-  return { ok: true };
-}
-
 /**
  * Pull an OPEN stoppage's start back one fixed step («+30 دقيقة» — owner's
  * rule, 2026-09-07 meeting). All the rules live in `planBackdate()`
@@ -727,37 +415,4 @@ export async function backdateDowntimeEvent(id: string) {
       backdatedMin: plan.backdatedMin,
     }),
   };
-}
-
-
-/* --------------------------- Aggregates ----------------------------- */
-
-export type ProductionStats = {
-  goodUnits: number;
-  scrapUnits: number;
-  totalUnits: number;
-  scrapRate: number; // 0..1
-  downtimeMin: number;
-};
-
-/** Roll up a list of runs into headline numbers. */
-export function summarizeRuns(runs: Run[]): ProductionStats {
-  const goodUnits = runs.reduce((s, r) => s + (r.goodUnits || 0), 0);
-  const scrapUnits = runs.reduce((s, r) => s + (r.scrapUnits || 0), 0);
-  const downtimeMin = runs.reduce((s, r) => s + (r.downtimeMin || 0), 0);
-  const totalUnits = goodUnits + scrapUnits;
-  return {
-    goodUnits,
-    scrapUnits,
-    totalUnits,
-    scrapRate: totalUnits ? scrapUnits / totalUnits : 0,
-    downtimeMin,
-  };
-}
-
-/** Map of jobId -> good units produced (from runs). */
-export function producedByJob(runs: Run[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const r of runs) out[r.jobId] = (out[r.jobId] ?? 0) + (r.goodUnits || 0);
-  return out;
 }

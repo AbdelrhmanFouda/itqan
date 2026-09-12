@@ -45,14 +45,10 @@ service cloud.firestore {
     // an open catch-all would also open /users and defeat the rules above.
     // TODO (hardening): move /api to the Admin SDK with verified ID tokens,
     // then require auth + role here instead of `if true`.
-    match /clients/{doc}          { allow read, write: if true; }
     match /machines/{doc}         { allow read, write: if true; }
     match /machineNotes/{doc}     { allow read, write: if true; }
     match /monthlyReports/{doc}   { allow read, write: if true; }
     match /contactInquiries/{doc} { allow read, write: if true; }
-    match /molds/{doc}            { allow read, write: if true; }
-    match /jobs/{doc}             { allow read, write: if true; }
-    match /productionRuns/{doc}   { allow read, write: if true; }
     // PHASE 2 downtime capture — the ONE piece of factory data not in the sheet
     // (the owner ruled the workbook must not gain columns). Written by
     // /api/downtime, which verifies the caller's Firebase ID token via
