@@ -28,7 +28,7 @@ import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lu
 import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
-import { ageLabel, numLocale } from "@/lib/format";
+import { ageLabel, fill, numLocale } from "@/lib/format";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
@@ -68,8 +68,6 @@ const blank = {
   code: "", client: "", product: "", qtyOrdered: "", machine: "", dueDate: "",
   priority: "Normal", instructions: "",
 };
-const fill = (t: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
 const firstNum = (v: string) => { const m = String(v ?? "").match(/[0-9]+(?:\.[0-9]+)?/); return m ? Number(m[0]) : 0; };
 const todayIso = () => new Date().toLocaleDateString("en-CA");
 

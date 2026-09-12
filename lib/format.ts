@@ -30,6 +30,14 @@ export const numLocale = (isAr: boolean): string => (isAr ? LOCALE_AR : LOCALE_E
 export const fmtInt = (n: number, isAr: boolean): string =>
   Math.round(Number(n) || 0).toLocaleString(numLocale(isAr));
 
+/**
+ * Fill the {placeholders} in an i18n string: fill(p.jobs.dataAge, { age }).
+ * Four byte-identical copies lived in the pages until cleanup batch 7; this is
+ * the i18n-adjacent formatting home and it stays import-free.
+ */
+export const fill = (t: string, vars: Record<string, string | number>): string =>
+  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
+
 /** True when a string still carries Arabic-Indic or Persian digits. */
 export const hasArabicDigits = (s: string): boolean => /[٠-٩۰-۹]/.test(s);
 

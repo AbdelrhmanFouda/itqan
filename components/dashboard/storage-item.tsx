@@ -22,11 +22,9 @@ import type { StorageBalance, StorageMovement } from "@/lib/storage";
 import {
   caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
 } from "@/lib/storage-filter";
-import { LOCALE_AR } from "@/lib/format";
+import { LOCALE_AR, fill } from "@/lib/format";
 
 type Strings = (typeof sd)["en"] | (typeof sd)["ar"];
-const fill = (t: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
 const fmt = (n: number, isAr: boolean) => n.toLocaleString(isAr ? LOCALE_AR : "en-US", { maximumFractionDigits: 2 });
 
 /* ------------------------------- the drawer ------------------------------- */

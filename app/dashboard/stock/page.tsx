@@ -24,7 +24,7 @@ import { JOB_STATUSES, jobTone, localize } from "@/lib/prod-meta";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
 import { compareByNet, isMaterialType, type StockRow } from "@/lib/stock";
 import { codeKey } from "@/lib/work-orders";
-import { ageLabel, numLocale } from "@/lib/format";
+import { ageLabel, fill, numLocale } from "@/lib/format";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { EmptyState, Pill, Spinner, LoadError } from "@/components/dashboard/ui";
@@ -44,8 +44,6 @@ type Tile = "" | "negative" | "belowMin" | "unit" | "withOrders";
 type TypeFilter = "" | "منتج" | "خامة";
 type Sort = "net" | "item" | "available";
 
-const fill = (t: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
 
 export default function StockPage() {
   const { lang } = useLang();

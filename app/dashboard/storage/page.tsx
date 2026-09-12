@@ -55,7 +55,7 @@ import {
   ListRestart, MapPin, Pencil, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import type { StorageBalance, StorageData, StorageMovement } from "@/lib/storage";
-import { LOCALE_AR } from "@/lib/format";
+import { LOCALE_AR, fill } from "@/lib/format";
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1jmPjBFMCcoZmaVeLUD_wLCRtat3RCQ2c7c_UVtsW4gw/edit";
 const MAP_KEY = "itqan.storage.map"; // remembered open/closed state of the room
@@ -79,8 +79,6 @@ const todayStr = () => new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, lo
 /** The sheet writes «خامة»/«منتج»; be tolerant of a stray «خامات» or a space. */
 const isMaterial = (t: string | undefined) => String(t ?? "").trim().startsWith("خام");
 const r2 = (n: number) => Math.round(n * 100) / 100;
-const fill = (t: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t);
 
 type FormState = {
   moveType: MoveType;
