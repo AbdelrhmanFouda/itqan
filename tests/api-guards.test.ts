@@ -28,6 +28,7 @@ type Kind =
   | "guard"       // requireRole(req): any approved role
   | "owner"       // requireRole(req, []): owner + manager only
   | "sales"       // requireRole(req, ["sales"]): sales + owner/manager
+  | "storage"     // requireRole(req, ["storage"]): storage + owner/manager
   | "token"       // verifies the ID token itself (verifyIdToken + roleFor)
   | "public"      // the contact form: unauthenticated by nature, rate-limited
   | "conditional"; // sheet/[entity]: open for OPEN_READS, guarded otherwise
@@ -75,7 +76,7 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   // order quantities — guarded like /api/storage and /api/jobs. Read-only by
   // construction: the file has no POST, and adding one here is a decision.
   "stock":               { GET: "guard" },
-  "storage":             { GET: "guard", POST: "token" },
+  "storage":             { GET: "guard", POST: "storage" },
   // Warms the instance's copies of the core tabs after sign-in (2026-09-10);
   // answers {ok:true} at once, returns no data.
   "warm":                { GET: "open" },
@@ -149,6 +150,10 @@ test("each handler does what its classification says", () => {
           break;
         case "sales":
           assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"sales"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["sales"])`);
+          assert.ok(denies, `${where}: must return g.deny`);
+          break;
+        case "storage":
+          assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"storage"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["storage"])`);
           assert.ok(denies, `${where}: must return g.deny`);
           break;
         case "token":

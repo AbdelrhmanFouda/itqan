@@ -3,17 +3,13 @@ import {
   getStorageData, saveMovement, updateMovement, deleteMovement,
   refreshStorageLists, storageConfigured, type MovementInput,
 } from "@/lib/storage";
-import { verifyIdToken, roleFor } from "@/lib/agent-auth";
 import { requireRole } from "@/lib/api-guard";
-import { hasFullAccess, type Role } from "@/lib/roles";
 
 // The READ is guarded too (any approved role, 2026-08-28) — the balance and
 // movement logs name clients and their material stocks, which is client data,
 // not an operational read like runs/machines. WRITES (stock in/out) stay
-// stricter: they require a role that may edit the storage.
-function mayWrite(role: Role | null): boolean {
-  return role !== null && (role === "storage" || hasFullAccess(role));
-}
+// stricter: requireRole(req, ["storage"]) — storage, owner or manager, the
+// same pair every other mutating route uses (lib/api-guard + authed-fetch).
 
 export async function GET(req: NextRequest) {
   const g = await requireRole(req);
@@ -35,17 +31,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const g = await requireRole(req, ["storage"]);
+  if ("deny" in g) return g.deny;
   try {
-    const auth = req.headers.get("authorization") || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    let role: Role | null = null;
-    try {
-      role = await roleFor(await verifyIdToken(token), token);
-    } catch {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-    if (!mayWrite(role)) return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
-
     const body = (await req.json()) as { action?: string } & MovementInput;
     const action = body.action || "save";
     const result =
