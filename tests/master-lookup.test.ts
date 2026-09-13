@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { masterRowByName, masterRowForDisplay, nameKey } from "../lib/master-lookup.ts";
+import { masterRowByName, masterRowForDisplay, masterRowForPick, nameKey } from "../lib/master-lookup.ts";
 import { moldKey } from "../lib/mold-number.ts";
 
 // The rows involved, as read through the bridge that day (name + code + client).
@@ -95,4 +95,15 @@ test("whitespace, case and Arabic digits fold on both sides", () => {
   const blank = masterRowByName(MASTER, "   ");
   assert.equal(blank.ok, false);
   if (!blank.ok) assert.equal(blank.reason, "no_name");
+});
+
+test("masterRowForPick: the tapped twin wins while it holds the name; a moved twin is never guessed", () => {
+  // «سماعة اريون» is on rows 289 and 453.
+  assert.equal(masterRowForPick(MASTER, "سماعة اريون", 453)?.row, 453);
+  assert.equal(masterRowForPick(MASTER, "سماعة اريون", 289)?.row, 289);
+  assert.equal(masterRowForPick(MASTER, "سماعة اريون")?.row, 289, "no row sent: the first twin, as the sheet's VLOOKUP");
+  assert.equal(masterRowForPick(MASTER, "سماعة اريون", 999), null, "the tapped row moved: never pick between twins");
+  assert.equal(masterRowForPick(MASTER, "زراير", 999)?.row, 465, "a unique name is found wherever it moved");
+  assert.equal(masterRowForPick(MASTER, "غير موجود"), null);
+  assert.equal(masterRowForPick(MASTER, ""), null);
 });

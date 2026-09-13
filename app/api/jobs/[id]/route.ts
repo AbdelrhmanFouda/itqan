@@ -4,9 +4,8 @@ import { loadJobs } from "@/lib/jobs";
 import { requireRole } from "@/lib/api-guard";
 import { isJobStatus, jobStatusToSheet, jobPriorityToSheet } from "@/lib/prod-meta";
 import { resolveMoldNumber } from "@/lib/mold-number";
-import { masterRowByName, masterRowForDisplay } from "@/lib/master-lookup";
-import { codeKey, machineMatch, parseQuantity, registryLabelsFrom, ISO_DAY } from "@/lib/work-orders";
-import { latinDigits } from "@/lib/dates";
+import { masterRowForDisplay, masterRowForPick } from "@/lib/master-lookup";
+import { codeKey, parseQuantity, registryLabelForTonnage, registryLabelsFrom, ISO_DAY } from "@/lib/work-orders";
 import { num } from "@/lib/run-join";
 
 // One job (sheet row) + the production runs credited to it + the product's
@@ -50,14 +49,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         // The name matches more than one Master row: the standard shown is the
         // first row's and may belong to a different product with that name.
         ambiguous: found.ambiguous,
-        // The Master row + raw cell text, so the page can offer an EDIT of the
-        // product's standard. Master's numeric columns are free text on purpose
-        // («4+4», «15جم», «تحتسب ورديات») — the edit must round-trip the raw
-        // string, never a parsed number, or it would destroy that notation.
-        row: m.row,
-        name: m.name || "",
-        cavitiesRaw: m.cavities || "",
-        cycleRaw: m.cycle || "",
         weight: m.weight || "",
         material: m.material || "",
         cavities: cavities || null,
@@ -75,46 +66,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
+// What the jobs pages send (2026-09-13): the product — picked from Master,
+// its client and mould number follow it (see PATCH) — the kilograms, the two
+// dates, status, priority and the order's own notes. The code, client, mould
+// code and machine are no longer typed on the site.
 const EDITABLE = new Set([
-  "code", "client", "product", "moldCode", "qty", "startDate", "dueDate",
-  "status", "priority", "machine", "materialIssued", "masterbatch", "instructions", "notes",
+  "product", "qty", "startDate", "dueDate",
+  "status", "priority", "materialIssued", "masterbatch", "instructions", "notes",
 ]);
 
-// The Master columns the job page may edit — the product's STANDARD, nothing
-// that carries identity. `name`, `code` and `id` are deliberately absent:
-// everything in the workbook joins on the product name, so renaming from here
-// would orphan every production row and job at once.
-const MASTER_EDITABLE = new Set(["weight", "material", "cavities", "cycle", "defects"]);
-
-/**
- * Edit the product's standard in «الرئيسي», located by NAME, not by row.
- *
- * The row number the client holds came from an earlier read, and a colleague
- * edits this sheet daily — rows shift. So the name is verified against a FRESH
- * read at the stored row first, and if it moved, re-resolved by name; zero or
- * several matches refuse rather than guess («سماعة اريون» genuinely exists
- * twice in Master, rows 289 and 453). Same identity rule as `mapToMaster()`,
- * including the whitespace-folding normalization — «زراير» carries a trailing
- * tab that one-sided trimming would break.
- */
-async function updateMasterStandard(m: { row?: unknown; name?: unknown; changes?: unknown }) {
-  const row = Number(m.row);
-  const name = String(m.name ?? "");
-  const changes: Record<string, string> = {};
-  for (const [k, v] of Object.entries((m.changes ?? {}) as Record<string, unknown>)) {
-    if (MASTER_EDITABLE.has(k)) changes[k] = String(v ?? "");
-  }
-  if (!name.trim()) return { ok: false, reason: "no_name" };
-  if (Object.keys(changes).length === 0) return { ok: true };
-
-  const master = await getRecords("master", { fresh: true });
-  // The same name-only rule the register's PATCH uses (lib/master-lookup.ts):
-  // the held row wins while it still carries the name, else exactly one row
-  // by name, else refuse.
-  const target = masterRowByName(master.records, name, row);
-  if (!target.ok) return { ok: false, reason: target.reason === "no_name" ? "no_name" : "identity_mismatch" };
-  return updateRecord("master", target.row.row, changes);
-}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const g = await requireRole(req);
@@ -122,13 +82,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   try {
     const body = (await req.json()) as Record<string, unknown>;
-
-    // A Master-standard edit rides this route (rather than the generic sheet
-    // PATCH) so it gets the name-verified row resolution above.
-    if (body.master && typeof body.master === "object") {
-      const res = await updateMasterStandard(body.master as Record<string, unknown>);
-      return NextResponse.json(res, { status: res.ok ? 200 : 400 });
-    }
 
     const bad = (reason: string, status = 400) => NextResponse.json({ ok: false, reason }, { status });
 
@@ -160,9 +113,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // sheet mid-batch and trip the rollback machinery, so refuse it here with
       // a clean validation error before it can reach a write.
       if (key === "status" && !isJobStatus(val)) return bad("invalid_status");
-      // The same three rules a new order obeys (app/api/jobs/route.ts): a
-      // quantity is a plain number of kilograms, material issued too, and a
-      // machine is a registry label — written in the registry's own spelling.
+      // The rules a new order obeys (app/api/jobs/route.ts): a quantity is a
+      // plain number of kilograms, material issued too, and a date is a date.
       if (key === "qty" && val.trim()) {
         const q = parseQuantity(val);
         if (q.value === null || !(q.value > 0)) return bad("bad_qty");
@@ -171,12 +123,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
       if (key === "materialIssued" && val.trim() && parseQuantity(val).unreadable) return bad("bad_material_issued");
       if (key === "dueDate" && val.trim() && !ISO_DAY.test(val.trim())) return bad("missing_due");
-      if (key === "machine" && val.trim()) {
-        const machines = await getRecords("machines");
-        const labels = registryLabelsFrom(machines.records);
-        const mm = machineMatch(latinDigits(val.trim()), labels);
-        if (!mm.matched) return bad("bad_machine");
-        changes[key] = mm.label;
+      if (key === "startDate" && val.trim() && !ISO_DAY.test(val.trim())) return bad("bad_start");
+      if (key === "product") {
+        // Picked from «الرئيسي» (2026-09-13): the order takes the picked row's
+        // spelling and, as one unit, its client, mould number and — when its
+        // tonnage names one press — machine (blank otherwise, so the page
+        // shows where the order last ran). A product Master does not know is
+        // never written.
+        const tapped = Number(body.masterRow) > 0 ? Number(body.masterRow) : undefined;
+        let row = masterRowForPick((await getRecords("master")).records, val, tapped);
+        if (!row) row = masterRowForPick((await getRecords("master", { fresh: true })).records, val, tapped);
+        if (!row) return bad("unknown_product");
+        changes.product = row.name || val.trim();
+        changes.client = (row.client || "").trim();
+        changes.moldCode = resolveMoldNumber({ code: row.code, notes: row.notes }).number;
+        changes.machine = registryLabelForTonnage(row.machine, registryLabelsFrom((await getRecords("machines")).records));
         continue;
       }
       changes[key] =

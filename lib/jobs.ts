@@ -18,7 +18,7 @@ import {
  * Jobs (client work orders) — sheet-backed, `jobs` tab.
  *
  * A job names a PRODUCT (as written in Master / production logs). Progress is
- * computed automatically: production rows whose product/mold matches the job's
+ * computed automatically: production rows whose product NAME matches the job's
  * product, dated on/after the job's start date, count toward the ordered
  * quantity. No run⇄job foreign keys — the product name IS the link, same as
  * the OEE engine.
@@ -113,6 +113,13 @@ export type JobShaped = {
   codeDuplicate: boolean;
   /** Still open — reserves its quantity and sits at the top of the list. */
   open: boolean;
+  /** «الرئيسي»'s client for this product ("" when it is not in Master) — what
+   *  the pages show, so a typo in the order's own client cell never surfaces. */
+  masterClient: string;
+  /** The machine of the latest production shift credited to this order (""
+   *  before the first one) — shown when the order's own machine cell is not
+   *  a registry label. */
+  lastMachine: string;
 };
 
 export type LoadJobsOptions = {
@@ -167,7 +174,7 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   // Product → standards, first row wins (same as the sheet's VLOOKUP) — and a
   // count per name, because "first row wins" is only honest while the name is
   // unique. Names that appear twice get flagged on the job (`ambiguous`).
-  const std = new Map<string, { w: number; cav: number; cyc: number; mat: string; moldNumber: string; moldNotesNumber: string }>();
+  const std = new Map<string, { w: number; cav: number; cyc: number; mat: string; client: string; moldNumber: string; moldNotesNumber: string }>();
   const nameCount = new Map<string, number>();
   for (const m of masterTab.records) {
     // NOTE: the master entity calls the product column `name`, not `product`.
@@ -181,6 +188,7 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
       cav: sumCavities(m.cavities),
       cyc: firstNum(m.cycle),
       mat: m.material || "",
+      client: (m.client || "").trim(),
       moldNumber: mn.number,
       moldNotesNumber: mn.notesNumber,
     });
@@ -193,7 +201,10 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   // stoppage to the other runs and inflate them.
   const shaped = prodTab.records.map((r) => ({
     id: String(r.row),
-    key: normKey(r.mold) || normKey(r.product),
+    // The product NAME is the only join (2026-09-13): a mould code repeats
+    // across customers, and new orders now carry Master's number in their
+    // «كود الاسطمبة», so matching on it would count another customer's shifts.
+    key: normKey(r.product),
     date: normalizeDate(r.date),
     machine: latinDigits((r.machine || "").trim()),
     goodUnits: num(r.goodUnits),
@@ -243,9 +254,9 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   const runs = shaped.filter((r) => r.key);
 
   const matches = (job: JobShaped) => {
-    const keys = new Set([normKey(job.moldCode), normKey(job.product)].filter(Boolean));
-    if (keys.size === 0) return [];
-    return runs.filter((r) => keys.has(r.key) && (!job.startDate || (r.date && r.date >= job.startDate)));
+    const key = normKey(job.product);
+    if (!key) return [];
+    return runs.filter((r) => r.key === key && (!job.startDate || (r.date && r.date >= job.startDate)));
   };
 
   const jobs: JobShaped[] = jobsTab.records.map((r) => {
@@ -277,6 +288,8 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
       material: s?.mat ?? "",
       masterMoldNumber: s?.moldNumber ?? "",
       masterMoldNotesNumber: s?.moldNotesNumber ?? "",
+      masterClient: s?.client ?? "",
+      lastMachine: "",
       estHours:
         pieces > 0 && s && s.cyc > 0 && s.cav > 0
           ? Math.round((pieces * s.cyc * 10) / (3600 * s.cav)) / 10
@@ -303,6 +316,7 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
     const rs = matches(job);
     job.produced = rs.reduce((a, x) => a + x.goodUnits, 0);
     job.scrapped = rs.reduce((a, x) => a + x.scrapUnits, 0);
+    job.lastMachine = rs.reduce<JobRun | null>((best, x) => (x.date && (!best || x.date > best.date) ? x : best), null)?.machine ?? "";
     job.remaining = job.qtyOrdered > 0 ? Math.max(0, job.qtyOrdered - job.produced) : 0;
     return job;
   });

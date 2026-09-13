@@ -96,3 +96,22 @@ export function masterRowForDisplay<T extends NamedRow>(
   }
   return { row: first, ambiguous: n > 1 };
 }
+
+/**
+ * The Master row a person PICKED from the list (the jobs pages, 2026-09-13).
+ * The tapped row wins while it still carries the name; else the single row
+ * with that name, wherever it moved; else — a name held twice and no tapped
+ * row to tell the twins apart — the first, as the sheet's own VLOOKUP does.
+ * null when Master has no such name, or when the tapped row moved and the
+ * name is held twice: a write never guesses between twins.
+ */
+export function masterRowForPick<T extends NamedRow>(
+  rows: readonly T[],
+  name: string | null | undefined,
+  pickedRow?: number,
+): T | null {
+  const hit = masterRowByName(rows, name, pickedRow);
+  if (hit.ok) return hit.row;
+  if (hit.reason === "identity_mismatch" && pickedRow === undefined) return hit.hits[0] ?? null;
+  return null;
+}

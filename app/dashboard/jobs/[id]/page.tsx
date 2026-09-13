@@ -5,7 +5,7 @@ import { pd } from "@/lib/i18n.prod";
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { Stat, Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError } from "@/components/dashboard/ui";
 import {
   JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
@@ -15,6 +15,9 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { fmtNum } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
+import { nameKey } from "@/lib/master-lookup";
+import { codeKey } from "@/lib/work-orders";
+import { MasterProductPicker, findProduct, type MasterPick } from "@/components/dashboard/master-product-picker";
 
 /**
  * One job (sheet row in the `jobs` tab) + the production runs credited to it
@@ -29,13 +32,12 @@ type Job = {
   qtyOrdered: number; qtyOrderedKg: number; startDate: string; dueDate: string;
   status: string; priority: string; machine: string;
   materialIssued: string; masterbatch: string; instructions: string; notes: string;
-  produced: number; scrapped: number; ambiguous: boolean;
+  produced: number; scrapped: number;
+  masterClient: string; lastMachine: string; machineMatched: boolean;
+  /** The product name is on more than one Master row — show the order's own client. */
+  ambiguous?: boolean;
 };
 type Standard = {
-  // row + raw cell text let this page EDIT the standard in «الرئيسي». The raw
-  // strings matter: Master's numeric columns hold notation like «4+4» and
-  // «15جم» that a parsed number would destroy on write-back.
-  row: number; name: string; cavitiesRaw: string; cycleRaw: string;
   weight: string; material: string; cavities: number | null; cycleSec: number | null;
   defects: string; ratePerHour: number | null; ratePerShift12h: number | null;
   // Master's MOULD NUMBER (D, else the notes) — lib/mold-number.ts.
@@ -49,7 +51,6 @@ type Run = {
 };
 // `label` is the registry identity («PQ 7 — 100»); `name` is the bare tonnage.
 type MachineAgg = { name: string; label: string };
-type Mold = { row: number; code?: string; name?: string };
 /** The three pieces the page draws — remembered per work order, per device. */
 type JobPayload = { job: Job; runs: Run[]; standard: Standard | null };
 const lastKeyFor = (id: string) => `itqan.job.${id}.last`;
@@ -74,19 +75,20 @@ export default function JobDetailPage() {
   const [loadErr, setLoadErr] = useState<null | { timedOut: boolean }>(null);
   const [loading, setLoading] = useState(false);
   const [machines, setMachines] = useState<MachineAgg[]>([]);
-  const [molds, setMolds] = useState<Mold[]>([]);
+  const [molds, setMolds] = useState<MasterPick[]>([]);
+  const [moldsLoaded, setMoldsLoaded] = useState(false);
+  const [moldsFailed, setMoldsFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   // Edit-job modal — every sheet column of «أوامر العمل», saved as a DIFF.
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
-  const [editErr, setEditErr] = useState(false);
+  const [editErr, setEditErr] = useState("");
   const [editForm, setEditForm] = useState<Record<string, string>>({});
-  // Edit-Master-standard modal — the product's row in «الرئيسي».
-  const [stdOpen, setStdOpen] = useState(false);
-  const [stdSaving, setStdSaving] = useState(false);
-  const [stdErr, setStdErr] = useState<"" | "save" | "identity">("");
-  const [stdForm, setStdForm] = useState<Record<string, string>>({});
+  // The product in the edit form: undefined = unchanged (the order's own),
+  // null = cleared to pick another, a row = the Master product picked.
+  const [editPick, setEditPick] = useState<MasterPick | null | undefined>(undefined);
+  const [editMore, setEditMore] = useState(false);
 
   const today = todayIso();
   const blankRun = useCallback(
@@ -105,15 +107,21 @@ export default function JobDetailPage() {
    * each) IN FRONT of the read this page exists to show. Nothing on screen
    * needs them until the modal opens.
    */
+  const listsStarted = useRef(false);
   const loadLists = useCallback(() => {
+    listsStarted.current = true;
     fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
     // A hand-typed product name that doesn't match Master exactly breaks the
     // join, so offer the real names the same way the add form does — from
     // MASTER through the guarded /api/molds, not from the «الاسطمبات» formula
     // view (cleanup batch 7; the production and quality pages already did).
-    authedFetch("/api/molds").then((x) => (x.ok ? x.json() : { molds: [] })).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
+    authedFetch("/api/molds")
+      .then((x) => { if (!x.ok) throw new Error(String(x.status)); return x.json(); })
+      .then((mo) => { setMolds(Array.isArray(mo.molds) ? mo.molds : []); setMoldsFailed(false); })
+      // Not final: the picker says so with a retry, and the next edit asks again.
+      .catch(() => { setMoldsFailed(true); listsStarted.current = false; })
+      .finally(() => setMoldsLoaded(true));
   }, []);
-  const listsStarted = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,7 +140,7 @@ export default function JobDetailPage() {
     setNotFound(false);
     writeLastSeen(lastKeyFor(id), { job: j.job, runs: j.runs ?? [], standard: j.standard ?? null });
     // Only now — the work order is on screen and the bridge is free.
-    if (!listsStarted.current) { listsStarted.current = true; loadLists(); }
+    if (!listsStarted.current) loadLists();
   }, [id, loadLists]);
 
   useEffect(() => {
@@ -149,7 +157,9 @@ export default function JobDetailPage() {
   }
 
   function openLog() {
-    setForm({ ...blankRun(), machine: job?.machine ?? "" });
+    // The order's machine when it is a registry label, else where it last ran —
+    // a new order's machine cell is often blank (its tonnage named no single press).
+    setForm({ ...blankRun(), machine: job ? (job.machineMatched ? job.machine : job.lastMachine || "") : "" });
     setOpen(true);
   }
 
@@ -180,10 +190,9 @@ export default function JobDetailPage() {
   /** The job's editable fields as form strings — the baseline the save diffs against. */
   function jobFormOf(j: Job): Record<string, string> {
     return {
-      code: j.code, client: j.client, product: j.product, moldCode: j.moldCode,
       qtyKg: j.qtyOrderedKg ? String(j.qtyOrderedKg) : "",
       startDate: j.startDate, dueDate: j.dueDate,
-      status: j.status, priority: j.priority, machine: j.machine,
+      status: j.status, priority: j.priority,
       materialIssued: j.materialIssued, masterbatch: j.masterbatch,
       instructions: j.instructions, notes: j.notes,
     };
@@ -193,9 +202,11 @@ export default function JobDetailPage() {
     if (!job) return;
     // If the page is showing a remembered copy, the live read has not started
     // the datalists yet — start them the moment they are actually needed.
-    if (!listsStarted.current) { listsStarted.current = true; loadLists(); }
-    setEditErr(false);
+    if (!listsStarted.current) loadLists();
+    setEditErr("");
     setEditForm(jobFormOf(job));
+    setEditPick(undefined);
+    setEditMore(false);
     setEditOpen(true);
   }
 
@@ -215,61 +226,29 @@ export default function JobDetailPage() {
       // The sheet column is «الكمية المطلوبة (كجم)» — the API knows it as `qty`.
       changes[k === "qtyKg" ? "qty" : k] = v;
     }
-    if (Object.keys(changes).length === 0) { setEditOpen(false); return; }
-    setEditSaving(true); setEditErr(false);
+    // The product is picked from «الرئيسي»; the server writes the picked row's
+    // client, mould number and machine with it.
+    const pickedNew = editPick && nameKey(editPick.name) !== nameKey(job.product) ? editPick : null;
+    if (Object.keys(changes).length === 0 && !pickedNew) { setEditOpen(false); return; }
+    setEditSaving(true); setEditErr("");
+    const body: Record<string, unknown> = { ...changes };
+    if (pickedNew) { body.product = pickedNew.name; body.masterRow = pickedNew.row; }
+    // The row must still be this order — a colleague may delete a row above it.
+    if (codeKey(job.code)) body.expect = { code: job.code };
     const res = await authedFetch(`/api/jobs/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(changes),
+      body: JSON.stringify(body),
     }).catch(() => null);
     setEditSaving(false);
-    if (!res || !res.ok) { setEditErr(true); return; }
-    setEditOpen(false);
-    load();
-  }
-
-  /** The Master standard's raw cell text — same diff rule as the job edit. */
-  function stdFormOf(s: Standard): Record<string, string> {
-    return {
-      weight: s.weight, material: s.material,
-      cavities: s.cavitiesRaw, cycle: s.cycleRaw, defects: s.defects,
-    };
-  }
-
-  function openStd() {
-    if (!standard) return;
-    setStdErr("");
-    setStdForm(stdFormOf(standard));
-    setStdOpen(true);
-  }
-
-  function setStd(k: string, v: string) {
-    setStdForm((f) => ({ ...f, [k]: v }));
-  }
-
-  async function handleStdSave(e: React.FormEvent) {
-    e.preventDefault();
-    if (!standard) return;
-    const base = stdFormOf(standard);
-    const changes: Record<string, string> = {};
-    for (const [k, v] of Object.entries(stdForm)) if (v !== base[k]) changes[k] = v;
-    if (Object.keys(changes).length === 0) { setStdOpen(false); return; }
-    setStdSaving(true); setStdErr("");
-    // Goes through the job route, not the generic sheet PATCH: the server
-    // re-locates the Master row by product NAME on a fresh read before writing,
-    // because rows shift under a daily-edited sheet.
-    const res = await authedFetch(`/api/jobs/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ master: { row: standard.row, name: standard.name, changes } }),
-    }).catch(() => null);
-    setStdSaving(false);
     if (!res || !res.ok) {
-      const reason = res ? (await res.json().catch(() => ({}))).reason : "";
-      setStdErr(reason === "identity_mismatch" ? "identity" : "save");
+      const reason = res ? String((await res.json().catch(() => ({}))).reason ?? "") : "";
+      // At-least-once: a failed-looking save may have landed — reload before a retry.
+      setEditErr((p.jobs.errors as Record<string, string>)[reason] ?? p.jobs.saveNotDoneHere);
+      load();
       return;
     }
-    setStdOpen(false);
+    setEditOpen(false);
     load();
   }
 
@@ -328,6 +307,10 @@ export default function JobDetailPage() {
   const remaining = Math.max(0, qty - good);
   const pct = qty ? Math.min(100, (good / qty) * 100) : 0;
   const overdue = !["Completed", "Delivered"].includes(job.status) && job.dueDate && job.dueDate < today;
+  // Only a date the person just CHANGED is held to the order of the two — an
+  // old row whose start date is after its due date must still save other edits.
+  const editDatesBad = !!editForm.startDate && !!editForm.dueDate && editForm.dueDate < editForm.startDate
+    && (editForm.startDate !== job.startDate || editForm.dueDate !== job.dueDate);
 
   return (
     <div className="max-w-4xl" dir={isAr ? "rtl" : "ltr"}>
@@ -347,7 +330,7 @@ export default function JobDetailPage() {
             <h1 className="text-2xl font-bold text-gray-900 break-all">{job.code}</h1>
             <Pill text={localize(job.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(job.priority)} />
           </div>
-          <p className="text-sm text-gray-500 mt-1">{[job.client, job.product].filter(Boolean).join(" · ")}</p>
+          <p className="text-sm text-gray-500 mt-1">{[job.ambiguous ? job.client || job.masterClient : job.masterClient || job.client, job.product].filter(Boolean).join(" · ")}</p>
         </div>
         <div className="flex items-center gap-2.5 sm:gap-1.5 w-full sm:w-auto">
           <select
@@ -382,18 +365,8 @@ export default function JobDetailPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mt-4 mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-900">{p.jobs.workOrder}</h2>
-          {/* flex-wrap: the Arabic edit-standard label is long, and together
-              with Print the pair cannot share one phone line. min-h-11 on the
-              phone keeps both tappable with a thumb. */}
+          {/* min-h-11 on the phone keeps Print tappable with a thumb. */}
           <div className="flex flex-wrap items-center gap-2">
-            {standard && (
-              <button
-                onClick={openStd}
-                className="min-h-11 sm:min-h-9 inline-flex items-center text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 transition-colors print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
-              >
-                {p.jobs.editStandard}
-              </button>
-            )}
             <button
               onClick={() => window.print()}
               className="min-h-11 sm:min-h-9 inline-flex items-center text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 transition-colors print:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
@@ -402,19 +375,9 @@ export default function JobDetailPage() {
             </button>
           </div>
         </div>
-        {/* Everything joins on the product NAME; when it exists twice in
-            Master, the standards and piece counts below are a first-match
-            guess, and the owner must hear that here, not discover it later. */}
-        {job.ambiguous && (
-          <div className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            {p.jobs.ambiguousNote}
-          </div>
-        )}
         <div className="grid sm:grid-cols-3 gap-y-4 gap-x-6 text-sm">
           <Detail label={p.jobs.part} value={job.product || "—"} />
-          <Detail label={p.jobs.moldCode} value={job.moldCode || "—"} />
-          {/* Master's own number for this product — not the customer's code
-              above. From the notes when that is where the sheet keeps it. */}
+          {/* Master's own number for this product — from the notes when that is where the sheet keeps it. */}
           <Detail
             label={p.jobs.moldNumber}
             value={
@@ -427,12 +390,15 @@ export default function JobDetailPage() {
                     : standard.moldNumber
             }
           />
-          <Detail label={p.jobs.machine} value={job.machine || "—"} />
-          <Detail label={startLabel} value={job.startDate || "—"} />
+          {/* The order's own machine when it is a registry label, else where it last ran. */}
+          <Detail label={p.jobs.machine} value={(job.machineMatched ? job.machine : job.lastMachine || job.machine) || "—"} ltr />
+          <Detail label={startLabel} value={job.startDate || "—"} ltr />
           <Detail
             label={p.jobs.due}
-            value={job.dueDate ? `${job.dueDate}${overdue ? ` · ${p.jobs.overdue}` : ""}` : "—"}
+            value={job.dueDate || "—"}
+            suffix={job.dueDate && overdue ? ` · ${p.jobs.overdue}` : ""}
             danger={!!overdue}
+            ltr
           />
           {/* Ordered is recorded in kg; pieces are derived from Master's piece weight. */}
           <Detail label={p.jobs.qtyOrderedKg} value={`${fmt(Number(job.qtyOrderedKg) || 0)} ${p.jobs.kg}`} />
@@ -459,11 +425,7 @@ export default function JobDetailPage() {
               <Detail label={p.jobs.possibleDefects} value={standard.defects || "—"} />
             </>
           ) : (
-            <div className="sm:col-span-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              {isAr
-                ? "لا يوجد معيار لهذا المنتج في Master (الوزن/الخامة/الدورة/الكافيتي) — أكمله لعرض أمر الشغل كاملاً."
-                : "No Master standard for this product (weight/material/cycle/cavities) — fill it to complete the work order."}
-            </div>
+            <p className="sm:col-span-3 text-xs text-gray-500">{p.jobs.noStandard}</p>
           )}
           {job.instructions ? (
             <div className="sm:col-span-3">
@@ -518,8 +480,8 @@ export default function JobDetailPage() {
             <div key={r.id} className="px-4 py-3 space-y-1.5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium text-gray-900 tabular-nums">{r.date}</div>
-                  <div className="text-xs text-gray-500 truncate">{r.machine || "—"}</div>
+                  <div className="font-medium text-gray-900 tabular-nums"><bdi dir="ltr">{r.date}</bdi></div>
+                  <div className="text-xs text-gray-500 truncate"><bdi dir="ltr">{r.machine || "—"}</bdi></div>
                 </div>
                 <button
                   onClick={() => handleDeleteRun(r.id)}
@@ -563,8 +525,8 @@ export default function JobDetailPage() {
               <tbody className="divide-y divide-gray-100">
                 {runs.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap tabular-nums">{r.date}</td>
-                    <td className="px-4 py-3 text-gray-500">{r.machine || "—"}</td>
+                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap tabular-nums"><bdi dir="ltr">{r.date}</bdi></td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap"><bdi dir="ltr">{r.machine || "—"}</bdi></td>
                     <td className="px-4 py-3 text-green-600 font-medium tabular-nums">{fmt(r.goodUnits)}</td>
                     <td className="px-4 py-3 text-red-500 tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
                     <td className="px-4 py-3 text-gray-500 tabular-nums">
@@ -646,37 +608,28 @@ export default function JobDetailPage() {
         </form>
       </Modal>
 
-      {/* Edit job modal — every «أوامر العمل» column; only changed fields are written */}
+      {/* Edit the order — the product is picked from «الرئيسي» (its client and
+          mould number follow it on the server); only changed fields are written. */}
       <Modal open={editOpen} title={`${p.jobs.edit} · ${job.code}`} onClose={() => setEditOpen(false)} isAr={isAr}>
-        <form onSubmit={handleEditSave}>
-          <div className="grid sm:grid-cols-2 gap-x-4">
-            <Field label={p.jobs.code}>
-              <input className={inputCls} required value={editForm.code ?? ""} onChange={(e) => setEdit("code", e.target.value)} />
-            </Field>
-            <Field label={p.jobs.client}>
-              <input className={inputCls} required value={editForm.client ?? ""} onChange={(e) => setEdit("client", e.target.value)} />
-            </Field>
-            <Field label={p.jobs.part}>
-              <input className={inputCls} required list="edit-job-products" value={editForm.product ?? ""} onChange={(e) => setEdit("product", e.target.value)} />
-              <datalist id="edit-job-products">
-                {molds.map((m) => (m.name ? <option key={m.row} value={m.name} /> : null))}
-              </datalist>
-            </Field>
-            <Field label={p.jobs.moldCode}>
-              <input className={inputCls} list="edit-job-moldcodes" value={editForm.moldCode ?? ""} onChange={(e) => setEdit("moldCode", e.target.value)} />
-              <datalist id="edit-job-moldcodes">
-                {molds.map((m) => (m.code ? <option key={`c${m.row}`} value={m.code} /> : null))}
-              </datalist>
-            </Field>
+        {/* noValidate: no browser validation bubbles — the grey line says what is wrong. */}
+        <form onSubmit={handleEditSave} noValidate>
+          {/* Not a <Field>: that is a <label>, and a label wrapping a search box
+              and a list of buttons sends every tap to the first control. */}
+          <div className="mb-3">
+            <span className="block text-xs font-medium text-gray-600 mb-1">{p.jobs.part}</span>
+            <MasterProductPicker
+              rows={molds}
+              value={editPick === undefined ? findProduct(molds, job.product) : editPick}
+              onChange={setEditPick}
+              loading={!moldsLoaded}
+              failed={moldsFailed}
+              onRetry={loadLists}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
             {/* The sheet column is «الكمية المطلوبة (كجم)» — kilograms, never pieces. */}
             <Field label={p.jobs.qtyOrderedKg}>
-              <input className={inputCls} type="number" min="0" step="any" value={editForm.qtyKg ?? ""} onChange={(e) => setEdit("qtyKg", e.target.value)} />
-            </Field>
-            <Field label={p.jobs.materialIssued}>
-              <input className={inputCls} value={editForm.materialIssued ?? ""} onChange={(e) => setEdit("materialIssued", e.target.value)} />
-            </Field>
-            <Field label={p.jobs.masterbatch}>
-              <input className={inputCls} value={editForm.masterbatch ?? ""} onChange={(e) => setEdit("masterbatch", e.target.value)} />
+              <input className={inputCls} type="number" inputMode="decimal" min="0" step="any" value={editForm.qtyKg ?? ""} onChange={(e) => setEdit("qtyKg", e.target.value)} />
             </Field>
             <Field label={startLabel}>
               <input className={inputCls} type="date" value={editForm.startDate ?? ""} onChange={(e) => setEdit("startDate", e.target.value)} />
@@ -684,22 +637,8 @@ export default function JobDetailPage() {
             <Field label={p.jobs.due}>
               <input className={inputCls} type="date" value={editForm.dueDate ?? ""} onChange={(e) => setEdit("dueDate", e.target.value)} />
             </Field>
-            <Field label={p.jobs.machine}>
-              <select className={inputCls} value={editForm.machine ?? ""} onChange={(e) => setEdit("machine", e.target.value)}>
-                <option value="">{p.common.select}</option>
-                {/* Keep the current value selectable even if the registry was
-                    renumbered since the job was created. */}
-                {/* The value written is the registry LABEL («PQ 7 — 100»), the
-                    machine's identity everywhere — the tonnage alone («220»)
-                    is what the legacy rows hold and cannot be joined. */}
-                {editForm.machine && !machines.some((m) => m.label === editForm.machine) && (
-                  <option value={editForm.machine}>{editForm.machine}</option>
-                )}
-                {machines.map((m) => (
-                  <option key={m.label} value={m.label}>{m.label}</option>
-                ))}
-              </select>
-            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4">
             <Field label={p.jobs.status}>
               <select className={inputCls} value={editForm.status ?? ""} onChange={(e) => setEdit("status", e.target.value)}>
                 {options(JOB_STATUSES, p.jobs.statuses).map((o) => (
@@ -715,67 +654,53 @@ export default function JobDetailPage() {
               </select>
             </Field>
           </div>
-          <Field label={p.jobs.instructions}>
-            <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.instructions ?? ""} onChange={(e) => setEdit("instructions", e.target.value)} />
-          </Field>
-          <Field label={p.jobs.notes}>
-            <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.notes ?? ""} onChange={(e) => setEdit("notes", e.target.value)} />
-          </Field>
-          {editErr && <p className="text-xs text-red-600 mt-1">{p.jobs.saveFailed}</p>}
+          <button
+            type="button"
+            onClick={() => setEditMore((v) => !v)}
+            aria-expanded={editMore}
+            className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-9 px-1 mb-2 rounded-lg text-sm text-gray-600 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
+            <ChevronDown size={15} className={`transition-transform ${editMore ? "rotate-180" : ""}`} /> {p.jobs.moreDetails}
+          </button>
+          {editMore && (
+            <>
+              <div className="grid sm:grid-cols-2 gap-x-4">
+                <Field label={p.jobs.materialIssued}>
+                  <input className={inputCls} type="number" inputMode="decimal" min="0" step="any" value={editForm.materialIssued ?? ""} onChange={(e) => setEdit("materialIssued", e.target.value)} />
+                </Field>
+                <Field label={p.jobs.masterbatch}>
+                  <input className={inputCls} value={editForm.masterbatch ?? ""} onChange={(e) => setEdit("masterbatch", e.target.value)} />
+                </Field>
+              </div>
+              <Field label={p.jobs.instructions}>
+                <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.instructions ?? ""} onChange={(e) => setEdit("instructions", e.target.value)} />
+              </Field>
+              <Field label={p.jobs.notes}>
+                <textarea className={`${inputCls} resize-none`} rows={2} value={editForm.notes ?? ""} onChange={(e) => setEdit("notes", e.target.value)} />
+              </Field>
+            </>
+          )}
+          {editErr && <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2">{editErr}</p>}
+          {editDatesBad && <p className="text-xs text-gray-500 mb-2">{p.jobs.dueBeforeStart}</p>}
           <div className="flex flex-wrap items-center gap-3 mt-2">
-            <Btn type="submit" disabled={editSaving}>{p.common.save}</Btn>
+            <Btn type="submit" disabled={editSaving || editDatesBad} className="flex-1 sm:flex-none min-h-12 sm:min-h-10">{editSaving ? p.common.loading : p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setEditOpen(false)}>{p.common.cancel}</Btn>
           </div>
         </form>
       </Modal>
-
-      {/* Edit Master standard modal — writes to «الرئيسي», the source of truth,
-          located by product NAME server-side. Raw cell text in, raw text out:
-          «4+4» cavities and «15جم» weights are notation, not numbers. */}
-      {standard && (
-        <Modal open={stdOpen} title={`${p.jobs.editStandard} · ${job.product}`} onClose={() => setStdOpen(false)} isAr={isAr}>
-          <form onSubmit={handleStdSave}>
-            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-              {p.jobs.standardWarning}
-            </p>
-            <div className="grid sm:grid-cols-2 gap-x-4">
-              <Field label={p.jobs.partWeight}>
-                <input className={inputCls} value={stdForm.weight ?? ""} onChange={(e) => setStd("weight", e.target.value)} />
-              </Field>
-              <Field label={p.jobs.materialType}>
-                <input className={inputCls} value={stdForm.material ?? ""} onChange={(e) => setStd("material", e.target.value)} />
-              </Field>
-              <Field label={p.jobs.cavities}>
-                <input className={inputCls} value={stdForm.cavities ?? ""} onChange={(e) => setStd("cavities", e.target.value)} />
-              </Field>
-              <Field label={p.jobs.cycleSec}>
-                <input className={inputCls} value={stdForm.cycle ?? ""} onChange={(e) => setStd("cycle", e.target.value)} />
-              </Field>
-            </div>
-            <Field label={p.jobs.possibleDefects}>
-              <textarea className={`${inputCls} resize-none`} rows={2} value={stdForm.defects ?? ""} onChange={(e) => setStd("defects", e.target.value)} />
-            </Field>
-            {stdErr && (
-              <p className="text-xs text-red-600 mt-1">
-                {stdErr === "identity" ? p.jobs.masterIdentity : p.jobs.saveFailed}
-              </p>
-            )}
-            <div className="flex flex-wrap items-center gap-3 mt-2">
-              <Btn type="submit" disabled={stdSaving}>{p.common.save}</Btn>
-              <Btn type="button" variant="outline" onClick={() => setStdOpen(false)}>{p.common.cancel}</Btn>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
 
-function Detail({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+/** `ltr` isolates a Latin label or an ISO date, which would read backwards inside Arabic. */
+function Detail({ label, value, danger, ltr, suffix }: { label: string; value: string; danger?: boolean; ltr?: boolean; suffix?: string }) {
   return (
     <div>
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-      <p className={`font-medium tabular-nums ${danger ? "text-red-600" : "text-gray-900"}`}>{value}</p>
+      <p className={`font-medium tabular-nums ${danger ? "text-red-600" : "text-gray-900"}`}>
+        {ltr ? <bdi dir="ltr">{value}</bdi> : value}
+        {suffix}
+      </p>
     </div>
   );
 }

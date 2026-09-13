@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import {
   OPEN_ORDER_STATUSES, codeKey, compareByDue, daysLate, duplicateCodes, foldWord, groupOrders,
   hasNoDue, isLate, isOpenOrder, machineLabelKey, machineMatch, nextActions, parseQuantity,
-  registryLabelsFrom, statusAfter, ISO_DAY,
+  registryLabelForTonnage, registryLabelsFrom, statusAfter, suggestJobCode, ISO_DAY,
 } from "../lib/work-orders.ts";
 import { JOB_STATUSES } from "../lib/prod-meta.ts";
 
@@ -196,4 +196,29 @@ test("one-tap actions per status, and every target is a value «أوامر ال�
     assert.ok(JOB_STATUSES.includes(statusAfter(a)), `${a} → ${statusAfter(a)} is not a sheet value`);
   }
   assert.equal(statusAfter("start"), "In Production", "status is the go-ahead");
+});
+
+/* ------------------------------- new orders -------------------------------- */
+
+test("suggestJobCode carries the floor's «Job n» sequence on and never repeats a code", () => {
+  // The live codes of «أوامر العمل» on 2026-09-13.
+  const live = ["1/1/26", "2/1/26", "Ma-01", "Pro/tec 01", "Job 01", "Job 045", "Job 046", "Job 047", "Job 013", "Job 014", "Job 089", "Job 0478", "Job-07845"];
+  assert.equal(suggestJobCode(live), "Job 479", "a five-digit customer number is not the sequence");
+  assert.equal(suggestJobCode([]), "Job 001");
+  assert.equal(suggestJobCode(["", null, undefined, "-"]), "Job 001");
+  assert.equal(suggestJobCode(["job 9", "JOB-010", "Job ١٢"]), "Job 013", "case, separators and Arabic-Indic digits fold");
+});
+
+test("registryLabelForTonnage names a machine only when its tonnage is unique", () => {
+  // The live registry, 2026-09-13.
+  const live = [
+    "PQ 1 — 550", "PQ 2 — 280", "PQ 3 — 280", "PQ 4 — 138", "PQ 5 — 100", "PQ 6 — 220", "PQ 7 — 100",
+    "PQ 8 — 220", "PQ 9 — 140", "PQ 10 — 150", "PQ 11 — 180", "PQ 12 — 180", "PQ 13 — 150", "PQ 14 — 180",
+  ];
+  assert.equal(registryLabelForTonnage("138", live), "PQ 4 — 138");
+  assert.equal(registryLabelForTonnage("١٤٠", live), "PQ 9 — 140");
+  assert.equal(registryLabelForTonnage("280", live), "", "PQ 2 and PQ 3 are both 280 t");
+  assert.equal(registryLabelForTonnage("100&180", live), "");
+  assert.equal(registryLabelForTonnage("غير متاح / N/A", live), "");
+  assert.equal(registryLabelForTonnage("", live), "");
 });

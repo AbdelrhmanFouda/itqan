@@ -11,10 +11,12 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  *  - «ابدأ التشغيل» is ONE tap: status IS the go-ahead, there is no approval
  *    step. The tap writes through the identity-checked PATCH (the row must
  *    still carry the same code on a fresh read);
- *  - a new order takes the product and client from «الرئيسي», the machine from
- *    «الماكينات» (never free text — the legacy «ماكينة 100»/«220»/«280» rows
- *    are what free text produced), a due date (required) and a number of
- *    kilograms (never «3.1طن»); the API refuses a duplicated code.
+ *  - a new order asks for four things only — the product (picked from
+ *    «الرئيسي», never typed), the kilograms, the start date and the due date —
+ *    and Master supplies the client, the mould number and, when its tonnage
+ *    names one machine, the machine (2026-09-13, owner's words). The code is
+ *    filled in (suggestJobCode). Nothing a person could mistype is asked, so
+ *    the cards and the form carry no "fix this" messages.
  *
  * Progress still fills from production rows matching the product name on/
  * after the start date (lib/jobs.ts). The rules the list draws — open, late,
@@ -24,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
-import { Check, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError, StatTile, iconBtnCls } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
@@ -32,11 +34,11 @@ import { ageLabel, fill, numLocale } from "@/lib/format";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { matchesTerms, searchTerms } from "@/lib/storage-filter";
-import { nameKey } from "@/lib/master-lookup";
 import { todayIso } from "@/lib/dates";
 import {
-  codeKey, daysLate, groupOrders, hasNoDue, isLate, nextActions, statusAfter, type OrderAction,
+  codeKey, daysLate, groupOrders, isLate, nextActions, statusAfter, suggestJobCode, type OrderAction,
 } from "@/lib/work-orders";
+import { MasterProductPicker, pieceGrams, type MasterPick } from "@/components/dashboard/master-product-picker";
 
 type Job = {
   id: string; code: string; client: string; product: string; moldCode: string;
@@ -51,6 +53,7 @@ type Job = {
   masterMoldNumber: string; masterMoldNotesNumber: string;
   qtyUnreadable: boolean; qtyRaw: string; materialIssuedUnreadable: boolean;
   machineMatched: boolean; codeDuplicate: boolean; open: boolean;
+  masterClient: string; lastMachine: string;
 };
 type Duplicate = { key: string; code: string; ids: string[] };
 type Data = {
@@ -61,15 +64,12 @@ type Data = {
 const LAST_KEY = "itqan.jobs.last";
 /** Past this the page says «الأرقام من قبل …» and refetches once on its own. */
 const STALE_AFTER_MS = 60_000;
-type MasterRow = { row: number; name: string; client: string; weight: string; ambiguous: boolean };
-type MachineAgg = { name: string; label: string; status: string };
-type Tile = "" | "late" | "noDue" | "dup";
+type Tile = "" | "running" | "notStarted" | "late";
+const isRunning = (j: { status: string }) => j.status === "In Production";
+const isNotStarted = (j: { status: string; open: boolean }) => j.open && (!j.status || j.status === "Not Started");
 
-const blank = {
-  code: "", client: "", product: "", qtyOrdered: "", machine: "", dueDate: "",
-  priority: "Normal", instructions: "",
-};
-const firstNum = (v: string) => { const m = String(v ?? "").match(/[0-9]+(?:\.[0-9]+)?/); return m ? Number(m[0]) : 0; };
+/** The new-order form: product, kilograms and the two dates; the rest is optional. */
+const blank = { qtyOrdered: "", startDate: "", dueDate: "", code: "", priority: "Normal", instructions: "" };
 
 export default function JobsPage() {
   const { lang } = useLang();
@@ -79,8 +79,9 @@ export default function JobsPage() {
   const today = todayIso();
   const fmt = useCallback((n: number) => Number(n || 0).toLocaleString(numLocale(isAr), { maximumFractionDigits: 2 }), [isAr]);
 
-  const [master, setMaster] = useState<MasterRow[]>([]);
-  const [machines, setMachines] = useState<MachineAgg[]>([]);
+  const [master, setMaster] = useState<MasterPick[]>([]);
+  const [masterLoaded, setMasterLoaded] = useState(false);
+  const [masterFailed, setMasterFailed] = useState(false);
   // list state
   const [tile, setTile] = useState<Tile>("");
   const [search, setSearch] = useState("");
@@ -90,23 +91,30 @@ export default function JobsPage() {
   // new-order modal
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ ...blank });
-  const [clientTouched, setClientTouched] = useState(false);
+  const [picked, setPicked] = useState<MasterPick | null>(null);
+  const [showMore, setShowMore] = useState(false);
+  const [codeTouched, setCodeTouched] = useState(false);
+  const [attemptCode, setAttemptCode] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
 
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
-  // The two lists that feed the new-order form (Master names + clients, the
-  // registry) are asked for AFTER the order book answers: fired first, their
-  // tab reads sat ahead of «أوامر العمل» in the instance's one serial bridge
-  // queue and delayed the list by a Master read (2026-09-10 audit).
+  // Master, which feeds the new-order form, is asked for AFTER the order book
+  // answers: fired first, its tab read sat ahead of «أوامر العمل» in the
+  // instance's one serial bridge queue and delayed the list (2026-09-10 audit).
   const listsStarted = useRef(false);
   const loadLists = useCallback(() => {
     if (listsStarted.current) return;
     listsStarted.current = true;
-    fetch("/api/machines").then((r) => r.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
-    authedFetch("/api/molds").then((r) => (r.ok ? r.json() : { molds: [] })).then((m) => setMaster(m.molds ?? [])).catch(() => {});
+    authedFetch("/api/molds")
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then((m) => { setMaster(Array.isArray(m.molds) ? m.molds : []); setMasterFailed(false); })
+      // A failed read is not final: the picker says so with a retry, and the
+      // next «أمر جديد» asks again.
+      .catch(() => { setMasterFailed(true); listsStarted.current = false; })
+      .finally(() => setMasterLoaded(true));
   }, []);
   // Snapshot → paint → bounded read → keep what is on screen when it fails.
   // A non-2xx (401 on a missing/expired token) must land in the FAILED state —
@@ -140,18 +148,20 @@ export default function JobsPage() {
   const jobs = useMemo(() => data?.jobs ?? [], [data]);
   const counts = useMemo(() => ({
     open: jobs.filter((j) => j.open).length,
+    running: jobs.filter(isRunning).length,
+    notStarted: jobs.filter(isNotStarted).length,
     late: jobs.filter((j) => isLate(j, today)).length,
-    noDue: jobs.filter(hasNoDue).length,
-    dup: jobs.filter((j) => j.codeDuplicate).length,
     done: jobs.filter((j) => !j.open).length,
   }), [jobs, today]);
   const terms = useMemo(() => searchTerms(search), [search]);
   const shown = useMemo(() => {
     let list = jobs;
+    if (tile === "running") list = list.filter(isRunning);
+    if (tile === "notStarted") list = list.filter(isNotStarted);
     if (tile === "late") list = list.filter((j) => isLate(j, today));
-    if (tile === "noDue") list = list.filter(hasNoDue);
-    if (tile === "dup") list = list.filter((j) => j.codeDuplicate);
-    if (terms.length) list = list.filter((j) => matchesTerms([j.code, j.client, j.product, j.machine, j.masterMoldNumber, j.instructions], terms));
+    if (terms.length) {
+      list = list.filter((j) => matchesTerms([j.code, j.masterClient, j.client, j.product, j.machine, j.lastMachine, j.masterMoldNumber, j.instructions], terms));
+    }
     return list;
   }, [jobs, tile, terms, today]);
   const groups = useMemo(() => groupOrders(shown), [shown]);
@@ -166,7 +176,9 @@ export default function JobsPage() {
     const status = statusAfter(action);
     // Optimistic: the pill flips at once; a failure reloads the truth.
     setData((d) => d ? { ...d, jobs: d.jobs.map((j) => (j.id === job.id ? { ...j, status } : j)) } : d);
-    const body: Record<string, unknown> = { status, expect: { code: job.code } };
+    // The row check compares the code; an order with none goes unchecked
+    // rather than failing every tap with «row_changed».
+    const body: Record<string, unknown> = codeKey(job.code) ? { status, expect: { code: job.code } } : { status };
     // Starting an order that never had a start date dates it today, so its
     // progress counts production from now on (the sheet's «تاريخ البدء»).
     if (action === "start" && !job.startDate) body.startDate = today;
@@ -195,61 +207,67 @@ export default function JobsPage() {
 
   /* ------------------------------ the new order ---------------------------- */
 
-  const masterNames = useMemo(() => {
-    const seen = new Set<string>();
-    return master.filter((m) => m.name && !seen.has(m.name) && seen.add(m.name));
-  }, [master]);
-  const masterClients = useMemo(() => Array.from(new Set(master.map((m) => m.client).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ar")), [master]);
-  const picked = useMemo(() => {
-    const k = nameKey(form.product);
-    return k ? master.find((m) => nameKey(m.name) === k) ?? null : null;
-  }, [form.product, master]);
-  const pieceWeight = picked ? firstNum(picked.weight) : 0;
+  // Master supplies everything about the product; the person gives the
+  // kilograms and the two dates. Save stays disabled until those are there,
+  // and the grey line under the form says what is still missing.
   const kgTyped = Number(form.qtyOrdered) || 0;
-  const piecesPreview = pieceWeight > 0 && kgTyped > 0 ? Math.round((kgTyped * 1000) / pieceWeight) : 0;
+  const grams = picked ? pieceGrams(picked.weight) : 0;
+  const piecesPreview = grams > 0 && kgTyped > 0 ? Math.round((kgTyped * 1000) / grams) : 0;
+  // The code is filled in from the list until the person types one. The first
+  // save attempt pins it (attemptCode), so a retry after an answer that looked
+  // failed sends the SAME code and the server recognises its own order.
+  const autoCode = useMemo(() => suggestJobCode(jobs.map((j) => j.code)), [jobs]);
+  const typedCode = codeTouched && !!codeKey(form.code);
+  const shownCode = codeTouched ? form.code : attemptCode || autoCode;
+  const codeTaken = typedCode && jobs.some((j) => codeKey(j.code) === codeKey(form.code));
+  const datesBad = !!form.startDate && !!form.dueDate && form.dueDate < form.startDate;
+  const canSave = !!picked && kgTyped > 0 && !!form.dueDate && !datesBad && !codeTaken && !saving;
+  const hint = codeTaken ? p.jobs.codeTaken : datesBad ? p.jobs.dueBeforeStart : p.jobs.pickProductFirst;
+  const moreOpen = showMore || codeTaken;
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
-    if (k === "client") setClientTouched(true);
+    if (k === "code") setCodeTouched(true);
   }
-  // The client follows the product's Master row until the user types one.
-  useEffect(() => {
-    if (!open || clientTouched || !picked) return;
-    setForm((f) => (f.client === picked.client ? f : { ...f, client: picked.client }));
-  }, [picked, open, clientTouched]);
 
   function openNew() {
-    setForm({ ...blank });
-    setClientTouched(false);
+    setForm({ ...blank, startDate: today });
+    setPicked(null);
+    setShowMore(false);
+    setCodeTouched(false);
+    setAttemptCode("");
     setSaveErr("");
     setOpen(true);
+    // Master may have failed to load earlier — ask again now that it is needed.
+    if (master.length === 0) loadLists();
   }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
+    if (!canSave || !picked) return;
+    const code = typedCode ? form.code.trim() : attemptCode || autoCode;
+    if (!typedCode) setAttemptCode(code);
     setSaveErr("");
-    const errs = p.jobs.errors as Record<string, string>;
-    // The same refusals the API makes, said before the round trip.
-    if (!form.code.trim() || !form.product.trim()) return setSaveErr(errs.missing_fields);
-    if (jobs.some((j) => codeKey(j.code) === codeKey(form.code))) return setSaveErr(errs.duplicate_code);
-    if (master.length > 0 && !picked) return setSaveErr(errs.unknown_product);
-    if (!(Number(form.qtyOrdered) > 0)) return setSaveErr(errs.bad_qty);
-    if (!form.machine) return setSaveErr(errs.missing_machine);
-    if (!form.dueDate) return setSaveErr(errs.missing_due);
     setSaving(true);
     const res = await authedFetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, product: picked?.name ?? form.product, status: "Not Started", startDate: today }),
+      body: JSON.stringify({
+        product: picked.name, masterRow: picked.row, qtyOrdered: form.qtyOrdered,
+        startDate: form.startDate || today, dueDate: form.dueDate,
+        code, codeAuto: !typedCode, priority: form.priority, instructions: form.instructions, status: "Not Started",
+      }),
       signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
     setSaving(false);
     if (!res || !res.ok) {
       const reason = res ? String((await res.json().catch(() => ({}))).reason ?? "") : "";
-      // A bridge failure may still have written the row (at-least-once):
-      // refresh the list so the person sees it before trying again.
-      setSaveErr(errs[reason] ?? p.jobs.saveCheckList);
-      if (!errs[reason]) load();
+      // The bridge is at-least-once: whatever the answer, the list is read
+      // again, and the message never claims that nothing was written. A retry
+      // is safe — it re-sends the pinned code.
+      setSaveErr((p.jobs.errors as Record<string, string>)[reason] ?? p.jobs.saveNotDone);
+      if (reason === "duplicate_code") setShowMore(true);
+      load();
       return;
     }
     setOpen(false);
@@ -318,19 +336,12 @@ export default function JobsPage() {
           {/* tiles — each one filters */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-1">
             <StatTile label={p.jobs.tilesOpen} value={String(counts.open)} active={tile === ""} onClick={() => setTile("")} />
+            <StatTile label={p.jobs.tilesInProduction} value={String(counts.running)} active={tile === "running"} onClick={() => setTile(tile === "running" ? "" : "running")} />
+            <StatTile label={p.jobs.tilesNotStarted} value={String(counts.notStarted)} active={tile === "notStarted"} onClick={() => setTile(tile === "notStarted" ? "" : "notStarted")} />
             <StatTile label={p.jobs.tilesLate} value={String(counts.late)} tone={counts.late ? "red" : undefined} active={tile === "late"} onClick={() => setTile(tile === "late" ? "" : "late")} />
-            <StatTile label={p.jobs.tilesNoDue} value={String(counts.noDue)} tone={counts.noDue ? "amber" : undefined} active={tile === "noDue"} onClick={() => setTile(tile === "noDue" ? "" : "noDue")} />
-            <StatTile label={p.jobs.tilesDup} value={String(counts.dup)} tone={counts.dup ? "amber" : undefined} active={tile === "dup"} onClick={() => setTile(tile === "dup" ? "" : "dup")} />
           </div>
           <p className="text-[11px] text-gray-400 mb-3">{p.jobs.tilesHint}</p>
-
-          {/* the duplicates, said once, on first load */}
-          {data.duplicates.map((d) => (
-            <p key={d.key} className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-              {fill(p.jobs.duplicateBanner, { code: d.code, n: d.ids.length, rows: d.ids.join("، ") })}
-            </p>
-          ))}
-          {actErr && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{actErr}</p>}
+          {actErr && <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">{actErr}</p>}
 
           {/* search */}
           <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -389,66 +400,62 @@ export default function JobsPage() {
       )}
 
       <Modal open={open} title={p.jobs.add} onClose={() => setOpen(false)} isAr={isAr}>
-        <form onSubmit={handleAdd}>
-          <div className="grid sm:grid-cols-2 gap-x-4">
-            <Field label={p.jobs.part}>
-              <input className={inputCls} required list="job-products" value={form.product} placeholder={p.jobs.pickProduct} onChange={(e) => set("product", e.target.value)} autoComplete="off" />
-              <datalist id="job-products">
-                {masterNames.map((m) => <option key={m.row} value={m.name}>{m.client}</option>)}
-              </datalist>
-              {form.product && master.length > 0 && !picked && <p className="text-[11px] text-amber-700 mt-1">{p.jobs.errors.unknown_product}</p>}
-              {picked?.ambiguous && <p className="text-[11px] text-amber-700 mt-1">{p.jobs.ambiguous}</p>}
-            </Field>
-            <Field label={p.jobs.client}>
-              <input className={inputCls} required list="job-clients" value={form.client} onChange={(e) => set("client", e.target.value)} autoComplete="off" />
-              <datalist id="job-clients">
-                {masterClients.map((c) => <option key={c} value={c} />)}
-              </datalist>
-              <p className="text-[11px] text-gray-400 mt-1">{p.jobs.clientFromMaster}</p>
-            </Field>
-            <Field label={p.jobs.code}>
-              <input className={inputCls} required value={form.code} placeholder={p.jobs.placeholderCode} onChange={(e) => set("code", e.target.value)} autoComplete="off" />
-              {form.code && jobs.some((j) => codeKey(j.code) === codeKey(form.code)) && (
-                <p className="text-[11px] text-red-600 mt-1">{p.jobs.errors.duplicate_code}</p>
-              )}
-            </Field>
+        {/* noValidate: the browser's own bubbles («Value must be…», often in English)
+            are exactly the errors this form must not show. */}
+        <form onSubmit={handleAdd} noValidate>
+          {/* Not a <Field>: that is a <label>, and a label wrapping a search box
+              and a list of buttons sends every tap to the first control. */}
+          <div className="mb-3">
+            <span className="block text-xs font-medium text-gray-600 mb-1">{p.jobs.part}</span>
+            <MasterProductPicker rows={master} value={picked} onChange={setPicked} loading={!masterLoaded} failed={masterFailed} onRetry={loadLists} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4">
             {/* The sheet column is «الكمية المطلوبة (كجم)» — label the unit so
                 nobody types a piece count into a kilogram field. */}
             <Field label={p.jobs.qtyOrderedKg}>
-              <input className={inputCls} type="number" inputMode="decimal" min="0" step="any" required value={form.qtyOrdered} onChange={(e) => set("qtyOrdered", e.target.value)} />
-              {form.product && picked && (
-                <p className={`text-[11px] mt-1 tabular-nums ${pieceWeight > 0 ? "text-gray-500" : "text-amber-700"}`}>
-                  {pieceWeight > 0
-                    ? kgTyped > 0 ? fill(p.jobs.piecesPreview, { kg: fmt(kgTyped), g: pieceWeight, pcs: fmt(piecesPreview) }) : `${pieceWeight} ${p.jobs.gPerPc}`
-                    : p.jobs.piecesUnknown}
-                </p>
+              <input className={inputCls} type="number" inputMode="decimal" min="0" step="any" value={form.qtyOrdered} onChange={(e) => set("qtyOrdered", e.target.value)} />
+              {piecesPreview > 0 && (
+                <span className="block text-[11px] text-gray-500 mt-1 tabular-nums">{fill(p.jobs.piecesFromMaster, { pcs: fmt(piecesPreview), g: grams })}</span>
               )}
             </Field>
-            <Field label={p.jobs.machine}>
-              <select className={inputCls} required value={form.machine} onChange={(e) => set("machine", e.target.value)}>
-                <option value="">{p.jobs.pickMachine}</option>
-                {machines.map((m) => (
-                  <option key={m.label} value={m.label}>{m.label}{m.status && m.status !== "Active" ? ` · ${m.status}` : ""}</option>
-                ))}
-              </select>
+            <Field label={p.jobs.startDate}>
+              <input className={inputCls} type="date" value={form.startDate} onChange={(e) => set("startDate", e.target.value)} />
             </Field>
             <Field label={p.jobs.due}>
-              <input className={inputCls} type="date" required min={today} value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
-            </Field>
-            <Field label={p.jobs.priority}>
-              <select className={inputCls} value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-                {options(JOB_PRIORITIES, p.jobs.priorities).map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <input className={inputCls} type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
             </Field>
           </div>
-          <Field label={p.jobs.instructions}>
-            <textarea className={`${inputCls} resize-none`} rows={2} value={form.instructions} onChange={(e) => set("instructions", e.target.value)} />
-          </Field>
-          {saveErr && <p className="text-sm text-red-600 mt-1 mb-2">{saveErr}</p>}
+          <button
+            type="button"
+            onClick={() => setShowMore((v) => !v)}
+            aria-expanded={moreOpen}
+            className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-9 px-1 mb-2 rounded-lg text-sm text-gray-600 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+          >
+            <ChevronDown size={15} className={`transition-transform ${moreOpen ? "rotate-180" : ""}`} /> {p.jobs.moreDetails}
+          </button>
+          {moreOpen && (
+            <>
+              <div className="grid sm:grid-cols-2 gap-x-4">
+                <Field label={p.jobs.codeAuto}>
+                  <input className={inputCls} value={shownCode} onChange={(e) => set("code", e.target.value)} autoComplete="off" />
+                </Field>
+                <Field label={p.jobs.priority}>
+                  <select className={inputCls} value={form.priority} onChange={(e) => set("priority", e.target.value)}>
+                    {options(JOB_PRIORITIES, p.jobs.priorities).map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <Field label={p.jobs.instructions}>
+                <textarea className={`${inputCls} resize-none`} rows={2} value={form.instructions} onChange={(e) => set("instructions", e.target.value)} />
+              </Field>
+            </>
+          )}
+          {saveErr && <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2">{saveErr}</p>}
+          {!canSave && !saving && <p className="text-xs text-gray-500 mb-2">{hint}</p>}
           <div className="flex flex-wrap items-center gap-3 mt-2">
-            <Btn type="submit" disabled={saving} className="flex-1 sm:flex-none min-h-12 sm:min-h-10">{saving ? p.common.loading : p.common.save}</Btn>
+            <Btn type="submit" disabled={!canSave} className="flex-1 sm:flex-none min-h-12 sm:min-h-10">{saving ? p.common.loading : p.common.save}</Btn>
             <Btn type="button" variant="outline" onClick={() => setOpen(false)}>{p.common.cancel}</Btn>
           </div>
         </form>
@@ -484,17 +491,23 @@ function OrderCard({ j, p, isAr, today, fmt, acting, busy, onAct }: {
 }) {
   const pct = j.qtyOrdered ? Math.min(100, (j.produced / j.qtyOrdered) * 100) : 0;
   const late = isLate(j, today);
-  const noDue = hasNoDue(j);
   const days = j.dueDate ? daysLate(j.dueDate, today) : 0;
-  const dueLine = noDue
-    ? { text: p.jobs.noDue, cls: "text-amber-700 font-medium" }
-    : !j.dueDate
+  // What the sheet and Master say about the order, never a complaint about
+  // them (2026-09-13): the machine is the order's own cell when it is a
+  // registry label, else the machine it last ran on.
+  const machine = j.machineMatched ? j.machine : j.lastMachine;
+  const qtyLine = j.qtyOrdered > 0
+    ? `${fmt(j.qtyOrderedKg)} ${p.jobs.kg} × ${j.pieceWeightG} ${p.jobs.gPerPc} = ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
+    : j.qtyOrderedKg > 0 ? `${fmt(j.qtyOrderedKg)} ${p.jobs.kg}` : "";
+  // The date is isolated when drawn: an ISO date inside an Arabic line reads
+  // backwards («26-09-2026»). Only the tail after it is text.
+  const dueLine = !j.dueDate
       ? null
       : late
-        ? { text: `${p.jobs.due}: ${j.dueDate} · ${fill(p.jobs.lateBy, { n: days })}`, cls: "text-red-600 font-medium" }
+        ? { tail: ` · ${fill(p.jobs.lateBy, { n: days })}`, cls: "text-red-600 font-medium" }
         : days === 0
-          ? { text: `${p.jobs.due}: ${j.dueDate} · ${p.jobs.dueToday}`, cls: "text-amber-700 font-medium" }
-          : { text: `${p.jobs.due}: ${j.dueDate}${j.open ? ` · ${fill(p.jobs.dueIn, { n: -days })}` : ""}`, cls: "text-gray-500" };
+          ? { tail: ` · ${p.jobs.dueToday}`, cls: "text-amber-700 font-medium" }
+          : { tail: j.open ? ` · ${fill(p.jobs.dueIn, { n: -days })}` : "", cls: "text-gray-500" };
   const actions = nextActions(j.status);
   const actionBtn = (a: OrderAction) => {
     const base = "inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 min-h-11 sm:min-h-9 px-4";
@@ -523,7 +536,7 @@ function OrderCard({ j, p, isAr, today, fmt, acting, busy, onAct }: {
   };
 
   return (
-    <div className={`bg-white border rounded-xl p-4 sm:p-5 ${late ? "border-red-200" : noDue ? "border-amber-200" : "border-gray-200"} ${acting ? "opacity-70" : ""}`}>
+    <div className={`bg-white border rounded-xl p-4 sm:p-5 ${late ? "border-red-200" : "border-gray-200"} ${acting ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           {/* flex-wrap: code + pills don't fit one phone line; wrapping beats
@@ -534,36 +547,14 @@ function OrderCard({ j, p, isAr, today, fmt, acting, busy, onAct }: {
             </Link>
             <Pill text={localize(j.status, JOB_STATUSES, p.jobs.statuses)} tone={jobTone(j.status)} />
             <Pill text={localize(j.priority, JOB_PRIORITIES, p.jobs.priorities)} tone={priorityTone(j.priority)} />
-            {j.codeDuplicate && <Pill text={p.jobs.duplicateCode} tone="amber" />}
-            {/* The name matches >1 Master row — the numbers below may belong
-                to a different product with the same name. */}
-            {j.ambiguous && <Pill text={p.jobs.ambiguous} tone="amber" />}
           </div>
           <p className="text-sm text-gray-700 mt-1.5">
-            {[j.client, j.product && j.masterMoldNumber ? `${j.product} (${p.jobs.moldNumber} ${j.masterMoldNumber})` : j.product].filter(Boolean).join(" · ") || "—"}
+            {[j.ambiguous ? j.client || j.masterClient : j.masterClient || j.client, j.product && j.masterMoldNumber ? `${j.product} (${p.jobs.moldNumber} ${j.masterMoldNumber})` : j.product].filter(Boolean).join(" · ") || "—"}
           </p>
-          <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            <span>{p.jobs.machine}: {j.machine || "—"}</span>
-            {j.machine && !j.machineMatched && (
-              <span className="inline-flex items-center rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[11px] text-amber-700" title={p.jobs.machineUnmatchedNote}>
-                {p.jobs.machineUnmatched}
-              </span>
-            )}
-          </p>
+          {machine && <p className="text-xs text-gray-500 mt-0.5">{p.jobs.machine}: <bdi dir="ltr">{machine}</bdi></p>}
           {/* Shows the kg→pieces working, so the number is never a black box. */}
-          <p className={`text-[11px] mt-0.5 tabular-nums ${j.qtyUnreadable ? "text-amber-700" : "text-gray-400"}`}>
-            {j.qtyUnreadable
-              ? `${p.jobs.qtyUnreadable} — ${fill(p.jobs.qtyUnreadableNote, { raw: j.qtyRaw })}`
-              : !j.linked
-                ? p.jobs.notInMaster
-                : j.qtyOrdered > 0
-                  ? `${fmt(j.qtyOrderedKg)} ${p.jobs.kg} × ${j.pieceWeightG} ${p.jobs.gPerPc} = ${fmt(j.qtyOrdered)} ${p.jobs.pcs}`
-                  : p.jobs.noWeight}
-          </p>
-          {j.materialIssuedUnreadable && (
-            <p className="text-[11px] text-amber-700 mt-0.5">{fill(p.jobs.materialUnreadable, { raw: j.materialIssued })}</p>
-          )}
-          {dueLine && <p className={`text-xs mt-1 ${dueLine.cls}`}>{dueLine.text}</p>}
+          {qtyLine && <p className="text-[11px] text-gray-400 mt-0.5 tabular-nums">{qtyLine}</p>}
+          {dueLine && <p className={`text-xs mt-1 ${dueLine.cls}`}>{p.jobs.due}: <bdi dir="ltr">{j.dueDate}</bdi>{dueLine.tail}</p>}
         </div>
         <Link href={`/dashboard/jobs/${j.id}`} className="shrink-0 min-w-11 min-h-11 -me-2 inline-flex items-center justify-center text-gray-300 hover:text-gray-600 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40" aria-label={p.jobs.detail}>
           <ChevronRight size={18} className={isAr ? "-scale-x-100" : ""} />

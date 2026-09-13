@@ -289,3 +289,41 @@ export function statusAfter(action: OrderAction): string {
     case "complete": return "Completed";
   }
 }
+
+/* ------------------------------ new orders -------------------------------- */
+
+/**
+ * The code a new order gets when nobody types one (2026-09-13, owner: "only
+ * pick the product and how much is required and the due date and the start
+ * date"). The next number after the highest «Job n» with up to four digits,
+ * so the floor's sequence carries on (Job 045 … Job 0478 → Job 479); a longer
+ * number («Job-07845») is a customer's reference, not the sequence. Never a
+ * code the tab already holds.
+ */
+export function suggestJobCode(codes: readonly (string | undefined | null)[]): string {
+  const taken = new Set(codes.map((c) => codeKey(c)).filter(Boolean));
+  let max = 0;
+  for (const c of codes) {
+    const m = latinDigits(String(c ?? "")).trim().match(/^job[\s\-_]*(\d{1,4})$/i);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  for (let n = max + 1; ; n++) {
+    const code = `Job ${String(n).padStart(3, "0")}`;
+    if (!taken.has(codeKey(code))) return code;
+  }
+}
+
+/**
+ * The registry label for a bare tonnage («الرئيسي»!L holds «138», «280») —
+ * only when exactly ONE machine has that tonnage. PQ 2 and PQ 3 are both
+ * 280 t, so «280» names no machine and gives "": nothing is guessed.
+ */
+export function registryLabelForTonnage(tonnage: string | undefined | null, registryLabels: readonly string[]): string {
+  const t = latinDigits(String(tonnage ?? "")).trim();
+  if (!/^\d+$/.test(t)) return "";
+  const hits = registryLabels.filter((l) => {
+    const m = latinDigits(l).match(/(\d+)\s*$/);
+    return !!m && m[1] === t;
+  });
+  return hits.length === 1 ? hits[0] : "";
+}

@@ -46,6 +46,59 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-13) — jobs: the product from «الرئيسي», four fields, no warnings
+
+Owner: "only pick the product and how much is required and the due date and the start
+date", "no errors to be facing the one using the software". Full story, the sheet cells
+fixed first and the numbers after: `../CHANGES-2026-09-13-jobs.md`.
+
+- **`components/dashboard/master-product-picker.tsx`** — the ONLY way the jobs pages take
+  a product: Arabic-folded search over Master's name/client/mould number, tap to pick, a
+  card with Master's data. Used by the new-order form and the job page's edit form. Not
+  wrapped in `<Field>` (a `<label>` around a search box and a list of buttons sends every
+  tap to the first control).
+- **`POST /api/jobs`** needs product + kilograms + due date (start date optional, `bad_start`
+  if not ISO). The page sends `masterRow` (the tapped Master row) and the server resolves it
+  with **`masterRowForPick()`** (lib/master-lookup.ts): the tapped twin while it still holds
+  the name, else the one row with that name, else refuse — never a guess between two
+  same-name rows. Master supplies client and mould number; the machine only via
+  `registryLabelForTonnage()` (a tonnage shared by two presses names none → blank).
+  `missing_machine` is gone; a machine that IS sent must still be a registry label.
+- ⚠ **The code and the at-least-once bridge.** The page fills the code in
+  (`suggestJobCode()`, the next «Job n» ≤4 digits) and PINS it on the first save attempt,
+  sending `codeAuto: true` while the person has not typed one. On the server a taken code
+  whose row has the same product + kilograms + due date is a **replay** of an order that
+  already landed → `{ok:true, replay:true}`, nothing written; a taken AUTO code (a colleague
+  got there first) is replaced by the next free one; a taken TYPED code is 409
+  `duplicate_code`. A blank code from another caller still gets `suggestJobCode()` — but no
+  page sends one, because a blank code is the one shape a retry would write twice.
+- **`PATCH /api/jobs/[id]`** edits product (with `masterRow`, resolved the same way; writes
+  that row's client, mould number and machine as one unit — machine blank when the tonnage
+  names no single press), qty, start/due, status, priority, material issued, masterbatch,
+  instructions, notes. **Code, client, mould code and machine are no longer editable**, and
+  the `body.master` edit-Master-standard branch is deleted — Master is edited in the sheet
+  or on `/dashboard/molds`.
+- **The cards flag nothing**: `codeDuplicate`, `ambiguous`, `machineMatched`,
+  `qtyUnreadable`, `materialIssuedUnreadable` are still computed by `loadJobs()` (the
+  stock page uses some) but the jobs pages no longer render them. `loadJobs()` adds
+  `masterClient` (shown instead of the order's client cell — unless the name is
+  `ambiguous`, then the order's own client wins) and `lastMachine` (the latest credited
+  shift's machine, shown when the order's machine is not a registry label; «سجّل تشغيلة»
+  starts on it too).
+- ⚠ **Orders count production by product NAME only** (`matches()` in lib/jobs.ts). It used
+  to accept the order's «كود الاسطمبة» as a second key; new orders now carry MASTER's
+  mould number there and numbers repeat across customers, so that key would count another
+  customer's shifts. No «الإنتاج» row carries a mould code today (checked 2026-09-13).
+- **No dead ends, no browser bubbles:** both forms are `noValidate` (the grey line under
+  the form names what is missing); Enter in the picker's search never submits; a Master
+  read that fails shows a retry and resets `listsStarted`; the one-tap buttons skip
+  `expect` for an order with no code.
+- **Bidi:** machine labels and ISO dates are wrapped in `<bdi dir="ltr">` on both jobs
+  pages — inside an Arabic line «PQ 6 — 220» rendered «220 — PQ 6» and dates reversed.
+- Progress rule unchanged (shift log from the start date, owner's choice 2026-09-13).
+- Reviewed before shipping by a read-only workflow (28 agents): 20 problems confirmed and
+  fixed, 5 refuted. `npm test` 328.
+
 ## Recently landed (2026-09-09, evening) — "the website is now very slow": the region-shared copy
 
 > ⚠ **The first deploy of this (7ae0856) took every sheet-backed route on production
@@ -121,7 +174,8 @@ problems: 401 machine-hours of «لا يوجد أمر شغل», and no reserved 
   `PATCH /api/jobs/[id]` with `expect: {code}` — 409 `row_changed` on a fresh-read
   mismatch, the same shape as the issues route. Every target is one of «أوامر العمل»!K's
   four values.
-- **Four live defects are refused on write and flagged on read:** a duplicated code
+- **Four live defects were refused on write and flagged on read** *(the flags and
+  `missing_machine` are gone since 2026-09-13 — see that section)*: a duplicated code
   (`Pro/tec 01`, rows 15+16 — banner + pill, POST 409 `duplicate_code` on a fresh read);
   a machine that is not a registry label (all 10 rows: «ماكينة 100», «220», «280» —
   amber «غير مطابق للسجل», POST/PATCH `bad_machine`; **the value written is the
@@ -351,7 +405,7 @@ button sits on the running card, not in the start flow.
   pile on the floor page; day-aware counter, measured stop. Details in the Downtime
   section below.
 - **Jobs are fully editable from the site** (`b5eb2f8`) — edit modal for every
-  «أوامر العمل» column + an edit-Master-standard modal; Master rows re-located by product
+  «أوامر العمل» column + an edit-Master-standard modal (removed 2026-09-13); Master rows re-located by product
   NAME on a fresh read, raw cell text round-tripped so «4+4» survives.
 - **Site-wide UI polish** (`ffbfea8`, 35 files, presentation only). Rollback tag
   **`before-redesign`** is pushed. The marketing dark ground is a `.marketing-dark`
