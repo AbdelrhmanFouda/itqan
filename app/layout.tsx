@@ -17,7 +17,7 @@ const META = {
     title: "Itqan — Industrial Manufacturing",
     description:
       "Plastic injection molding, fan counterweights, and CNC mold manufacturing in Egypt.",
-    ogTitle: "Itqan إتقان — Plastic Injection Molding & CNC Mold Making",
+    ogTitle: "Itqan · إتقان — Plastic Injection Molding & CNC Mold Making",
     ogDescription:
       "Plastic injection molding, fan counterweights and CNC mold making in Egypt — مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC.",
     locale: "en_US",
@@ -26,7 +26,7 @@ const META = {
     title: "إتقان — حقن بلاستيك وتصنيع اسطمبات",
     description:
       "مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC.",
-    ogTitle: "إتقان Itqan — حقن بلاستيك وتصنيع اسطمبات",
+    ogTitle: "إتقان · Itqan — حقن بلاستيك وتصنيع اسطمبات",
     ogDescription:
       "مصنع مصري لحقن البلاستيك وأثقال المراوح وتصنيع الاسطمبات CNC — Plastic injection molding, fan counterweights and CNC mold making in Egypt.",
     locale: "ar_EG",
@@ -48,17 +48,31 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: m.title, template: "%s — إتقان Itqan" },
     description: m.description,
     // WhatsApp is the distribution channel here — without these a shared link
-    // renders with no preview card at all. The image comes from
-    // app/opengraph-image.tsx (generated, brand-true, no stock photos).
+    // renders with no preview card at all. The image and icons are the brand
+    // files from _shared/brand, copied into public/ (2026-09-15; replaced the
+    // generated app/opengraph-image.tsx, which could not render Arabic).
     openGraph: {
       title: m.ogTitle,
       description: m.ogDescription,
       url: "/",
-      siteName: "Itqan إتقان",
+      siteName: "Itqan · إتقان",
       type: "website",
       locale: m.locale,
+      images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Itqan · إتقان" }],
     },
-    twitter: { card: "summary_large_image" },
+    twitter: {
+      card: "summary_large_image",
+      title: m.ogTitle,
+      description: m.ogDescription,
+      images: ["/og-image.png"],
+    },
+    icons: {
+      icon: [
+        { url: "/itqan-favicon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/itqan-favicon-16.png", sizes: "16x16", type: "image/png" },
+      ],
+      apple: "/itqan-avatar-192.png",
+    },
   };
 }
 

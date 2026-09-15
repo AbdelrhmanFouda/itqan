@@ -4,8 +4,12 @@ import { t } from "@/lib/i18n";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { fadeInUp, staggerContainer } from "@/lib/animations";
-import { Send, CheckCircle } from "lucide-react";
+import { Send, CheckCircle, MessageCircle } from "lucide-react";
 import ContactChannels from "@/components/ContactChannels";
+import ContactDetails from "@/components/ContactDetails";
+import { captureAttribution } from "@/lib/attribution";
+import { trackConversion } from "@/lib/ads";
+import { WHATSAPP_URL } from "@/lib/company";
 
 export default function Contact() {
   const { lang } = useLang();
@@ -39,24 +43,18 @@ export default function Contact() {
       setLoading(false);
       return;
     }
-    // Attribution: utm_* + referrer, captured at submit. Must exist BEFORE any
-    // ad money is spent — it cannot be reconstructed retrospectively.
-    try {
-      const q = new URLSearchParams(window.location.search);
-      const parts: string[] = [];
-      for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]) {
-        const v = q.get(k);
-        if (v) parts.push(`${k}=${v}`);
-      }
-      if (document.referrer) parts.push(`ref=${document.referrer}`);
-      data.source = parts.join("&").slice(0, 500);
-    } catch { /* attribution must never block the enquiry itself */ }
+    // Attribution from the FIRST landing of the session (lib/attribution.ts):
+    // source ∈ facebook/google/whatsapp/referral/direct + the raw markers.
+    const attribution = captureAttribution();
+    if (attribution) Object.assign(data, attribution);
+    else data.source = "direct";
     const res = await fetch("/api/contact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }).catch(() => null);
     if (res && res.ok) {
+      trackConversion("form");
       setSent(true);
     } else {
       const j = res ? ((await res.json().catch(() => null)) as { reason?: string } | null) : null;
@@ -88,10 +86,11 @@ export default function Contact() {
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
           <p className="text-gray-500">{tr.contact.subtitle}</p>
           {/* Phone-first channels above the form — most buyers here call or
-              WhatsApp rather than type. Hidden until the env carries a number. */}
+              WhatsApp rather than type. */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <ContactChannels size="hero" />
           </div>
+          <ContactDetails />
         </motion.div>
 
         {sent ? (
@@ -155,6 +154,12 @@ export default function Contact() {
                 />
               </div>
             </motion.div>
+            {/* Honeypot: invisible to people, filled by form-spamming bots. The
+                server accepts such a POST silently and stores nothing. */}
+            <div aria-hidden="true" className="absolute -start-[10000px] w-px h-px overflow-hidden">
+              <label htmlFor="contact-website">Website</label>
+              <input id="contact-website" name="website" type="text" tabIndex={-1} autoComplete="off" />
+            </div>
             {needContact && (
               <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-300 text-sm">
                 {tr.contact.needContact}
@@ -184,7 +189,17 @@ export default function Contact() {
             </motion.div>
             {failed && (
               <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300 text-sm">
-                {tr.contact.failed}
+                <p>{tr.contact.failed}</p>
+                <a
+                  href={WHATSAPP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => trackConversion("whatsapp")}
+                  className="mt-3 inline-flex items-center gap-2 min-h-11 px-4 rounded-lg bg-green-600 hover:bg-green-500 text-white font-medium"
+                >
+                  <MessageCircle size={16} />
+                  {tr.contact.failedWhatsApp}
+                </a>
               </div>
             )}
             <motion.div variants={fadeInUp}>

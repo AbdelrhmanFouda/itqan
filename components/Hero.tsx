@@ -19,6 +19,16 @@ export default function Hero() {
       .catch(() => {});
   }, []);
 
+  // The showcase answers zeros when the sheet read fails — "0 Clients" on an
+  // ad landing page is worse than no strip. Each stat shows only when > 0.
+  const shown = stats
+    ? [
+        { v: Number(stats.molds), l: isAr ? "اسطمبة" : "Molds" },
+        { v: Number(stats.machines), l: isAr ? "ماكينة" : "Machines" },
+        { v: Number(stats.clients), l: isAr ? "عميل" : "Clients" },
+      ].filter((s) => s.v > 0)
+    : [];
+
   return (
     <section
       dir={isAr ? "rtl" : "ltr"}
@@ -98,18 +108,14 @@ export default function Hero() {
               </a>
             </motion.div>
 
-            {stats && (
+            {shown.length > 0 && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1, delay: 0.6 }}
                 className="flex flex-wrap gap-6 sm:gap-8 mt-12 pt-8 border-t border-white/5"
               >
-                {[
-                  { v: stats.molds, l: isAr ? "اسطمبة" : "Molds" },
-                  { v: stats.machines, l: isAr ? "ماكينة" : "Machines" },
-                  { v: stats.clients, l: isAr ? "عميل" : "Clients" },
-                ].map((s) => (
+                {shown.map((s) => (
                   <div key={s.l}>
                     <div className="text-2xl font-bold text-white tabular-nums">{fmtNum(s.v, isAr)}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{s.l}</div>

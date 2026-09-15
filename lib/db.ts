@@ -152,6 +152,12 @@ export async function deleteReport(id: string) {
 /* -------------------------- Contact inquiries ----------------------- */
 
 export type InquiryInput = {
+  // Attribution (2026-09-15) — see lib/attribution.ts. `source` is the fixed vocabulary.
+  utm_source?: string;
+  utm_campaign?: string;
+  gclid?: string;
+  fbclid?: string;
+  landing_path?: string;
   name?: string;
   company?: string;
   phone?: string;
@@ -173,6 +179,11 @@ export async function addInquiry(input: InquiryInput) {
     inquiryType: input.inquiry_type ?? "",
     message: input.message ?? "",
     source: input.source ?? "",
+    utmSource: input.utm_source ?? "",
+    utmCampaign: input.utm_campaign ?? "",
+    gclid: input.gclid ?? "",
+    fbclid: input.fbclid ?? "",
+    landingPath: input.landing_path ?? "",
     createdAt: Date.now(),
   });
   return { ok: true };

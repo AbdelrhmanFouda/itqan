@@ -45,6 +45,17 @@ export const t = {
     about: {
       title: "About Itqan",
       body: "Itqan is a contract-based industrial manufacturer based in Egypt. We specialize in plastic injection molding and fan counterweight production, serving the household electrical, automotive, and general industrial sectors. Our in-house CNC mold capability gives clients a single point of contact from tooling to production.",
+      // Verified figures only (owner, 2026-09-15). Never a cycle time, a
+      // monthly capacity or a certification — none are claimed.
+      facts: [
+        { v: "14", l: "injection machines" },
+        { v: "100–550 t", l: "clamping force" },
+        { v: "1–88", l: "cavities per mould" },
+        { v: "~1 g – 1.45 kg", l: "part weight" },
+        { v: "426+", l: "products made" },
+        { v: "1.5M+", l: "pieces produced" },
+        { v: "2005", l: "founded" },
+      ],
     },
     team: {
       title: "Our Team",
@@ -77,11 +88,20 @@ export const t = {
       send: "Send Message",
       sent: "Message sent! We'll be in touch.",
       failed: "Your message was NOT sent — please try again, or contact us directly.",
+      failedWhatsApp: "Message us on WhatsApp",
+      details: {
+        phones: "Phone & WhatsApp",
+        email: "Email",
+        address: "6th of October City (2), Giza",
+        map: "Open in Google Maps",
+        hoursTitle: "Working hours",
+        hours: ["Sat – Wed: 09:00 – 17:00", "Thu: until 15:30", "Fri: closed"],
+      },
       needContact: "Please add a phone number or an email so we can get back to you.",
     },
     footer: {
       rights: "All rights reserved.",
-      location: "Egypt",
+      location: "Giza, Egypt",
     },
     dashboard: {
       machines: "Machines",
@@ -165,6 +185,15 @@ export const t = {
     about: {
       title: "عن إتقان",
       body: "إتقان شركة تصنيع صناعي بالعقود مقرها مصر. متخصصون في قولبة البلاستيك بالحقن وإنتاج الأثقال الموازنة للمراوح، نخدم قطاعات الأجهزة الكهربائية المنزلية والسيارات والصناعة العامة. قدرتنا على تصنيع القوالب داخلياً تجعلنا نقطة اتصال واحدة من العدة حتى الإنتاج.",
+      facts: [
+        { v: "14", l: "ماكينة حقن" },
+        { v: "100–550 طن", l: "قوة الغلق" },
+        { v: "1–88", l: "تجويف في الاسطمبة" },
+        { v: "من 1 جم إلى 1.45 كجم", l: "وزن القطعة" },
+        { v: "+426", l: "منتج" },
+        { v: "+1.5 مليون", l: "قطعة منتجة" },
+        { v: "2005", l: "سنة التأسيس" },
+      ],
     },
     team: {
       title: "فريقنا",
@@ -197,11 +226,20 @@ export const t = {
       send: "إرسال الرسالة",
       sent: "تم الإرسال! سنتواصل معك قريباً.",
       failed: "لم يتم إرسال رسالتك — حاول مرة أخرى، أو تواصل معنا مباشرة.",
+      failedWhatsApp: "راسلنا على واتساب",
+      details: {
+        phones: "الهاتف وواتساب",
+        email: "البريد الإلكتروني",
+        address: "مدينة 6 أكتوبر (2)، الجيزة",
+        map: "افتح في خرائط جوجل",
+        hoursTitle: "مواعيد العمل",
+        hours: ["السبت – الأربعاء: 09:00 – 17:00", "الخميس: حتى 15:30", "الجمعة: مغلق"],
+      },
       needContact: "أدخل رقم هاتف أو بريداً إلكترونياً حتى نتمكن من الرد عليك.",
     },
     footer: {
       rights: "جميع الحقوق محفوظة.",
-      location: "مصر",
+      location: "الجيزة، مصر",
     },
     dashboard: {
       machines: "الماكينات",

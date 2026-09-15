@@ -129,6 +129,15 @@ export default function About() {
             </p>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-6">{tr.about.title}</h2>
             <p className="text-gray-400 leading-relaxed text-lg">{tr.about.body}</p>
+            <dl className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {tr.about.facts.map((f) => (
+                <div key={f.l} className="rounded-xl border border-white/8 bg-gray-950/50 px-4 py-3">
+                  <dt className="sr-only">{f.l}</dt>
+                  <dd className="text-lg font-bold text-white tabular-nums"><bdi>{f.v}</bdi></dd>
+                  <dd className="text-xs text-gray-500 mt-0.5">{f.l}</dd>
+                </div>
+              ))}
+            </dl>
           </motion.div>
         </div>
       </div>

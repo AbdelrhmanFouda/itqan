@@ -7,10 +7,15 @@ import Clients from "@/components/Clients";
 import Tools from "@/components/Tools";
 import Contact from "@/components/Contact";
 import Footer from "@/components/Footer";
+import StickyContactBar from "@/components/StickyContactBar";
+import PublicTracking from "@/components/PublicTracking";
 
 export default function Home() {
   return (
-    <div className="marketing-dark">
+    // Bottom padding on phones = the sticky WhatsApp/call bar's height, so it
+    // never covers the footer.
+    <div className="marketing-dark pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
+      <PublicTracking />
       <Navbar />
       <main className="pt-16">
         <Hero />
@@ -25,6 +30,7 @@ export default function Home() {
         <Contact />
       </main>
       <Footer />
+      <StickyContactBar />
     </div>
   );
 }
