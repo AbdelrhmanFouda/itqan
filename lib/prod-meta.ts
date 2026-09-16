@@ -211,12 +211,41 @@ export function normalizeArabic(s: string | undefined): string {
     .toLowerCase();
 }
 
+/**
+ * Other wordings the crew has actually typed into «سبب التوقف», read as the key
+ * they mean. NOT spellings — `normalizeArabic` already folds alef, ya and
+ * ta-marbuta; these are different WORDS for the same thing, which no fold can
+ * bring together.
+ *
+ * Keep this list SHORT and date every entry. An unknown reason is meant to show
+ * up in the Pareto under its own name (see `downtimeReasonFromSheet` below) —
+ * that is how a missing reason gets discovered — and every alias silently
+ * removes one such signal. An entry earns its place only when somebody has
+ * confirmed the two wordings mean one thing.
+ *
+ * READ side only: `downtimeReasonAr` still writes the canonical wording, which
+ * is what «التوقفات»!C's validated dropdown accepts.
+ */
+const REASON_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  // 2026-09-16, owner's word: «توفر» and «وجود» are the same absence of
+  // material. His older wording stood in the sheet's dropdown until that day
+  // (4 rows, 1,245 min, none typed after 2026-09-01) and read as a reason of
+  // its own beside the button's — one cause, two bars in the Pareto.
+  ["عدم توفر خامة", "No material"],
+];
+
 const REASON_BY_TEXT: Map<string, string> = (() => {
   const m = new Map<string, string>();
   for (const r of ALL_DOWNTIME_REASONS) {
     m.set(normalizeArabic(r.ar), r.key);
     m.set(normalizeArabic(r.key), r.key); // an English key in the cell resolves too
     m.set(normalizeArabic(r.en), r.key);  // …as does the English label
+  }
+  // Aliases go in last and may never SHADOW a reason's own wording — a typo in
+  // the list above would otherwise silently re-point a live reason's minutes.
+  for (const [text, key] of REASON_ALIASES) {
+    const folded = normalizeArabic(text);
+    if (!m.has(folded)) m.set(folded, key);
   }
   return m;
 })();
@@ -229,7 +258,8 @@ const REASON_BY_TEXT: Map<string, string> = (() => {
  * in the Pareto under its own name so it can be seen and either added to the
  * list or corrected in the sheet; folding it into «أخرى» hides it. Unknown keys
  * already count as unplanned (`isPlannedDowntime`), so this cannot flatter the
- * avoidable-downtime figure either.
+ * avoidable-downtime figure either. The one exception is `REASON_ALIASES` above:
+ * a wording somebody has confirmed means an existing reason, folded on purpose.
  *
  * A blank cell returns "" — the caller decides what an unrecorded reason means.
  * It must never become a 0 or an invented value.

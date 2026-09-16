@@ -437,11 +437,26 @@ green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تر�
 - **No real product names on the landing page** (`90ab433`) — «أعمالنا» section removed.
 - **Three new downtime reasons** (`032f18f`) — «عدم وجود خامة» (new key `No material`),
   «لا يوجد أمر شغل» (`No order` revived from the retired list), «كسر المصب»
-  (`Sprue broken`). Eleven buttons, «أخرى» last. **The sheet dropdown holds all three since
-  2026-09-16** («التوقفات»!C2:C2023, edited in the Sheets UI — the bridge cannot set
-  validation). ⚠ It also holds «عدم توفر خامة», the owner's older wording for the same
-  thing (4 rows, all before 2026-09-01); `downtimeReasonFromSheet` returns it as itself,
-  so it groups as its own reason until somebody decides which wording wins.
+  (`Sprue broken`). Eleven buttons, «أخرى» last. **The sheet dropdown holds exactly those
+  eleven since 2026-09-16** («التوقفات»!C2:C2023, edited in the Sheets UI — the bridge
+  cannot set data validation, and neither can the Sheets API code in this repo).
+- **One cause had two wordings — 2026-09-16, owner's word.** The sheet's dropdown also
+  offered «عدم توفر خامة», his older phrase for the absence the button calls
+  «عدم وجود خامة». `normalizeArabic` folds spelling, not vocabulary, so the two read as
+  two reasons: 4 rows / 1,245 min stood as their own Pareto bar, unplanned (right) but not
+  organisational (wrong). The wording is **deleted from the dropdown** and **aliased on
+  READ** — `REASON_ALIASES` in `lib/prod-meta.ts`, folded into `REASON_BY_TEXT` after the
+  canonical entries and never allowed to shadow one. Measured on the live tab through the
+  app's own rule: 11 reason buckets → 10, `No material` 23,454 → **24,699 min**,
+  organisational 99,098 → **100,343** (+896 in August, +349 in September); planned and
+  unplanned move by nothing, and no Pareto bar changes rank in either month.
+  ⚠ **Keep that table short and date every entry.** An unknown reason showing up under its
+  own name is how a missing reason gets discovered; each alias removes one such signal.
+  ⚠ Read/write asymmetry is deliberate: the site READS the old wording and WRITES the
+  canonical one — which is also the only value «التوقفات»!C ("Reject the input") still
+  accepts, now that the old one is out of the dropdown. No write path reaches those four
+  rows today (`/api/downtime/reclassify` only offers rows whose reason is «أخرى»), so the
+  cells keep the wording the crew typed; a future path that rewrites one would re-word it.
 - **The workbook was re-surveyed 2026-08-27** and several claims in this file dated 9 Aug
   are corrected in place below, each marked *(REVISED 2026-08-27)*. The biggest: «الإنتاج»
   now carries native سستم/هالك/«حالة السجل».

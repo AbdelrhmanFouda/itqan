@@ -192,3 +192,57 @@ test("normalizeArabic folds only spelling, never two different reasons together"
   const folded = ALL_DOWNTIME_REASONS.map((r) => normalizeArabic(r.ar));
   assert.equal(new Set(folded).size, folded.length, "two reasons collapsed onto one key");
 });
+
+/* ---- the other wording for «No material» (owner's word, 2026-09-16) ------- */
+
+const NO_MATERIAL_ALIAS = "عدم توفر خامة";
+
+test("«عدم توفر خامة» reads as the No material reason, not as a bar of its own", () => {
+  // Two words for one absence: the site's button writes «عدم وجود خامة», the
+  // sheet's older dropdown offered «عدم توفر خامة», and 4 rows carry it. Read
+  // as itself it was unplanned (right) but NOT organisational (wrong), so the
+  // minutes sat outside the avoidable line and made a second Pareto bar.
+  assert.equal(downtimeReasonFromSheet(NO_MATERIAL_ALIAS), "No material");
+  assert.equal(isPlannedDowntime(downtimeReasonFromSheet(NO_MATERIAL_ALIAS)), false);
+  assert.equal(isOrganisationalDowntime(downtimeReasonFromSheet(NO_MATERIAL_ALIAS)), true);
+  // An alias goes through the same fold as every reason — it is not a literal
+  // string match, so the row a person retyped still resolves.
+  assert.equal(downtimeReasonFromSheet("عدم توفر خامه"), "No material", "ه for ة");
+  assert.equal(downtimeReasonFromSheet("عدم تَوفر خامة"), "No material", "harakat");
+  assert.equal(downtimeReasonFromSheet("  عدم   توفر  خامة	"), "No material", "spacing + tab");
+});
+
+test("an alias is read-only — the floor is never offered it and nothing writes it", () => {
+  // The write direction is unchanged, and it has to be: «التوقفات»!C rejects a
+  // value outside its dropdown, and the alias was removed from that dropdown.
+  assert.equal(downtimeReasonAr("No material"), "عدم وجود خامة");
+  assert.notEqual(downtimeReasonAr(downtimeReasonFromSheet(NO_MATERIAL_ALIAS)), NO_MATERIAL_ALIAS);
+  // Not a button…
+  assert.equal(DOWNTIME_CAPTURE_REASONS.length, 11, "an alias must never grow the flow");
+  for (const r of DOWNTIME_CAPTURE_REASONS) {
+    assert.notEqual(normalizeArabic(r.ar), normalizeArabic(NO_MATERIAL_ALIAS));
+  }
+  // …and not a row either: a second row with the same key would make the label
+  // lookups (`find`) order-dependent.
+  const keys = ALL_DOWNTIME_REASONS.map((r) => r.key);
+  assert.equal(new Set(keys).size, keys.length, "an alias was added as a reason row");
+  assert.ok(!DOWNTIME_REASONS.includes(NO_MATERIAL_ALIAS));
+});
+
+test("an alias never shadows a reason's own wording", () => {
+  // The lookup adds aliases last and refuses to overwrite, so a typo in the
+  // alias list cannot silently re-point a live reason's minutes. Pin the
+  // premise: no alias may fold onto any reason's Arabic.
+  for (const r of ALL_DOWNTIME_REASONS) {
+    assert.notEqual(normalizeArabic(r.ar), normalizeArabic(NO_MATERIAL_ALIAS),
+      `«${r.ar}» folds onto an alias — the alias would be shadowing it`);
+  }
+});
+
+test("everything else unrecognised still keeps its own name", () => {
+  // The alias is one confirmed wording, not a rule about «عدم توفر …». A reason
+  // nobody has defined must stay visible in the Pareto so it gets fixed.
+  assert.equal(downtimeReasonFromSheet("عدم توفر عامل"), "عدم توفر عامل");
+  assert.equal(downtimeReasonFromSheet("كهرباء"), "كهرباء");
+  assert.equal(isPlannedDowntime(downtimeReasonFromSheet("عدم توفر عامل")), false);
+});
