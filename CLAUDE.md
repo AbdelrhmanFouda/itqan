@@ -437,8 +437,11 @@ green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تر�
 - **No real product names on the landing page** (`90ab433`) — «أعمالنا» section removed.
 - **Three new downtime reasons** (`032f18f`) — «عدم وجود خامة» (new key `No material`),
   «لا يوجد أمر شغل» (`No order` revived from the retired list), «كسر المصب»
-  (`Sprue broken`). Eleven buttons, «أخرى» last. The sheet dropdown still needs the three
-  values (owner).
+  (`Sprue broken`). Eleven buttons, «أخرى» last. **The sheet dropdown holds all three since
+  2026-09-16** («التوقفات»!C2:C2023, edited in the Sheets UI — the bridge cannot set
+  validation). ⚠ It also holds «عدم توفر خامة», the owner's older wording for the same
+  thing (4 rows, all before 2026-09-01); `downtimeReasonFromSheet` returns it as itself,
+  so it groups as its own reason until somebody decides which wording wins.
 - **The workbook was re-surveyed 2026-08-27** and several claims in this file dated 9 Aug
   are corrected in place below, each marked *(REVISED 2026-08-27)*. The biggest: «الإنتاج»
   now carries native سستم/هالك/«حالة السجل».
