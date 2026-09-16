@@ -289,6 +289,12 @@ export const pd = {
       // start back one fixed step per press.
       backdateHint: "Started earlier?",
       backdate: "+30 min",
+      // «−30 دقيقة» — owner, 2026-09-16: the mirror, for a machine that came
+      // back before anybody tapped stop.
+      resumeHint: "Came back earlier?",
+      resumeEarly: "−30 min",
+      resumedLine: "Came back at {time} — {dur} will be recorded.",
+      undoResume: "Undo",
       noneRunning: "Every machine is running.",
       today: "Stopped today",
       todayMinutes: "Minutes lost today",
@@ -586,6 +592,10 @@ export const pd = {
       runningSince: "من",
       backdateHint: "بدأت قبل ما تسجّل؟",
       backdate: "+30 دقيقة",
+      resumeHint: "رجعت قبل ما تسجّل؟",
+      resumeEarly: "−30 دقيقة",
+      resumedLine: "رجعت تشتغل {time} — هيتسجل {dur}.",
+      undoResume: "تراجع",
       noneRunning: "كل الماكينات شغالة.",
       today: "توقفات النهاردة",
       todayMinutes: "دقائق ضايعة النهاردة",

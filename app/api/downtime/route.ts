@@ -5,6 +5,8 @@ import {
   addDowntimeEvent,
   stopDowntimeEvent,
   backdateDowntimeEvent,
+  resumeEarlyDowntimeEvent,
+  clearDowntimeResume,
   markDowntimeSynced,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
@@ -169,6 +171,32 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json(bd, { status: bd.reason === "not_found" ? 404 : 400 });
       }
       return NextResponse.json({ ok: true, event: bd.event });
+    }
+
+    /**
+     * «−30 دقيقة» — the mirror (owner, 2026-09-16: "I want the option also if
+     * he forgot to record that it started working"). Each press moves the
+     * REPORTED resume one fixed step back; the stop then records up to that
+     * moment. Same guards as the backdate: the step is fixed server-side, only
+     * an open event moves, and `planResumeEarly()` keeps a minute on the
+     * stoppage and 12 h as the ceiling. `clearResume` undoes it.
+     */
+    if (typeof b.resumeEarlyMin !== "undefined") {
+      if (b.resumeEarlyMin !== BACKDATE_STEP_MIN) {
+        return NextResponse.json({ ok: false, reason: "bad_resume" }, { status: 400 });
+      }
+      const re = await resumeEarlyDowntimeEvent(id);
+      if (!re.ok) {
+        return NextResponse.json(re, { status: re.reason === "not_found" ? 404 : 400 });
+      }
+      return NextResponse.json({ ok: true, event: re.event });
+    }
+    if (b.clearResume === true) {
+      const cr = await clearDowntimeResume(id);
+      if (!cr.ok) {
+        return NextResponse.json(cr, { status: cr.reason === "not_found" ? 404 : 400 });
+      }
+      return NextResponse.json({ ok: true, event: cr.event });
     }
 
     let res: Awaited<ReturnType<typeof stopDowntimeEvent>>;

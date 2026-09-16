@@ -9,9 +9,9 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { useVisiblePoll } from "@/components/dashboard/use-remembered";
 import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta";
-import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN } from "@/lib/downtime";
+import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN, planResumeEarly } from "@/lib/downtime";
 import { hasFullAccess } from "@/lib/roles";
-import { LOCALE_AR } from "@/lib/format";
+import { fill, LOCALE_AR } from "@/lib/format";
 
 /**
  * PHASE 2 — downtime capture, built for a phone on the factory floor.
@@ -35,6 +35,8 @@ type Event = {
   estimated?: boolean;
   /** minutes the start was pulled back with «+30 دقيقة» — see backdate() below. */
   backdatedMin?: number;
+  /** when the machine came back, reported with «−30 دقيقة» — see resumeEarly(). */
+  resumedAt?: number | null;
 };
 type Data = { open: Event[]; stale: Event[]; today: Event[]; todayDate: string };
 type OtherRow = { row: number; date: string; machine: string; minutes: number; notes: string };
@@ -51,6 +53,29 @@ const MACHINES_KEY = "itqan.downtime.machines"; // last machine list seen — se
  */
 const LAST_KEY = "itqan.downtime.last";
 type TodaySnap = { today: Event[]; todayDate: string };
+
+/**
+ * The two late-tap adjustments on a running card: «+30 دقيقة» and «−30 دقيقة».
+ * The hint sits on its own line above the step so neither ever breaks across
+ * lines on a phone — «+30» split from «دقيقة» reads like two controls.
+ */
+const ADJUST_BTN =
+  "flex min-h-11 flex-col items-start justify-center gap-0.5 rounded-xl border-2 border-amber-400 " +
+  "bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 active:bg-amber-50 disabled:opacity-40 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1";
+
+/**
+ * A reported resume, as a clock on the phone's own day. 24-hour on purpose: the
+ * duration beside it («3:31») is written the same way, and «03:52 م» next to it
+ * reads like a second duration.
+ */
+function clockAt(ms: number, isAr: boolean): string {
+  return new Date(ms).toLocaleTimeString(isAr ? LOCALE_AR : "en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
 
 /** Big enough to hit with a work glove on. */
 const TAP =
@@ -304,12 +329,33 @@ export default function DowntimePage() {
    * the button also disables at the cap so the floor never sees a refusal.
    */
   async function backdate(id: string) {
+    await adjust({ id, backdateMin: BACKDATE_STEP_MIN });
+  }
+
+  /**
+   * «−30 دقيقة» — owner's rule, 2026-09-16: the machine came back before
+   * anybody tapped stop, so each press moves the REPORTED resume one step back
+   * and the counter above freezes at what will be written. The stop then
+   * records up to that moment. «تراجع» clears it. Step, floor and 12-hour
+   * ceiling are enforced server-side (planResumeEarly); the button disables at
+   * the same bounds so the floor never sees a refusal.
+   */
+  async function resumeEarly(id: string) {
+    await adjust({ id, resumeEarlyMin: BACKDATE_STEP_MIN });
+  }
+
+  async function undoResume(id: string) {
+    await adjust({ id, clearResume: true });
+  }
+
+  /** One PATCH, one refresh of the running list — the three adjustments share it. */
+  async function adjust(body: Record<string, unknown>) {
     if (busy) return;
     setBusy(true); setFailed(false);
     const res = await authedFetch("/api/downtime", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, backdateMin: BACKDATE_STEP_MIN }),
+      body: JSON.stringify(body),
     }).catch(() => null);
     setBusy(false);
     if (!res || !res.ok) { setFailed(true); return; }
@@ -417,8 +463,25 @@ export default function DowntimePage() {
                   <div className="text-lg font-bold text-gray-900 truncate">{e.machine}</div>
                   <div className="text-sm text-red-700">
                     {reasonLabel(e.reason)} · {t.runningSince}{" "}
-                    {elapsed(e.startedAt, now, t.minutes, t.day)}
+                    {/* A reported resume freezes the counter at what the stop
+                        will write, instead of counting time the machine ran. */}
+                    {elapsed(e.startedAt, e.resumedAt || now, t.minutes, t.day)}
                   </div>
+                  {e.resumedAt ? (
+                    <div className="text-xs text-emerald-800 mt-0.5">
+                      {fill(t.resumedLine, {
+                        time: clockAt(e.resumedAt, isAr),
+                        dur: elapsed(e.startedAt, e.resumedAt, t.minutes, t.day),
+                      })}{" "}
+                      <button
+                        onClick={() => undoResume(e.id)}
+                        disabled={busy}
+                        className="inline-flex min-h-11 items-center rounded-lg px-2 underline underline-offset-2 active:bg-emerald-50 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                      >
+                        {t.undoResume}
+                      </button>
+                    </div>
+                  ) : null}
                   {/* Started on an earlier factory day — say so, so a long
                       stoppage reads as deliberate, not as a stuck counter. */}
                   {e.date !== data?.todayDate && (
@@ -426,16 +489,35 @@ export default function DowntimePage() {
                       {t.staleSince} {e.date}
                     </div>
                   )}
-                  {/* Logged late? Pull the start back one step per press — the
-                      counter above jumps, which is the feedback. Disabled at
-                      the server's cap so the floor never sees a refusal. */}
-                  <button
-                    onClick={() => backdate(e.id)}
-                    disabled={busy || (e.backdatedMin ?? 0) + BACKDATE_STEP_MIN > BACKDATE_CAP_MIN}
-                    className="mt-2 inline-flex min-h-11 items-center rounded-xl border-2 border-amber-400 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 active:bg-amber-50 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
-                  >
-                    {t.backdateHint} {t.backdate}
-                  </button>
+                  {/* Logged late in either direction: it stopped before the tap
+                      (+) or it came back before the tap (−). Each press moves
+                      one fixed step and the counter above jumps, which is the
+                      feedback. Both disable at the server's own bounds, so the
+                      floor never sees a refusal. */}
+                  <div className="mt-2 grid gap-2">
+                    <button
+                      onClick={() => backdate(e.id)}
+                      disabled={busy || (e.backdatedMin ?? 0) + BACKDATE_STEP_MIN > BACKDATE_CAP_MIN}
+                      className={ADJUST_BTN}
+                    >
+                      <span className="text-xs font-normal text-amber-900">{t.backdateHint}</span>
+                      <bdi dir="ltr" className="whitespace-nowrap">{t.backdate}</bdi>
+                    </button>
+                    <button
+                      onClick={() => resumeEarly(e.id)}
+                      disabled={
+                        busy ||
+                        !planResumeEarly(
+                          { startedAt: e.startedAt, endedAt: e.endedAt, resumedAt: e.resumedAt },
+                          now,
+                        ).ok
+                      }
+                      className={ADJUST_BTN}
+                    >
+                      <span className="text-xs font-normal text-amber-900">{t.resumeHint}</span>
+                      <bdi dir="ltr" className="whitespace-nowrap">{t.resumeEarly}</bdi>
+                    </button>
+                  </div>
                 </div>
                 <button
                   onClick={() => stop(e.id)}

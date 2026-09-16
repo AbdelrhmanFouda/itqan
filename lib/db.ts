@@ -12,7 +12,7 @@ import {
   type QuerySnapshot,
   type DocumentData,
 } from "firebase/firestore";
-import { planBackdate } from "./downtime";
+import { planBackdate, planResumeEarly } from "./downtime";
 
 /**
  * Firestore data layer for Itqan.
@@ -284,6 +284,12 @@ export type DowntimeEvent = {
    */
   backdatedMin?: number;
   /**
+   * WHEN the machine came back, reported with «−30 دقيقة» (owner, 2026-09-16)
+   * by whoever forgot to tap stop at the time. The stop records the stoppage up
+   * to this moment; null/absent means it runs to the stop tap, as before.
+   */
+  resumedAt?: number | null;
+  /**
    * Has this stoppage's row reached «التوقفات»?
    *
    * `undefined` on every pre-cutover document (those were migrated by hand and
@@ -308,6 +314,7 @@ function shapeDowntime(id: string, d: Partial<DowntimeDoc>): DowntimeEvent {
     estimated: d.estimated ?? false,
     closedBy: d.closedBy ?? "",
     backdatedMin: d.backdatedMin,
+    resumedAt: d.resumedAt ?? null,
     // Left undefined rather than defaulted: "this document predates the sheet"
     // and "this row has not landed yet" are different states and only one of
     // them should be retried.
@@ -376,11 +383,15 @@ export async function stopDowntimeEvent(
   id: string,
   opts: { endedAt?: number; estimated?: boolean; closedBy?: string } = {},
 ) {
-  const { endedAt = Date.now(), estimated = false, closedBy = "" } = opts;
+  const { estimated = false, closedBy = "" } = opts;
   const ref = doc(db, PCOL.downtime, id);
   const snap = await getDoc(ref);
   if (!snap.exists()) return { ok: false as const, reason: "not_found" };
   const d = snap.data() as DowntimeDoc;
+  // «−30 دقيقة» (2026-09-16): the machine came back before anybody tapped, and
+  // somebody said when. The stoppage ends THERE, not at the moment of the tap.
+  const reported = typeof d.resumedAt === "number" && d.resumedAt > 0 ? d.resumedAt : null;
+  const endedAt = opts.endedAt ?? reported ?? Date.now();
   if (d.endedAt != null) {
     return {
       ok: true as const,
@@ -426,4 +437,36 @@ export async function backdateDowntimeEvent(id: string) {
       backdatedMin: plan.backdatedMin,
     }),
   };
+}
+
+/**
+ * «−30 دقيقة» — report that the machine came back BEFORE anybody tapped stop
+ * (owner, 2026-09-16). Every rule lives in `planResumeEarly()` (lib/downtime.ts,
+ * pure, tested): open events only, fixed steps, at least a minute left on the
+ * stoppage, 12 h back at most. Nothing reaches the sheet here — the row still
+ * appears on stop, with the reported moment as its end.
+ */
+export async function resumeEarlyDowntimeEvent(id: string, now: number = Date.now()) {
+  const ref = doc(db, PCOL.downtime, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false as const, reason: "not_found" as const };
+  const d = snap.data() as DowntimeDoc;
+  const plan = planResumeEarly(
+    { startedAt: d.startedAt ?? 0, endedAt: d.endedAt ?? null, resumedAt: d.resumedAt ?? null },
+    now,
+  );
+  if (!plan.ok) return { ok: false as const, reason: plan.reason };
+  await updateDoc(ref, { resumedAt: plan.resumedAt });
+  return { ok: true as const, event: shapeDowntime(id, { ...d, resumedAt: plan.resumedAt }) };
+}
+
+/** Undo a reported resume — the stoppage runs to the stop tap again. */
+export async function clearDowntimeResume(id: string) {
+  const ref = doc(db, PCOL.downtime, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false as const, reason: "not_found" as const };
+  const d = snap.data() as DowntimeDoc;
+  if (d.endedAt != null) return { ok: false as const, reason: "not_open" as const };
+  await updateDoc(ref, { resumedAt: null });
+  return { ok: true as const, event: shapeDowntime(id, { ...d, resumedAt: null }) };
 }

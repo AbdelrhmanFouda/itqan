@@ -324,7 +324,7 @@ Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves
   untouched, still plain text). Numbers stay unique, so `webFindRow_` is unaffected — but
   any «إيداع» number quoted in these docs before that date is stale.
 
-## Recently landed (2026-09-08) — «+30 دقيقة»: a late-logged stoppage can pull its start back
+## Recently landed (2026-09-08 → 09-16) — «+30» / «−30 دقيقة»: the two late-tap adjustments
 
 Owner's rule from the 2026-09-07 meeting, built in another chat and shipped from this one.
 A technician who tapped START late presses «بدأت قبل ما تسجّل؟ +30 دقيقة» on the running
@@ -339,6 +339,30 @@ minutes are still computed from the stored start on stop, so the moved start flo
 «التوقفات» exactly like a timely tap. This is the one sanctioned exception to "the server
 stamps the start" — bounded, stepped, recorded. The four-tap flow itself is unchanged; the
 button sits on the running card, not in the start flow.
+
+**«−30 دقيقة» — the mirror, owner 2026-09-16:** *"I want the option also if he forgot to
+record that it started working … it has to be like a plus or minus thing."* The machine came
+back before anybody tapped stop, so «رجعت قبل ما تسجّل؟ −30 دقيقة» moves the REPORTED
+resume one step back per press, the counter above FREEZES at what the stop will write, a
+green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تراجع» clears it.
+
+- **An absolute moment, not a number of minutes.** `resumedAt` on the Firestore event
+  (`planResumeEarly()` in lib/downtime.ts, pure, 6 tests). Held as minutes, a stoppage left
+  open another hour would grow by that hour again on stop; held as a moment, what gets
+  written stays what was reported. Presses accumulate from the reported moment, so two
+  presses are one hour however long the pause between them — and a moment in the future
+  (clock skew) is pulled back from NOW.
+- **`stopDowntimeEvent()` ends the stoppage THERE**: `opts.endedAt ?? resumedAt ?? now`.
+  The row still appears in «التوقفات» only on stop, measured, `estimated: false`.
+- **Bounds, all server-side** (`PATCH /api/downtime {id, resumeEarlyMin: 30}`, anything else
+  is `bad_resume`; `{id, clearResume: true}` undoes): open events only, at least
+  `MIN_RECORDED_MIN = 1` minute of stoppage left — «التوقفات»!D is validated > 0 and
+  rounding a zero up would invent a measurement — and the same 12 h `BACKDATE_CAP_MIN`
+  ceiling. The button disables at exactly those bounds (the page calls the same pure
+  function), so the floor never sees a refusal.
+- The four-tap flow is untouched: both adjustments live on the RUNNING card, no typing, no
+  English. The reported clock is 24-hour on purpose — the duration beside it is written
+  the same way and «03:52 م» next to it reads like a second duration.
 
 ## Recently landed (2026-09-05) — Latin digits, and the sheet reader no longer waits
 

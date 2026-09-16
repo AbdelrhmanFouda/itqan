@@ -384,3 +384,43 @@ export function planBackdate(ev: {
     backdatedMin: already + BACKDATE_STEP_MIN,
   };
 }
+
+/* ------------- The machine came back before anybody tapped stop ------------ */
+
+/**
+ * «−30 دقيقة» — the mirror of «+30 دقيقة» (owner, 2026-09-16: *"I want the
+ * option also if he forgot to record that it started working … plus or minus
+ * thirty minutes"*). The press does not stop anything; it reports WHEN the
+ * machine came back, in the same fixed steps, and the stop then records the
+ * stoppage up to that moment instead of the moment somebody remembered.
+ *
+ * Why an absolute moment (`resumedAt`) and not "minutes to subtract": the
+ * machine resumed at a point in wall-clock time. Held as minutes, a stoppage
+ * left open for another hour would grow by that hour again on stop; held as a
+ * moment, what gets written stays what was reported.
+ *
+ * Bounded in code, for the same reason the backdate is:
+ *   - only an OPEN event (a written «التوقفات» row is never edited from here);
+ *   - whole steps of BACKDATE_STEP_MIN, never a duration a phone chose;
+ *   - the stoppage keeps at least MIN_RECORDED_MIN — «التوقفات»!D is validated
+ *     greater than zero, and rounding a zero up would invent a measurement;
+ *   - at most BACKDATE_CAP_MIN back from now, the same 12 h ceiling. Further
+ *     back is a stale-open review for the owner, not a late tap.
+ */
+export const MIN_RECORDED_MIN = 1;
+
+export function planResumeEarly(
+  ev: { startedAt: number; endedAt: number | null; resumedAt?: number | null },
+  now: number,
+):
+  | { ok: true; resumedAt: number }
+  | { ok: false; reason: "not_open" | "too_short" | "resume_limit" } {
+  if (ev.endedAt != null) return { ok: false, reason: "not_open" };
+  // Presses accumulate from what was already reported, not from the clock, so
+  // two presses are always exactly one hour — however long the pause between.
+  const from = ev.resumedAt && ev.resumedAt > 0 ? Math.min(ev.resumedAt, now) : now;
+  const next = from - BACKDATE_STEP_MIN * 60_000;
+  if (next - ev.startedAt < MIN_RECORDED_MIN * 60_000) return { ok: false, reason: "too_short" };
+  if (now - next > BACKDATE_CAP_MIN * 60_000) return { ok: false, reason: "resume_limit" };
+  return { ok: true, resumedAt: next };
+}
