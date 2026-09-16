@@ -125,8 +125,11 @@ await check("/sitemap.xml is an XML sitemap", async () => {
   const r = await req("/sitemap.xml");
   expect(r.status === 200 && r.text.includes("<urlset"), `HTTP ${r.status}`);
 });
-await check("/opengraph-image is an image", async () => {
-  const r = await req("/opengraph-image");
+// The share card is the brand PNG in public/ since 2026-09-15 — the generated
+// app/opengraph-image.tsx could not render Arabic and was deleted with it. This
+// check kept asking for the old route and failed on production for a day.
+await check("the share card is an image", async () => {
+  const r = await req("/og-image.png");
   expect(r.status === 200 && r.type.startsWith("image/"), `HTTP ${r.status} ${r.type}`);
 });
 
