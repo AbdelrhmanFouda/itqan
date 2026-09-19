@@ -4,7 +4,8 @@
 
 Next.js 16 (App Router) + Tailwind v4 + Framer Motion. Public marketing site plus a
 role-gated `/dashboard` for an Egyptian plastic-injection factory. **The database is a
-Google Sheet** (the crew edits it; the site reads/writes through an Apps Script bridge).
+Google Sheet** (the crew edits it; the site reads/writes it through the Google Sheets API
+as the owner — the Apps Script bridge is the fallback and the Drive path, since 2026-09-10).
 Firebase holds auth/roles and small caches (users, usage, aiReviews). Everything is
 bilingual AR/EN with RTL support.
 
@@ -45,6 +46,8 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
+`GET /api/health` (open, no dependencies) reports the build, the region and which sheet
+transport is serving: `"transport": "api"` (Sheets API) or `"bridge"` (Apps Script).
 
 ## Recently landed (2026-09-13) — jobs: the product from «الرئيسي», four fields, no warnings
 
@@ -99,6 +102,87 @@ fixed first and the numbers after: `../CHANGES-2026-09-13-jobs.md`.
 - Reviewed before shipping by a read-only workflow (28 agents): 20 problems confirmed and
   fixed, 5 refuted. `npm test` 328.
 
+## Recently landed (2026-09-10) — the Sheets API is the transport; the bridge is the fallback
+
+Owner, 2026-09-10: "is this the best way?" — no. Every read and write of the workbook went
+through the Apps Script web app: 2.5–4 s per round trip on a good day, 20–40 s in a slow
+spell, cold starts, HTML error pages under load, at-least-once writes, and a deploy step for
+every change. `a8421c6` (then `367ddae`, `c1a68e1`, `a2af51f`) talks to the same spreadsheet
+through the Sheets REST API instead: ~0.2–0.5 s a call, several tabs per call, no deploy.
+Owner steps in `../CHANGES-2026-09-10-sheets-api.md`.
+
+- **`lib/google-sheets-api.ts`** — reads are one `values:batchGet` of whole tabs
+  (`FORMATTED_VALUE`: the same display strings `getDisplayValues()` gave, so `lib/dates.ts`
+  and every parser are unchanged; rows arrive ragged, which the header mapping already
+  tolerates). A tab the workbook does not have fails the whole batch, so those are re-read
+  one by one and answer `no_tab`. Writes: `append`, `updates` (+ `expect`), `deleteRow`,
+  `createTab` — `postViaApi()` in `lib/sheets.ts` maps the bridge's payload shapes onto
+  them, so every caller is unchanged. `expect` is a `batchGet` of those cells right before
+  the write (a ~200 ms window instead of one Apps Script execution — accepted). 20 s per
+  call; the access token is minted from the refresh token and cached for its hour.
+- **Authorised as the OWNER through a refresh token he grants once.** `/api/google/connect`
+  sends him to Google's consent screen (scope `spreadsheets` + `openid email`, offline,
+  `prompt=consent`; a `state` cookie ties the callback to that browser).
+  `/api/google/callback` exchanges the code, proves the token reaches THIS workbook by
+  showing its title, and shows the refresh token ONCE, to paste into Vercel as
+  `GOOGLE_OAUTH_REFRESH_TOKEN`. Nothing is stored server-side — Vercel's environment is
+  the secret store, as for the bridge token. Both routes are open on purpose
+  (`DOCUMENTED_OPEN`): the only thing the callback can reveal is the caller's own token.
+  Env for the transport: `GOOGLE_SHEETS_ID` + `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` /
+  `_REFRESH_TOKEN`; the bridge pair stays for the fallback and for Drive. The workspace
+  blocks service-account keys, which is why the bridge existed; a user token is a
+  different mechanism. Revoking the app at myaccount.google.com puts the site back on the
+  bridge, and `/api/health` says so.
+- **Which transport answers: `sheetsApiUsable()`** — configured and not marked broken in
+  the last 5 min. An AUTH failure (`invalid_grant`, 401, 403 — the owner revoked, or the
+  token is wrong) marks it broken and the bridge carries reads AND writes; `GET /api/health`
+  reports `transport: "api" | "bridge"` and `sheetsApi: {configured, broken}`. A NON-auth
+  failure (network, 5xx, a 429) is an error answer for every tab in that batch and does
+  NOT fall back to the bridge — deliberately: the two would hide each other's outages —
+  so `fetchSheetUncached` waits 1.5 s, asks once more, logs `[sheets] every attempt
+  failed`, and `fetchSheet` serves the last-good copy. API reads are NOT in the bridge's
+  serial `queued()`; the 8 ms micro-batch still folds a page's tabs into one call.
+- ⚠ **Writes never cross transports after the fact.** An auth failure is thrown BEFORE
+  anything reaches the workbook, so that write is handed to the bridge safely; any other
+  failure is reported as `sheets_api:<reason>` and never retried elsewhere — a timeout
+  after the request reached Google may have written, so "a failed-looking write is not
+  evidence that nothing happened" (Write semantics, item 3) still holds here. After a
+  successful `updates`/`append`, `applyWriteToCopy()` patches this instance's copy (never
+  for `deleteRow` — rows shift) so the reload after a save is warm; the region-shared copy
+  is still dropped.
+- ⚠ **The API enforces NO data validation, on updates OR appends.** The bridge's `setValue`
+  threw on a value outside a dropdown (the `cell_rejected` rollback exists for that);
+  through the API the value simply lands. The site's own vocabularies — `jobStatusToSheet`'s
+  four values, registry labels, `DOWNTIME_CAPTURE_REASONS` — are the only guard, as they
+  already were for appends. And **appends are `USER_ENTERED` since `a2af51f`** (RAW rows
+  landed as TEXT: `SUM` over «إنتاج سليم» and every date filter skipped each row the site
+  wrote), so unlike `appendRow` an appended date string becomes a real date rendered in
+  the column's format (still fine through `normalizeDate()`), a number-looking string
+  becomes a number (a leading zero is lost), and a leading `=` starts a formula. Nothing
+  the site appends starts with `=` today; a new writer that must keep text as text
+  prefixes an apostrophe, as a typist would.
+- ⚠ **Quota: the whole site is ONE Google user** (the owner's token). The Sheets API allows
+  60 reads and 60 writes per minute per user per project, 300 per project; a 429 is a
+  non-auth failure (last-good copy, no bridge). Nothing counts requests yet. What keeps
+  reads under it is the copy layers: one read per tab per instance per 45 s, a page's tabs
+  in one call, `expect` = one extra read per guarded write. `SHEET_SHARED_COPY=on` makes
+  instances share reads; the quota is raisable in the Cloud console. Budget a new poller
+  against this number before adding it.
+- **What the API can do that the bridge could not — unused so far:**
+  `spreadsheets.batchUpdate` sets data validation, protected ranges, number formats and
+  conditional formatting. Nothing in the repo calls those yet; the 2026-09-16 dropdown
+  edit was made in the Sheets UI.
+- **The bridge is not gone.** `apps-script.gs` in the repo is `BRIDGE_VERSION = 7` (6:
+  `?tabs=a,b,c` multi-read; 7: `expect` on updates — both 2026-09-10; 5 added audio);
+  what is DEPLOYED is whatever `?ping=1` answers, not the repo. Voice notes (Drive) stay
+  on it whichever transport carries the sheet — `bridgeFeatures()` still pings for
+  `audio`, unqueued, 20 s cap, and the issues list waits at most 1.5 s for that answer
+  (`c1a68e1`). The storage workbook (`lib/storage.ts`) is untouched: its own bridge, v4.1.
+- **Tests:** `tests/sheets-api.test.ts` pins `colLetter` / `tabRange` / `cellA1` — a
+  wrong letter writes into the wrong column; `tests/api-guards.test.ts` classifies the two
+  Google routes as open. The module's own header said "append is RAW" until 2026-09-19;
+  this file and that comment now agree.
+
 ## Recently landed (2026-09-09, evening) — "the website is now very slow": the region-shared copy
 
 > ⚠ **The first deploy of this (7ae0856) took every sheet-backed route on production
@@ -112,7 +196,9 @@ fixed first and the numbers after: `../CHANGES-2026-09-13-jobs.md`.
 > 5-minute breaker, and `GET /api/health` (open, no dependencies) reports the commit that
 > is serving.** The rule it left: a new dependency on the read path is bounded before it
 > is awaited, always. Read the paragraphs below with that in mind — the shared copy is
-> opt-in, not the default.
+> opt-in, not the default. **And since 2026-09-10 that bridge read is itself the
+> fallback:** the primary read is the Sheets API, 20 s per call, several tabs per call —
+> see "Recently landed (2026-09-10)".
 
 Measured on production first (`../CHANGES-2026-09-09-speed.md` has the table): page HTML
 ~100 ms; every sheet-backed route 100–300 ms on an instance that holds a copy; **2.2–11.5 s
@@ -439,7 +525,8 @@ green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تر�
   «لا يوجد أمر شغل» (`No order` revived from the retired list), «كسر المصب»
   (`Sprue broken`). Eleven buttons, «أخرى» last. **The sheet dropdown holds exactly those
   eleven since 2026-09-16** («التوقفات»!C2:C2023, edited in the Sheets UI — the bridge
-  cannot set data validation, and neither can the Sheets API code in this repo).
+  cannot set data validation; the Sheets API can (`setDataValidation` in
+  `spreadsheets.batchUpdate`), but nothing in this repo calls it yet).
 - **One cause had two wordings — 2026-09-16, owner's word.** The sheet's dropdown also
   offered «عدم توفر خامة», his older phrase for the absence the button calls
   «عدم وجود خامة». `normalizeArabic` folds spelling, not vocabulary, so the two read as
@@ -498,10 +585,13 @@ All were verified against the live workbook through the bridge, not inferred.
 ## Architecture (data flow)
 
 ```
-Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Apps Script web app (apps-script.gs)
-        id: 1Oi5ZedXaMWUwLVbh01-rH6X3xCuCA94yrdMmw3wBBE0        │ token-gated doGet/doPost
-                                                                 ▼
-                                    lib/sheets.ts  (generic ENTITIES reader/writer)
+Google Sheet «قاعدة بيانات اتقان - مترابطة»   id: 1Oi5ZedXaMWUwLVbh01-rH6X3xCuCA94yrdMmw3wBBE0
+        │                                               │
+        │ Google Sheets REST API — PRIMARY (2026-09-10)  │ Apps Script web app (apps-script.gs)
+        │ the owner's OAuth refresh token                │ token-gated doGet/doPost — FALLBACK,
+        │ lib/google-sheets-api.ts                       │ and the only path to Drive (voice notes)
+        ▼                                               ▼
+                    lib/sheets.ts  (generic ENTITIES reader/writer; picks the transport)
                                                                  ▼
              app/api/* (sheet/[entity], runs, machines, jobs, issues,
                         oee, ai-review, agent, storage)
@@ -514,6 +604,12 @@ Google Sheet «قاعدة بيانات اتقان - مترابطة»  ←→  Ap
   tab's real headers, so column reordering in the sheet doesn't break writes.
   `TAB_ALIASES` maps the Arabic tab names to their old English names as fallbacks — keep
   that map when adding an entity.
+- `lib/google-sheets-api.ts` — the transport (2026-09-10): `values:batchGet` of whole tabs
+  for reads (display values); `append`, `values:batchUpdate`, `deleteDimension` and
+  `addSheet` for writes; `expect` as a read-before-write. `postViaApi()` in `lib/sheets.ts`
+  keeps the bridge's payload shapes, `sheetsApiUsable()` picks the transport, and an auth
+  failure hands everything to the bridge for 5 min. Details under "Recently landed
+  (2026-09-10)".
 - Molds/Products tabs are **formula views of Master** — never write to them; writes route
   to the Master row (`MASTER_VIEWS` logic). Clients is a manual tab (write in place).
   ⚠️ **The view's ID column cannot be trusted.** It is `ROW()-2` of the view's OWN row, and
@@ -856,6 +952,11 @@ What it means for the numbers:
 > "never cache an empty result", the `no_tab` short-circuit, and `fresh` for writes. The
 > cache is the per-instance last-good copy (2026-09-05) plus the opt-in shared copy;
 > `revalidateTag(SHEET_CACHE_TAG)` in `invalidateSheetCache` is inert and harmless.
+>
+> **And since 2026-09-10 the bridge GET is the fallback.** The primary read is
+> `apiReadTabs` (the Sheets API: 20 s per call, several tabs per call, NOT in the bridge's
+> serial queue). The retry after 1.5 s, "never cache an empty result", the `no_tab`
+> short-circuit, `fresh` for writes and the copy layers apply to both transports.
 
 **Symptom reported:** "the app loads for too long and it is fetching nothing."
 Measured against production while the bridge itself answered every tab in ~2.5s:
@@ -921,9 +1022,15 @@ again. `invalidateSheetCache()` clears both.
 
 ## The bridge (apps-script.gs)
 
+- **The FALLBACK transport since 2026-09-10**, and the only path to Drive (voice notes):
+  the Sheets API carries the sheet whenever the owner's OAuth token is configured and not
+  refused — see "Recently landed (2026-09-10)". Everything below still holds whenever the
+  bridge is the one answering.
 - Bound to the sheet, deployed as web app (Execute as owner / access Anyone), token-gated.
 - Actions: `doGet(tab)` → displayValues; `doGet(ping=1)` → `{ok, version, features}`
-  (version 5, 2026-09-09 — an older deployment answers `no_tab`); `doGet(audio=<id>)` →
+  (the repo's file is version 7: 6 added `?tabs=a,b,c` multi-read, 7 `expect` on
+  updates, both 2026-09-10; 5 added audio; an older deployment answers `no_tab` — and what
+  is DEPLOYED is what the ping says, not the repo); `doGet(audio=<id>)` →
   one recording from the «تسجيلات الأعطال» Drive folder, base64; `doPost` →
   `updates[{row,col,value}]` (setValue — a "=..." string becomes a live formula),
   `append`, `deleteRow`, `createTab`, `saveAudio{name,mime,data}` (a file into that
@@ -941,6 +1048,16 @@ again. `invalidateSheetCache()` clears both.
 
 Learned while migrating downtime into «التوقفات». All four apply to **every** tab, not
 just that one, and three of them contradict what the code comments used to claim.
+
+> **Through the Sheets API — the transport since 2026-09-10 — this section reads
+> differently.** `updates` are `USER_ENTERED` like `setValue` (a date is parsed, `=` is a
+> formula) but **data validation is NOT enforced**: nothing throws, the value lands, so
+> item 2's `cell_rejected` rollback is bridge-only and the site's own vocabularies are the
+> only guard. `append` is `USER_ENTERED` too (since `a2af51f`), so item 1's "stays TEXT"
+> column does not apply: an appended date becomes a real date in the column's format. Item 3
+> still holds — a timeout after the request reached Google may have written, and
+> `postAction` reports `sheets_api:<reason>` without retrying on the other transport. Item 4
+> is the sheet's rendering and applies to both.
 
 1. **`append` and `updates` do NOT obey the same rules.** `append` → `sheet.appendRow()`;
    `updates` → `range.setValue()` per cell. They differ in two ways that matter:
