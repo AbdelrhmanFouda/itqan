@@ -12,9 +12,13 @@ export const COMPANY = {
   nameEn: "Itqan",
   nameAr: "إتقان",
   founded: 2005,
-  /** Primary: calls AND WhatsApp. */
-  phone: { display: "+20 106 980 0643", tel: "+201069800643", wa: "201069800643" },
-  phone2: { display: "+20 101 329 8179", tel: "+201013298179" },
+  /**
+   * The ONE published line — calls AND WhatsApp, answered by staff.
+   * The owner's own two numbers (…0643, …8179) were RETIRED from the site on
+   * 2026-09-16 after the Performance Max campaign filled them with junk calls.
+   * Do not put a personal number back here.
+   */
+  phone: { display: "+20 105 083 4098", tel: "+201050834098", wa: "201050834098" },
   email: "abdelrhmanfouda@etqaneg.com",
   mapUrl: "https://maps.app.goo.gl/1mkwqngykxobGyxJ6",
 } as const;

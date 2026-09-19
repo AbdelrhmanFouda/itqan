@@ -133,9 +133,6 @@ export default function Navbar() {
               >
                 {tr.nav.dashboard}
               </Link>
-              <div className="flex flex-wrap items-center gap-2 pt-3">
-                <ContactChannels />
-              </div>
             </div>
           </motion.div>
         )}

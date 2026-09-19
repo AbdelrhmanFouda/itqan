@@ -5,7 +5,6 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { fadeInUp, staggerContainer } from "@/lib/animations";
 import { Send, CheckCircle, MessageCircle } from "lucide-react";
-import ContactChannels from "@/components/ContactChannels";
 import ContactDetails from "@/components/ContactDetails";
 import { captureAttribution } from "@/lib/attribution";
 import { trackConversion } from "@/lib/ads";
@@ -85,11 +84,10 @@ export default function Contact() {
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">{tr.contact.title}</h2>
           <p className="text-gray-500">{tr.contact.subtitle}</p>
-          {/* Phone-first channels above the form — most buyers here call or
-              WhatsApp rather than type. */}
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            <ContactChannels size="hero" />
-          </div>
+          {/* The channels live in ONE place per screen — the sticky bar on
+              phones, the navbar on desktop. The card below carries the same
+              number as a link, so nothing is lost by not repeating the
+              buttons here. */}
           <ContactDetails />
         </motion.div>
 

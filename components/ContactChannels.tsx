@@ -12,14 +12,14 @@ import { trackConversion } from "@/lib/ads";
  * it used to come from env, which had drifted to the second number.
  * Each tap fires its Google Ads conversion (inert until configured).
  */
-export default function ContactChannels({ size = "nav" }: { size?: "nav" | "hero" }) {
+export default function ContactChannels() {
   const { lang } = useLang();
   const tr = t[lang];
 
   const base =
     "inline-flex items-center gap-2 rounded-lg font-medium transition-colors " +
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 " +
-    (size === "hero" ? "px-5 py-3 min-h-12 text-sm" : "px-3 py-2 min-h-11 text-sm");
+    "px-3 py-2 min-h-11 text-sm";
 
   return (
     <>
@@ -39,7 +39,7 @@ export default function ContactChannels({ size = "nav" }: { size?: "nav" | "hero
         className={`${base} border border-white/15 text-gray-200 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/10`}
       >
         <Phone size={16} />
-        <span dir="ltr">{size === "hero" ? COMPANY.phone.display : tr.nav.call}</span>
+        <span dir="ltr">{tr.nav.call}</span>
       </a>
     </>
   );

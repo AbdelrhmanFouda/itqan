@@ -1,8 +1,8 @@
 "use client";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Phone, Mail, MapPin, Clock } from "lucide-react";
-import { COMPANY } from "@/lib/company";
+import { Phone, Mail, MapPin, Clock, MessageCircle } from "lucide-react";
+import { COMPANY, WHATSAPP_URL } from "@/lib/company";
 import { trackConversion } from "@/lib/ads";
 
 /**
@@ -11,7 +11,8 @@ import { trackConversion } from "@/lib/ads";
  */
 export default function ContactDetails({ variant = "card" }: { variant?: "card" | "footer" }) {
   const { lang } = useLang();
-  const d = t[lang].contact.details;
+  const tr = t[lang];
+  const d = tr.contact.details;
   const isAr = lang === "ar";
   const footer = variant === "footer";
 
@@ -32,11 +33,22 @@ export default function ContactDetails({ variant = "card" }: { variant?: "card" 
         <Phone size={16} className={icon} />
         <div>
           <div className="text-xs text-gray-500 mb-1">{d.phones}</div>
+          {/* The number once, then WhatsApp as a quiet text link. A second
+              green button here would face the sticky bar (phones) or the
+              navbar button (desktop) — that duplication is what the owner
+              saw, 2026-09-19. */}
           <a href={`tel:${COMPANY.phone.tel}`} onClick={() => trackConversion("call")} className={`${link} block min-h-7`} dir="ltr">
             {COMPANY.phone.display}
           </a>
-          <a href={`tel:${COMPANY.phone2.tel}`} onClick={() => trackConversion("call")} className={`${link} block min-h-7`} dir="ltr">
-            {COMPANY.phone2.display}
+          <a
+            href={WHATSAPP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackConversion("whatsapp")}
+            className={`${link} inline-flex items-center gap-1.5 text-green-400 min-h-7`}
+          >
+            <MessageCircle size={14} />
+            {tr.nav.whatsapp}
           </a>
         </div>
       </div>
