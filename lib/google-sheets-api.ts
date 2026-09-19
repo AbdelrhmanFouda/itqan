@@ -21,7 +21,9 @@
  *    strings getDisplayValues() gave, so lib/dates.ts and every parser are
  *    unchanged — rows arrive ragged (trailing blanks trimmed), which the
  *    header mapping already tolerates;
- *  - append is RAW (a date string stays text, like appendRow);
+ *  - append is USER_ENTERED too (since a2af51f: RAW rows landed as TEXT, and
+ *    SUM / date filters skipped every row the site wrote), so unlike appendRow
+ *    an appended date becomes a real date and a leading "=" would be a formula;
  *  - updates are USER_ENTERED (a date string is parsed, "=…" is a formula,
  *    like setValue) — but the API does NOT enforce data validation, so the
  *    site's own checks (status vocabulary, registry labels, reasons) are the
@@ -177,7 +179,7 @@ export async function apiReadTabs(tabs: string[]): Promise<Record<string, ApiTab
 
 type ApiCell = { row: number; col: number; value: string };
 
-/** Append one row after the tab's data (RAW: text stays text). Returns the row number. */
+/** Append one row after the tab's data (USER_ENTERED, like a typed row — see the header). Returns the row number. */
 export async function apiAppend(tab: string, row: string[]): Promise<{ row: number }> {
   const json = await call<{ updates?: { updatedRange?: string } }>(
     `/values/${encodeURIComponent(tabRange(tab))}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
