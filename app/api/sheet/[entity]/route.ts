@@ -6,14 +6,18 @@ import { requireRole } from "@/lib/api-guard";
 // pinned by tests/open-reads.test.ts — with the full story of why deny-by-
 // default exists (2026-08-28: `sheet/jobs` served the order book past the
 // /api/jobs guard). Changing the set is a publish/unpublish decision.
-import { OPEN_READS, WRITABLE_ENTITIES } from "@/lib/open-reads";
+import { OPEN_READS, SALES_ONLY, WRITABLE_ENTITIES, readonlyFields } from "@/lib/open-reads";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ entity: string }> }) {
   const { entity } = await params;
   if (!ENTITIES[entity]) return NextResponse.json({ error: "unknown entity" }, { status: 404 });
-  if (entity === "clients") {
-    // The clients tab carries contact details — signed-in sales (+ owner/
-    // manager) only, stricter than the default guard.
+  if (SALES_ONLY.has(entity)) {
+    // «العملاء» carries contact details; «طلبات العملاء» carries a customer's
+    // name, their free-text note, the reject reason and who decided — and the
+    // dedicated route over that tab (/api/requests) is sales-only for exactly
+    // that reason. Without this branch the generic door would serve the whole
+    // review queue to any approved role, including the roles the views matrix
+    // keeps off /dashboard/requests (2026-09-23 review).
     const g = await requireRole(req, ["sales"]);
     if ("deny" in g) return g.deny;
   } else if (!OPEN_READS.has(entity)) {
@@ -34,6 +38,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
       {
         records: data.records, fields: data.fields, longFields: data.longFields,
         labels: data.labels, writable: data.writable, configured: sheetsConfigured(),
+        // Fields the PATCH below will strip — the editor shows them as text
+        // rather than as an input that silently does not save (2026-09-23,
+        // «العملاء»!A «الرقم», now a portal access key).
+        readonlyFields: [...readonlyFields(entity)],
       },
       OPEN_READS.has(entity)
         ? { headers: { "Cache-Control": "private, max-age=30" } }
@@ -41,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
     );
   } catch (err) {
     console.error(err);
-    return NextResponse.json({ records: [], fields: [], longFields: [], labels: {}, writable: false, configured: false });
+    return NextResponse.json({ records: [], fields: [], longFields: [], labels: {}, writable: false, configured: false, readonlyFields: [] });
   }
 }
 
@@ -59,7 +67,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ en
   }
   try {
     const body = await req.json();
-    const result = await updateRecord(entity, Number(body.row), (body.changes ?? {}) as Record<string, string>);
+    // An access key is never written here. «العملاء»!A «الرقم» is the stable
+    // half of a portal account's link (lib/open-reads.ts READONLY_FIELDS), so
+    // the generic editor may not renumber a row and point an approved buyer
+    // at a different company. Stripped, not refused: the rest of the save is
+    // ordinary contact data.
+    const changes = { ...((body.changes ?? {}) as Record<string, string>) };
+    for (const f of readonlyFields(entity)) delete changes[f];
+    if (Object.keys(changes).length === 0) {
+      return NextResponse.json({ ok: false, reason: "no_writable_changes" }, { status: 400 });
+    }
+    const result = await updateRecord(entity, Number(body.row), changes);
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   } catch (err) {
     console.error(err);

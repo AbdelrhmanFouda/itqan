@@ -27,6 +27,7 @@ import path from "node:path";
 import {
   ENTITIES, colIndex, findHeaderRow, normHeader, splitLabel, clean,
 } from "../lib/sheet-entities.ts";
+import { REQUEST_HEADERS, REQUEST_TAB } from "../lib/customer-requests.ts";
 
 /* ------------------------------ fixtures --------------------------------- */
 // Each value is the FULL tab prefix up to and including the header row, as the
@@ -61,6 +62,15 @@ const HEADERS: Record<string, string[][]> = {
   ],
   issues: [
     ["التاريخ\nDate", "الماكينة\nMachine", "المنتج\nProduct", "التصنيف\nCategory", "الوصف\nDescription", "الإجراء\nAction", "الحالة\nStatus", "ملاحظات\nNotes"],
+  ],
+  // «طلبات العملاء» — the ONE tab in this file that does not exist in the
+  // workbook yet: it is created lazily by the first real customer request,
+  // with exactly this row (lib/customer-requests.ts REQUEST_HEADERS, pinned
+  // equal below). Replace it with the row read BACK out of the tab once the
+  // owner has made that first submit — every other fixture here is a read-back
+  // and that is what makes them worth having.
+  customerRequests: [
+    REQUEST_HEADERS,
   ],
   master: [
     ["Master — المصدر الرئيسي (حرّر هنا فقط)", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
@@ -162,8 +172,12 @@ test("«الاسطمبات» / «المنتجات» views and «العملاء»
   assert.deepEqual(readMap("products"), {
     name: 2, client: 1, weight: 3, material: 4, cavities: 5, worstCycle: 7, cycle: 6, machine: 8, defects: 9, date: 10,
   });
+  // `no` (column A «الرقم / No.») added 2026-09-23 for the customer portal: it
+  // is the stable half of an account's link. The Arabic keyword ONLY — an
+  // English `no` is contained in the «ملاحظات / Notes» header and would claim
+  // column 11 instead.
   assert.deepEqual(readMap("clients"), {
-    name: 1, products: 2, lastOrder: 3, contact: 4, phone: 5, email: 6, address: 7, type: 8, status: 9, payment: 10, notes: 11,
+    no: 0, name: 1, products: 2, lastOrder: 3, contact: 4, phone: 5, email: 6, address: 7, type: 8, status: 9, payment: 10, notes: 11,
   });
   // The live tab held A:H on 2026-09-09; the two recording columns (−1 here)
   // appear when the first voice note is saved (ensureHeaders) or the owner
@@ -172,6 +186,51 @@ test("«الاسطمبات» / «المنتجات» views and «العملاء»
     date: 0, machine: 1, product: 2, category: 3, issueAudio: -1, solutionAudio: -1,
     description: 4, action: 5, status: 6, note: 7,
   });
+});
+
+test("«طلبات العملاء»: one header per field, bilingual, and the tab named once", () => {
+  // The fixture IS the array `ensureTab` sends, because this tab is created by
+  // the site — so what is worth pinning is that the row it creates is the row
+  // the entity can read back: one header per declared field, each a bilingual
+  // "ar\nen" cell like every other tab, and the tab named in one place only.
+  assert.equal(REQUEST_HEADERS.length, ENTITIES.customerRequests.fields.length);
+  for (const h of REQUEST_HEADERS) {
+    const { ar, en } = splitLabel(h);
+    assert.notEqual(ar, en, `«${h}» is not bilingual`);
+    assert.ok(ar && en, `«${h}» is missing a half`);
+  }
+  assert.equal(ENTITIES.customerRequests.tab, REQUEST_TAB);
+});
+
+test("«طلبات العملاء»: every field lands on its own column — including D, which cost a header rename", () => {
+  assert.deepEqual(readMap("customerRequests"), {
+    reqId: 0, submittedAt: 1, clientNo: 2, client: 3, product: 4, masterRow: 5,
+    qtyAsked: 6, unit: 7, qtyKg: 8, wantedDate: 9, note: 10, state: 11,
+    rejectReason: 12, jobCode: 13, decidedBy: 14, decidedAt: 15,
+  });
+});
+
+test("«طلبات العملاء»: «العميل / Client» at D would have read the client NUMBER", () => {
+  // Why the header is «اسم العميل / Client Name». colIndex takes the FIRST
+  // header containing a keyword; C «رقم العميل / Client No.» comes before D,
+  // and it CONTAINS the whole of D's own header as a substring — so no keyword
+  // drawn from «العميل / Client» can distinguish the two, in either language. A
+  // `client` field keyed on «العميل» reads column 2, and every order the
+  // customer owns then fails the match and vanishes from their portal.
+  const asContracted = ["رقم العميل\nClient No.", "العميل\nClient"];
+  assert.equal(colIndex(asContracted, ["العميل", "client"]), 0, "the collision is real, not theoretical");
+  // The shipped headers have no such overlap, in either direction.
+  const shipped = [REQUEST_HEADERS[2], REQUEST_HEADERS[3]];
+  assert.equal(colIndex(shipped, ["رقم العميل", "client no"]), 0);
+  assert.equal(colIndex(shipped, ["اسم العميل", "client name"]), 1);
+});
+
+test("«طلبات العملاء»: an appended request lands every value in its own column", () => {
+  assert.deepEqual(appendMap("customerRequests"), [
+    "reqId", "submittedAt", "clientNo", "client", "product", "masterRow",
+    "qtyAsked", "unit", "qtyKg", "wantedDate", "note", "state",
+    "rejectReason", "jobCode", "decidedBy", "decidedAt",
+  ]);
 });
 
 test("no two fields of one entity resolve to the same column", () => {
@@ -268,6 +327,8 @@ test("«العملاء»: «نوع العميل» would be claimed by `name` on 
   // resolves to B first); an APPEND would write the client's name into the
   // type column as well. Pinned so that whoever adds a clients append sees it.
   const m = appendMap("clients");
+  assert.equal(m[0], "no", "«الرقم» goes to `no`, declared first");
+  assert.equal(m[11], "notes", "«ملاحظات» must NOT be claimed by `no` — the keyword is Arabic-only");
   assert.equal(m[1], "name");
   assert.equal(m[8], "name", "known: the type column is claimed by name — fix the keywords before appending clients");
   const src = allSource();

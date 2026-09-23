@@ -23,9 +23,10 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 
 // The endpoints a browser may call WITHOUT a token — the documented open reads
 // (tests/api-guards.test.ts) plus the two public front-door endpoints.
+// TEN left this list on 2026-09-23 (the customer portal's phase 0b, then the
+// review pass that closed the faults log and the OEE set) — see
+// GUARDED_PREFIXES below. What is left carries no factory data at all.
 const OPEN_PREFIXES = [
-  "/api/runs", "/api/oee", "/api/machines", "/api/issues",
-  "/api/sheet/molds", "/api/sheet/products", "/api/sheet/machines", "/api/sheet/issues",
   "/api/public/showcase", "/api/contact", "/api/health", "/api/warm",
 ];
 
@@ -35,9 +36,25 @@ const GUARDED_PREFIXES = [
   "/api/jobs", "/api/storage", "/api/downtime", "/api/reports", "/api/ai-review", "/api/inquiries",
   "/api/molds", "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production",
   "/api/sheet/downtime", "/api/agent", "/api/stock",
-  // A recording's bytes (2026-09-09) — the list under /api/issues stays open,
-  // the voice behind it does not.
-  "/api/issues/audio",
+  // The faults log and the OEE set, closed on the 2026-09-23 review pass:
+  // every fault row names a product and a registry machine label, and the OEE
+  // body carries one entry per machine WITH its label — the machine count the
+  // owner's rule of 2026-09-20 keeps off public surfaces — plus product names
+  // in standardsGap/suspects. (A recording's bytes: guarded since 2026-09-09.)
+  "/api/issues", "/api/oee", "/api/sheet/issues",
+  // Closed 2026-09-23 (customer portal, phase 0b): the run rows carry the
+  // operator's name; the registry carries the machine count; the product and
+  // mould views pair 502 product names with a real client name.
+  "/api/runs", "/api/machines",
+  "/api/sheet/products", "/api/sheet/molds", "/api/sheet/machines",
+  // «بوابة العملاء» (2026-09-23). Every portal route is guarded by the
+  // customer's own account document; a token-less fetch answers 401 and the
+  // portal would show a buyer an empty order list as if that were the truth.
+  "/api/portal",
+  // The staff side of the same feature (2026-09-23): the review queue, the
+  // preview and the two decisions. Sales-only, so a token-less fetch answers
+  // 401 and the page would show an empty queue as if nothing were waiting.
+  "/api/requests",
 ];
 
 type Call = { file: string; line: number; url: string; authed: boolean; ownToken: boolean };
@@ -125,6 +142,33 @@ test("the pages that read Master for the mould number use the guarded route with
   const files = new Set(users.map((c) => c.file));
   for (const f of ["components/dashboard/molds-register.tsx", "app/dashboard/production/page.tsx", "app/dashboard/quality/page.tsx", "app/dashboard/jobs/[id]/page.tsx"]) {
     assert.ok(files.has(f), `${f} does not read /api/molds`);
+  }
+});
+
+test("the pages switched to authedFetch on 2026-09-23 still use it", () => {
+  // Phase 0b of the customer portal closed /api/runs, /api/machines and
+  // /api/sheet/products. Every page that read them had to gain a token in the
+  // same change — a plain fetch now gets 401, and each of these pages turns a
+  // failed read into "nothing here", which on a factory screen reads as truth.
+  const expected: [string, string][] = [
+    ["app/dashboard/page.tsx", "/api/runs"],
+    ["app/dashboard/finance/page.tsx", "/api/runs"],
+    ["app/dashboard/production/page.tsx", "/api/runs"],
+    ["app/dashboard/quality/page.tsx", "/api/runs"],
+    ["app/dashboard/page.tsx", "/api/machines"],
+    ["app/dashboard/machines/page.tsx", "/api/machines"],
+    ["app/dashboard/machines/[id]/page.tsx", "/api/machines/"],
+    ["app/dashboard/downtime/page.tsx", "/api/machines"],
+    ["app/dashboard/issues/page.tsx", "/api/machines"],
+    ["app/dashboard/issues/page.tsx", "/api/sheet/products"],
+    ["app/dashboard/production/page.tsx", "/api/machines"],
+    ["app/dashboard/quality/page.tsx", "/api/machines"],
+    ["app/dashboard/jobs/[id]/page.tsx", "/api/machines"],
+  ];
+  for (const [f, url] of expected) {
+    const c = CALLS.find((x) => x.file === f && x.url === url);
+    assert.ok(c, `${f} no longer calls ${url}`);
+    assert.ok(c!.authed || c!.ownToken, `${f}: ${url} lost its token`);
   }
 });
 

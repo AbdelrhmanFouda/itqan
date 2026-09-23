@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { ensureProfile, watchProfile, type UserProfile } from "@/lib/users";
+import { clearLastSeen } from "@/components/dashboard/last-seen";
 import type { Role } from "@/lib/roles";
 
 type AuthCtx = {
@@ -19,6 +20,16 @@ type AuthCtx = {
   profile: UserProfile | null;
   loading: boolean;        // initial auth state resolving
   profileLoading: boolean; // profile document resolving
+  /**
+   * This signed-in account is a CUSTOMER, not staff — null until known.
+   *
+   * It is not a second Firestore read: `ensureProfile()` already has to decide
+   * this before it creates anything (lib/users.ts), and returning null is how
+   * it says so. The dashboard layout uses it to send a buyer who lands on
+   * /dashboard to /portal instead of leaving them on "Setting up your
+   * account…" forever, and the portal layout uses `profile` for the mirror.
+   */
+  isCustomer: boolean | null;
   signInEmail: (email: string, password: string) => Promise<void>;
   signUpEmail: (email: string, password: string, displayName: string, requestedRole: Role) => Promise<void>;
   signInGoogle: (requestedRole?: Role | null) => Promise<void>;
@@ -48,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [isCustomer, setIsCustomer] = useState<boolean | null>(null);
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
@@ -59,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // on every page open, before any page could mount (2026-09-02, "the
       // downtime page is still slow on my phone").
       setLoading(false);
+      setIsCustomer(null);
       if (!u) {
         setProfile(null);
         setProfileLoading(false);
@@ -81,9 +94,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Create-if-missing runs alongside, not in front. For an existing user it
       // is a read that changes nothing; for a brand-new one the snapshot above
       // reports the document the instant this writes it.
-      ensureProfile({ uid: u.uid, email: u.email ?? "", displayName: u.displayName ?? "" }).catch(() => {
-        // ignore — a sign-up path may create the profile with a requested role
-      });
+      ensureProfile({ uid: u.uid, email: u.email ?? "", displayName: u.displayName ?? "" })
+        // null = a customer account: nothing was created, and the layouts
+        // route on this instead of waiting for a staff profile that will
+        // never arrive.
+        .then((p) => setIsCustomer(p === null))
+        .catch(() => {
+          // ignore — a sign-up path may create the profile with a requested role
+        });
     });
     return () => {
       unsub();
@@ -118,11 +136,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    // Every page snapshot goes with the session. The snapshots are per DEVICE,
+    // not per account, and they paint before the live answer arrives — so on a
+    // shared browser the next person to sign in was shown the previous one's
+    // screen for a moment, which on /portal is another company's orders
+    // (2026-09-23 review). The cached profile is already uid-keyed.
+    clearLastSeen();
     await fbSignOut(auth);
   }
 
   return (
-    <Ctx.Provider value={{ user, profile, loading, profileLoading, signInEmail, signUpEmail, signInGoogle, signOut }}>
+    <Ctx.Provider value={{ user, profile, loading, profileLoading, isCustomer, signInEmail, signUpEmail, signInGoogle, signOut }}>
       {children}
     </Ctx.Provider>
   );

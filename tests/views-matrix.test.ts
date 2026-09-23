@@ -41,6 +41,10 @@ const MATRIX: Record<NavKey, Role[]> = {
   molds:       ["owner", "manager", "worker"],
   products:    ["owner", "manager", "sales"],
   jobs:        ["owner", "manager", "production", "sales"],
+  // The customer portal's review queue (2026-09-23). Sales, manager, owner —
+  // and deliberately nobody else: the page shows who asked for what, and one
+  // tap on it creates a work order. A NEW pin, not a moved one.
+  requests:    ["owner", "manager", "sales"],
   // The production side's read-only warehouse view (2026-09-09): «can I
   // promise this?». Not the storekeeper's page, and not the floor's.
   stock:       ["owner", "manager", "production"],

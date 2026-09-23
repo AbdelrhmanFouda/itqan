@@ -68,6 +68,15 @@ export default function Navbar() {
               <span className="absolute -bottom-0.5 start-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
             </a>
           ))}
+          {/* «دخول العملاء» — the customer portal, beside the staff link
+              (2026-09-23). Both are sign-in walls; /portal is in robots.ts. */}
+          <Link
+            href="/portal/login"
+            className="text-sm text-gray-400 hover:text-white transition-colors relative group"
+          >
+            {tr.nav.customerLogin}
+            <span className="absolute -bottom-0.5 start-0 w-0 h-px bg-blue-400 group-hover:w-full transition-all duration-300" />
+          </Link>
           <Link
             href="/dashboard"
             className="text-sm text-gray-400 hover:text-white transition-colors relative group"
@@ -126,6 +135,13 @@ export default function Navbar() {
                   {link.label}
                 </a>
               ))}
+              <Link
+                href="/portal/login"
+                onClick={() => setOpen(false)}
+                className="text-sm text-gray-300 hover:text-white transition-colors py-2.5 min-h-11 flex items-center"
+              >
+                {tr.nav.customerLogin}
+              </Link>
               <Link
                 href="/dashboard"
                 onClick={() => setOpen(false)}

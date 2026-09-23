@@ -17,7 +17,17 @@ import { loadIssues, readIssueInput, saveIssueAudio } from "@/lib/issues-data";
 // Edits (fields, status, adding a solution) go through PATCH /api/issues/[row],
 // which verifies the row's identity on a fresh read first.
 
-export async function GET() {
+// CLOSED 2026-09-23 (customer portal review). This was the last open read, on
+// the reasoning that a fault row «names a machine and a symptom and no
+// customer». It names more than that: every row carries «المنتج» — a real
+// product name — and «الماكينة», the registry label («PQ 7 — 100»), from which
+// the distinct machine COUNT falls out. That count is what the owner's rule of
+// 2026-09-20 keeps off every public surface, and the product names are what the
+// portal promises a buyer only ever sees their own of. The only caller is
+// /dashboard/issues, which already used a token for everything else on the page.
+export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     // The feature probe is an Apps Script ping (measured 0.9–20 s). The list
     // now comes through the Sheets API in well under a second, so the probe
@@ -36,11 +46,10 @@ export async function GET() {
     // `audio.supported` tells the page whether the DEPLOYED bridge can take a
     // recording; until the owner deploys the version with `saveAudio`, the
     // microphone stays hidden and the page is exactly what it was.
-    // Open operational read — browsers may reuse it briefly; error responses
-    // deliberately carry no cache header.
+    // The body depends on who asked, so it is never shared-cacheable.
     return NextResponse.json(
       { issues, audio: { supported: features.audio } },
-      { headers: { "Cache-Control": "private, max-age=30" } },
+      { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
     console.error(err);

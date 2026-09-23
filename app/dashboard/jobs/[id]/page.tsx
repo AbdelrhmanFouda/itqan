@@ -111,7 +111,7 @@ export default function JobDetailPage() {
   const listsStarted = useRef(false);
   const loadLists = useCallback(() => {
     listsStarted.current = true;
-    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
+    authedFetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
     // A hand-typed product name that doesn't match Master exactly breaks the
     // join, so offer the real names the same way the add form does — from
     // MASTER through the guarded /api/molds, not from the «الاسطمبات» formula

@@ -526,6 +526,21 @@ type RecordsResult = {
   readAt: number;
 };
 
+/**
+ * The cell a row is IDENTIFIED by, for the totals-row check below: the first
+ * present field whose value is not blank and not a bare number. A row's index
+ * column («العملاء»!A «الرقم») says nothing about what the row is.
+ */
+function labelCell(rec: SheetRecord, present: readonly { key: string }[]): string {
+  for (const f of present) {
+    const v = (rec[f.key] || "").trim();
+    if (!v) continue;
+    if (/^[\d.,\s]+$/.test(v)) continue;
+    return v;
+  }
+  return "";
+}
+
 export async function getRecords(
   entity: string,
   opts: { fresh?: boolean } = {},
@@ -563,7 +578,14 @@ export async function getRecords(
     }
     if (!any) continue;
     // Skip spreadsheet summary/total rows (e.g. "الإجمالي / Total").
-    const head = rec[present[0].key] || "";
+    //
+    // The label is the first present field that is not a bare NUMBER, not
+    // simply `present[0]`. «العملاء» declares its numeric «الرقم» first since
+    // 2026-09-23 (it is a portal account's stable link), which silently moved
+    // this test from the client name to the client number — and a «الإجمالي»
+    // row would then have come back as a client, straight into the approvals
+    // screen's company picker.
+    const head = labelCell(rec, present);
     if (/الإجمالي|إجمالي|الاجمالي|اجمالي/.test(head) || /\btotals?\b/i.test(head)) continue;
     records.push(rec);
   }

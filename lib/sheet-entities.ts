@@ -53,6 +53,18 @@ export const ENTITIES: Record<string, EntityConfig> = {
   clients: {
     tab: "العملاء", titleEn: "Clients", titleAr: "العملاء",
     fields: [
+      // «الرقم» (column A, 1–65) — read since 2026-09-23 because it is the
+      // STABLE half of a customer-portal account's link: the owner picks the
+      // row on /dashboard/approvals and the account stores `{no, name}`, so a
+      // renamed company is still recognisably the same customer.
+      //
+      // ⚠ The Arabic keyword ONLY, and declared FIRST. An English `no` would
+      // be contained in «ملاحظات / Notes» and would silently claim that column
+      // instead — the same class of collision that let «تسمية الماكينة» be
+      // claimed by `name` and wrote a tonnage over a computed label.
+      // It is also READ-ONLY: lib/open-reads.ts READONLY_FIELDS keeps the
+      // generic PATCH away from it, because it is now an access key.
+      { key: "no", keywords: ["الرقم"] },
       { key: "name", keywords: ["client", "العميل"] },
       { key: "products", keywords: ["products", "عدد المنتجات"] },
       { key: "lastOrder", keywords: ["last order", "آخر طلب"] },
@@ -215,6 +227,43 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "action", keywords: ["action", "الإجراء", "الاجراء", "المعالجة", "الحل", "إجراء"], long: true },
       { key: "status", keywords: ["status", "الحالة", "الحاله"] },
       { key: "note", keywords: ["note", "ملاحظ"], long: true },
+    ],
+  },
+  // «طلبات العملاء» — a customer's order REQUEST, before anybody agreed to it
+  // (2026-09-23, the portal). Created lazily by the first real submit; the
+  // header row it is created with, and the reasons the wording is what it is,
+  // live in lib/customer-requests.ts REQUEST_HEADERS beside the rest of the
+  // rules. Never «أوامر العمل»: a row there is an OPEN ORDER the moment it
+  // exists and reserves material on /dashboard/stock.
+  //
+  // FIELD ORDER IS LOAD-BEARING for appendRecord, which gives each real header
+  // to the FIRST field whose keyword it contains:
+  //   • `clientNo` before `client` — C «رقم العميل» contains «العميل»;
+  //   • every date keyword is a full phrase, never a bare «تاريخ»;
+  //   • `qtyAsked` is «العدد المطلوب» and `qtyKg` is «الكمية بالكيلو», so
+  //     neither a bare «الكمية» nor a bare `qty` can claim the wrong column;
+  //   • `state` is «حالة الطلب», never «الحالة».
+  // The READ direction needed one more thing, which is why D is «اسم العميل»
+  // and not «العميل»: see REQUEST_HEADERS.
+  customerRequests: {
+    tab: "طلبات العملاء", titleEn: "Customer Requests", titleAr: "طلبات العملاء",
+    fields: [
+      { key: "reqId", keywords: ["رقم الطلب", "request no"] },
+      { key: "submittedAt", keywords: ["تاريخ الطلب", "submitted"] },
+      { key: "clientNo", keywords: ["رقم العميل", "client no"] },
+      { key: "client", keywords: ["اسم العميل", "client name"] },
+      { key: "product", keywords: ["المنتج", "product"] },
+      { key: "masterRow", keywords: ["الصف في الرئيسي", "master row"] },
+      { key: "qtyAsked", keywords: ["العدد المطلوب", "quantity asked"] },
+      { key: "unit", keywords: ["الوحدة", "unit"] },
+      { key: "qtyKg", keywords: ["الكمية بالكيلو", "qty kg"] },
+      { key: "wantedDate", keywords: ["التاريخ المطلوب", "wanted date"] },
+      { key: "note", keywords: ["ملاحظات", "note"], long: true },
+      { key: "state", keywords: ["حالة الطلب", "request state"] },
+      { key: "rejectReason", keywords: ["سبب الرفض", "reject reason"], long: true },
+      { key: "jobCode", keywords: ["كود أمر العمل", "work order code"] },
+      { key: "decidedBy", keywords: ["بواسطة", "decided by"] },
+      { key: "decidedAt", keywords: ["تاريخ القرار", "decided on"] },
     ],
   },
   // The single source of truth. Read directly when we need the per-mold standards

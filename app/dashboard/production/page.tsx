@@ -45,7 +45,7 @@ export default function ProductionPage() {
     // Master (guarded) rather than the open «الاسطمبات» view: only Master
     // carries the notes column where 26 products keep their mould number.
     authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
-    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
+    authedFetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
   }, []);
 
   // Snapshot → paint → bounded read (90 s) → keep what is on screen when the
@@ -53,7 +53,9 @@ export default function ProductionPage() {
   // take 10–160 s on a cold instance and there used to be no client timeout.
   const { data: runs, loading, failed, reload: load } = useRemembered<RunRow[]>({
     key: LAST_KEY,
-    read: () => timedJson<RunRow[]>(fetch, "/api/runs"),
+    // Guarded since 2026-09-23 — the rows carry the operator's name, printed
+    // in the table below.
+    read: () => timedJson<RunRow[]>(authedFetch, "/api/runs"),
     valid: (snap) => Array.isArray(snap),
     onSettled: loadLists,
   });

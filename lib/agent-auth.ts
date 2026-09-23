@@ -13,7 +13,11 @@ import { createPublicKey, createVerify } from "node:crypto";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cairoDay } from "@/lib/ai-review";
-import { isOwnerEmail, hasFullAccess, type Role } from "@/lib/roles";
+import { isOwnerEmail, hasFullAccess, asRole, type Role } from "@/lib/roles";
+import {
+  customerStatusOf, normalizeClients,
+  type ClientLink, type CustomerStatus,
+} from "@/lib/customer-link";
 
 const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "itqan-5f802";
 const CERTS_URL =
@@ -115,6 +119,17 @@ const ROLE_CACHE = new Map<string, { role: Role; at: number }>();
 const ROLE_CACHE_MS = 5 * 60 * 1000;
 const ROLE_CACHE_MAX = 500;
 
+/**
+ * The caller's granted role, or null.
+ *
+ * ⚠ The role string is UNTRUSTED. It comes from a Firestore document, and the
+ * two reads below used to cast it (`f.role?.stringValue as Role`) — so an
+ * approved profile carrying any word passed every bare `requireRole(req)` in
+ * the site, with a fully green test suite. `asRole()` (lib/roles.ts) is the
+ * only conversion now: a word that is not in ALL_ROLES resolves to null and is
+ * refused everywhere. This is what keeps a non-staff account kind — a customer —
+ * from reaching a staff route by having its role typed in by hand.
+ */
 async function lookupRole(user: VerifiedUser, idToken?: string): Promise<Role | null> {
   if (idToken) {
     try {
@@ -125,7 +140,7 @@ async function lookupRole(user: VerifiedUser, idToken?: string): Promise<Role | 
       if (res.status === 404) return null; // signed in but no profile yet
       if (res.ok) {
         const f = ((await res.json()) as { fields?: Record<string, { stringValue?: string }> }).fields ?? {};
-        return f.status?.stringValue === "approved" ? ((f.role?.stringValue as Role) ?? null) : null;
+        return f.status?.stringValue === "approved" ? asRole(f.role?.stringValue) : null;
       }
     } catch {
       /* fall through to the SDK path below */
@@ -137,10 +152,103 @@ async function lookupRole(user: VerifiedUser, idToken?: string): Promise<Role | 
     const snap = await getDoc(doc(db, "users", user.uid));
     if (!snap.exists()) return null;
     const d = snap.data();
-    return d.status === "approved" ? ((d.role as Role) ?? null) : null;
+    return d.status === "approved" ? asRole(d.role) : null;
   } catch {
     return null;
   }
+}
+
+/* ---------------------------- customer lookup ----------------------------- */
+
+/**
+ * The customer account behind a verified token, or null.
+ *
+ * Read AS THE CALLER over the Firestore REST API, exactly as `lookupRole`
+ * above reads `users/{uid}` — the server reaches Firestore through the
+ * UNAUTHENTICATED client SDK, so the caller's own ID token is the only way to
+ * satisfy `request.auth.uid == uid` in the rules. A signed-in staff account has
+ * no document here and gets null, which is what keeps `requireCustomer` from
+ * admitting anyone but a customer.
+ *
+ * ⚠ NEVER cached, unlike the role. The `clients` list IS the access boundary:
+ * caching it would mean a mis-linked account keeps reading another company's
+ * orders for minutes after the owner fixes the link. One read per portal call,
+ * bounded at 5 s like every other read-path dependency since the September
+ * outage (a hung dependency took every sheet read down for a night).
+ */
+export type CustomerRecord = {
+  uid: string;
+  email: string;
+  displayName: string;
+  status: CustomerStatus;
+  requestedClient: string;
+  clients: ClientLink[];
+};
+
+const CUSTOMER_TIMEOUT_MS = 5000;
+
+/** One Firestore REST `Value` as a plain JS value. */
+function restValue(v: unknown): unknown {
+  if (!v || typeof v !== "object") return undefined;
+  const f = v as Record<string, unknown>;
+  if ("stringValue" in f) return String(f.stringValue ?? "");
+  if ("integerValue" in f) return Number(f.integerValue);
+  if ("doubleValue" in f) return Number(f.doubleValue);
+  if ("booleanValue" in f) return Boolean(f.booleanValue);
+  if ("nullValue" in f) return null;
+  if ("timestampValue" in f) return String(f.timestampValue ?? "");
+  if ("arrayValue" in f) {
+    const values = (f.arrayValue as { values?: unknown[] })?.values ?? [];
+    return values.map(restValue);
+  }
+  if ("mapValue" in f) return restFields((f.mapValue as { fields?: Record<string, unknown> })?.fields);
+  return undefined;
+}
+
+function restFields(fields: Record<string, unknown> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields ?? {})) out[k] = restValue(v);
+  return out;
+}
+
+export async function lookupCustomer(
+  user: VerifiedUser,
+  idToken: string,
+): Promise<CustomerRecord | null> {
+  if (!idToken) return null;
+  let res: Response;
+  try {
+    res = await fetch(customerDocUrl(user.uid), {
+      headers: { Authorization: `Bearer ${idToken}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(CUSTOMER_TIMEOUT_MS),
+    });
+  } catch {
+    return null; // timeout or network — the portal answers 401, never a stale link
+  }
+  if (!res.ok) return null; // 404 = not a customer; 403 = rules said no
+  const body = (await res.json().catch(() => null)) as { fields?: Record<string, unknown> } | null;
+  if (!body) return null;
+  const d = restFields(body.fields);
+  return {
+    uid: user.uid,
+    // The token's email is the verified one; the document's is a convenience copy.
+    email: user.email || String(d.email ?? ""),
+    displayName: String(d.displayName ?? ""),
+    status: customerStatusOf(d.status),
+    requestedClient: String(d.requestedClient ?? ""),
+    clients: normalizeClients(d.clients),
+  };
+}
+
+/** The REST path of one customer document — shared by the lookup and the register route. */
+export function customerDocUrl(uid: string): string {
+  return `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/customers/${encodeURIComponent(uid)}`;
+}
+
+/** The collection path, for `POST …/customers?documentId=<uid>` (create-if-absent). */
+export function customerCollectionUrl(): string {
+  return `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/customers`;
 }
 
 /* ------------------------------ usage limit ------------------------------- */

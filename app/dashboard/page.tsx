@@ -82,7 +82,7 @@ export default function DashboardPage() {
      * answer follows below, only for the days-since-last-log tile.
      */
     const [rr, jr, dq] = await Promise.all([
-      timedJson<Run[]>(fetch, "/api/runs"),
+      timedJson<Run[]>(authedFetch, "/api/runs"),
       timedJson<{ jobs?: Job[] }>(authedFetch, "/api/jobs"),
       timedJson<{ stale?: StaleEvent[] }>(authedFetch, "/api/downtime?quick=1"),
     ]);
@@ -103,7 +103,7 @@ export default function DashboardPage() {
      * machine tile's denominator, and the full downtime answer is read ONLY
      * for `lastLoggedDate` (the days-since-last-stoppage tile).
      */
-    fetch("/api/machines").then((r) => r.json()).then((m) => {
+    authedFetch("/api/machines").then((r) => r.json()).then((m) => {
       // One per registry LABEL — «PQ 7» sits on two rows (one per product).
       const list: Machine[] = uniqueByLabel<Machine & { label: string }>(m.machines ?? []);
       setMachines(list); snap.current.machines = list; remember();

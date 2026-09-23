@@ -122,7 +122,7 @@ export default function PerformancePage() {
   // into an empty one, so a failure keeps what is on screen.
   const { data, loading, failed, fromSnapshot, reload: load } = useRemembered<Data>({
     key: LAST_KEY(period),
-    read: () => timedJson<Data>(fetch, `/api/oee${period === "month" ? `?month=${thisMonth}` : ""}`),
+    read: () => timedJson<Data>(authedFetch, `/api/oee${period === "month" ? `?month=${thisMonth}` : ""}`),
     valid: (snap) => Array.isArray(snap?.machines),
   });
 

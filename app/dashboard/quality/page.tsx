@@ -41,7 +41,7 @@ export default function QualityPage() {
   const loadLists = useCallback(() => {
     if (listsStarted.current) return;
     listsStarted.current = true;
-    fetch("/api/machines").then((x) => x.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
+    authedFetch("/api/machines").then((x) => x.json()).then((m) => setMachines(m.machines ?? [])).catch(() => {});
     // Master (guarded) rather than the open view — see the production page.
     authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
   }, []);
@@ -51,7 +51,9 @@ export default function QualityPage() {
   // a different and much worse statement. One hook since cleanup batch 7.
   const { data: runs, loading, failed, reload: load } = useRemembered<RunRow[]>({
     key: LAST_KEY,
-    read: () => timedJson<RunRow[]>(fetch, "/api/runs"),
+    // Guarded since 2026-09-23 — the rows carry the operator's name, printed
+    // in the table below.
+    read: () => timedJson<RunRow[]>(authedFetch, "/api/runs"),
     valid: (snap) => Array.isArray(snap),
     onSettled: loadLists,
   });

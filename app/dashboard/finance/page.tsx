@@ -63,7 +63,7 @@ export default function FinancePage() {
     // wait for «الإنتاج», and the production tiles do not wait for the four
     // tabs behind /api/jobs.
     const jp = timedJson<{ jobs?: Job[] }>(authedFetch, "/api/jobs");
-    const rp = timedJson<Run[]>(fetch, "/api/runs");
+    const rp = timedJson<Run[]>(authedFetch, "/api/runs");
     void jp.then((res) => {
       if (!res.ok) return; // a failure must never blank what is already shown
       const list = res.data.jobs ?? [];

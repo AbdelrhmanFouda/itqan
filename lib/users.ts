@@ -10,6 +10,7 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import { isOwnerEmail, type Role, type UserStatus } from "./roles";
+import { isPortalSignUp } from "./portal-signup";
 
 export type UserProfile = {
   uid: string;
@@ -39,15 +40,34 @@ function shape(uid: string, d: DocumentData): UserProfile {
  * Make sure a profile document exists for a signed-in user.
  * - The owner email is auto-approved as `owner`.
  * - Everyone else starts `pending` with their requested role recorded.
+ * - A CUSTOMER gets nothing at all, and the function returns null.
+ *
+ * That last branch is the customer portal's half of the account-kind split
+ * (2026-09-23). `AuthProvider` calls this on every sign-in, for every account,
+ * including a buyer signing in to /portal — and a staff profile written for a
+ * buyer would put them in the owner's staff approvals queue and, if anyone ever
+ * approved it by reflex, hand them a role. So before creating anything we check
+ * whether this uid is a customer: `isPortalSignUp(uid)` for the window during
+ * sign-up when `customers/{uid}` does not exist yet, and the document itself
+ * for every sign-in after that (a user may read their own customer document —
+ * firestore.rules). The marker is PINNED to the uid it was set for, so an
+ * abandoned sign-up in this browser can never suppress a colleague's staff
+ * profile (lib/portal-signup.ts).
+ *
+ * Returning null means "this is not a staff account"; the caller uses it to
+ * send the person to /portal instead of /dashboard.
  */
 export async function ensureProfile(params: {
   uid: string; email: string; displayName?: string; requestedRole?: Role | null;
-}): Promise<UserProfile> {
+}): Promise<UserProfile | null> {
   const ref = doc(db, COL, params.uid);
   const snap = await getDoc(ref);
   const owner = isOwnerEmail(params.email);
 
   if (!snap.exists()) {
+    // Not staff → create nothing. The owner email is exempt: it bootstraps
+    // itself as owner and must never be diverted by a stray flag.
+    if (!owner && (isPortalSignUp(params.uid) || (await isCustomerAccount(params.uid)))) return null;
     const base = {
       email: params.email,
       displayName: params.displayName ?? "",
@@ -74,6 +94,23 @@ export async function ensureProfile(params: {
   return shape(params.uid, data);
 }
 
+/**
+ * Does this uid already hold a customer account?
+ *
+ * Read as the signed-in user, which the rules allow for their OWN document.
+ * A denial or a network failure answers false — the caller then creates a
+ * staff profile, which is the pre-2026-09-23 behaviour and is recoverable;
+ * refusing to create one on a hiccup would lock a real new employee out of
+ * sign-up with nothing on screen to explain it.
+ */
+async function isCustomerAccount(uid: string): Promise<boolean> {
+  try {
+    return (await getDoc(doc(db, "customers", uid))).exists();
+  } catch {
+    return false;
+  }
+}
+
 export function watchProfile(uid: string, cb: (p: UserProfile | null) => void) {
   return onSnapshot(doc(db, COL, uid), (snap) => {
     cb(snap.exists() ? shape(uid, snap.data()) : null);
@@ -90,12 +127,25 @@ export async function listUsers(): Promise<UserProfile[]> {
 export async function approveUser(uid: string, role: Role) {
   await updateDoc(doc(db, COL, uid), { role, status: "approved" });
 }
+/**
+ * Taking access away CLEARS THE ROLE as well as the status.
+ *
+ * Leaving `role` behind on a rejected or revoked profile was a standing hazard:
+ * the role was the thing every guard reads, and a single later write that set
+ * `status: 'approved'` — a stray console edit, a rules mistake, a future
+ * re-approve path that forgot to pass one — restored the OLD privileges
+ * silently, without anyone choosing them. A revoked manager is the sharp case,
+ * because `isManager()` in firestore.rules is what lets a profile be edited at
+ * all. Re-approving still works: /dashboard/approvals sends the role explicitly
+ * (`approveUser(uid, sel[uid] ?? REQUESTABLE_ROLES[0])`, and the all-users
+ * select falls back to the least-privileged role when `u.role` is null).
+ */
 export async function rejectUser(uid: string) {
-  await updateDoc(doc(db, COL, uid), { status: "rejected" });
+  await updateDoc(doc(db, COL, uid), { status: "rejected", role: null });
 }
 export async function setUserRole(uid: string, role: Role) {
   await updateDoc(doc(db, COL, uid), { role, status: "approved" });
 }
 export async function setPending(uid: string) {
-  await updateDoc(doc(db, COL, uid), { status: "pending" });
+  await updateDoc(doc(db, COL, uid), { status: "pending", role: null });
 }

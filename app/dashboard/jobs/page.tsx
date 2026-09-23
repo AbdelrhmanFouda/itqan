@@ -25,8 +25,13 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useLang } from "@/context/LangContext";
+import { useAuth } from "@/context/AuthContext";
+import { canAccess } from "@/lib/roles";
 import { pd } from "@/lib/i18n.prod";
-import { Check, ChevronDown, ChevronRight, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+// The portal's staff strings live in their own namespace — the counter below
+// links to /dashboard/requests and must say the same word that page does.
+import { cp } from "@/lib/i18n.portal";
+import { Check, ChevronDown, ChevronRight, Inbox, Pause, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Pill, Field, inputCls, Btn, Modal, EmptyState, Spinner, LoadError, StatTile, iconBtnCls } from "@/components/dashboard/ui";
 import { JOB_STATUSES, JOB_PRIORITIES, jobTone, priorityTone, localize, options } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
@@ -73,6 +78,7 @@ const blank = { qtyOrdered: "", startDate: "", dueDate: "", code: "", priority: 
 
 export default function JobsPage() {
   const { lang } = useLang();
+  const { profile } = useAuth();
   const p = pd[lang];
   const isAr = lang === "ar";
   usePageTitle(p.jobs.title);
@@ -142,6 +148,26 @@ export default function JobsPage() {
   });
   loadRef.current = load;
   useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); }, []);
+
+  /* ------------------------ the portal's review queue ---------------------- */
+
+  // A red count of customer requests waiting for an answer (2026-09-23). The
+  // person who opens the order book is the person who has not noticed one come
+  // in, so the number belongs HERE as well as on its own page. Only the roles
+  // that can open that page ask for it — production would meet a 403 — it is
+  // fired after the order book has answered, never in front of it, and a
+  // failure is silent: this is a badge, not a screen.
+  const [pendingReqs, setPendingReqs] = useState(0);
+  const canReview = !!profile?.role && canAccess(profile.role, "/dashboard/requests");
+  const reqsAsked = useRef(false);
+  useEffect(() => {
+    if (!canReview || reqsAsked.current || !data) return;
+    reqsAsked.current = true;
+    authedFetch("/api/requests")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j && typeof j.pending === "number") setPendingReqs(j.pending); })
+      .catch(() => {});
+  }, [canReview, data]);
 
   /* ------------------------------- the list -------------------------------- */
 
@@ -302,7 +328,15 @@ export default function JobsPage() {
       <div className="mb-5 sm:mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-gray-900">{p.jobs.title}</h1>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canReview && pendingReqs > 0 && (
+              <Link
+                href="/dashboard/requests"
+                className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-sm font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+              >
+                <Inbox size={15} /> {fill(cp[lang].staff.reqs.pendingCount, { n: pendingReqs })}
+              </Link>
+            )}
             <button onClick={load} className={iconBtnCls} title={p.common.loading} aria-label={p.common.refresh} disabled={loading}>
               <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             </button>

@@ -17,6 +17,14 @@ type Payload = {
   labels: Record<string, { en: string; ar: string }>;
   configured: boolean;
   writable: boolean;
+  /**
+   * Fields the API will strip from a PATCH (lib/open-reads.ts READONLY_FIELDS).
+   * Shown as text, not as an input: «العملاء»!A «الرقم» is a customer-portal
+   * access key since 2026-09-23, and an input that silently does not save is
+   * worse than no input at all. Optional so a cached payload from before that
+   * change still renders.
+   */
+  readonlyFields?: string[];
 };
 
 /**
@@ -80,6 +88,8 @@ export default function SheetSection({
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [editing, load]);
 
+  const roFields = data?.readonlyFields ?? [];
+
   const label = (f: string) => {
     const l = data?.labels?.[f];
     return l ? (isAr ? l.ar : l.en) : f;
@@ -99,6 +109,7 @@ export default function SheetSection({
     // authoritative Master values) are never overwritten.
     const changes: Record<string, string> = {};
     for (const key of data.fields) {
+      if (roFields.includes(key)) continue;
       const next = form[key] ?? "";
       if (next !== String(editing[key] ?? "")) changes[key] = next;
     }
@@ -277,8 +288,12 @@ export default function SheetSection({
             <div className="grid sm:grid-cols-2 gap-x-4">
               {data.fields.filter((f) => !data.longFields.includes(f)).map((key) => (
                 <Field key={key} label={label(key)}>
-                  <input className={inputCls} value={form[key] ?? ""} disabled={!data.writable}
-                    onChange={(e) => setForm((s) => ({ ...s, [key]: e.target.value }))} />
+                  {roFields.includes(key) ? (
+                    <p className="text-sm text-gray-500 py-2 tabular-nums">{form[key] || "—"}</p>
+                  ) : (
+                    <input className={inputCls} value={form[key] ?? ""} disabled={!data.writable}
+                      onChange={(e) => setForm((s) => ({ ...s, [key]: e.target.value }))} />
+                  )}
                 </Field>
               ))}
             </div>

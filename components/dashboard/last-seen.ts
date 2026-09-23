@@ -34,6 +34,31 @@ export function writeLastSeen(key: string, data: unknown): void {
   }
 }
 
+/**
+ * Throw away every page snapshot on this device — what SIGNING OUT means
+ * (2026-09-23 review).
+ *
+ * These keys are per device, not per account, and a snapshot paints before
+ * the live answer arrives. On a shared browser — a factory office PC, a phone
+ * two people use, a demo laptop — that meant the next person to sign in saw
+ * the previous one's screen for a moment: on /portal, another company's
+ * product names, quantities, reference numbers and delivery dates. The portal
+ * also keys its own snapshots by uid (app/portal/page.tsx), so this is the
+ * second of two locks, and it covers the staff pages as well.
+ */
+export function clearLastSeen(): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && /^itqan\..*\.last(\.|$)/.test(k)) doomed.push(k);
+    }
+    for (const k of doomed) localStorage.removeItem(k);
+  } catch {
+    /* private mode, or storage blocked — nothing was stored either */
+  }
+}
+
 /* ---------------------------- bounded fetch (2026-09-10) ---------------------------
  * No dashboard page had a client-side timeout: when the bridge stalled, the
  * spinner stayed until the platform killed the function (300 s). Every page

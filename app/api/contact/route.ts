@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addInquiry } from "@/lib/db";
 import { isSource } from "@/lib/attribution";
+import { notify, line } from "@/lib/notify";
 
 /**
  * The public enquiry endpoint — unauthenticated by nature, so it carries its
@@ -46,35 +47,21 @@ function rateLimited(ip: string): boolean {
 // cap and could reduce a real value to empty before the emptiness checks ran.
 const s = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 
-async function notify(fields: Record<string, string>, stored: boolean) {
-  const key = process.env.RESEND_API_KEY;
-  const to = (process.env.INQUIRY_NOTIFY_TO ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  if (!key || !to.length) return;
-  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-  const line = (k: string, v: string) => (v ? `<p><b>${k}:</b> ${esc(v)}</p>` : "");
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: process.env.INQUIRY_NOTIFY_FROM || "ITQAN <onboarding@resend.dev>",
-        to,
-        subject: `${stored ? "" : "⚠ لم يُحفظ — "}استفسار جديد من الموقع — ${fields.name || "بدون اسم"}`,
-        html:
-          (stored ? "" : "<p><b>⚠ فشل الحفظ في قاعدة البيانات — هذه الرسالة هي النسخة الوحيدة.</b></p>") +
-          line("الاسم", fields.name) + line("الشركة", fields.company) +
-          line("الهاتف", fields.phone) + line("البريد", fields.email) +
-          line("النوع", fields.inquiry_type) + line("الرسالة", fields.message) +
-          line("المصدر", fields.source) + line("utm_source", fields.utm_source) +
-          line("utm_campaign", fields.utm_campaign) + line("gclid", fields.gclid) +
-          line("fbclid", fields.fbclid) + line("صفحة الوصول", fields.landing_path),
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) console.error(`[contact] notify failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
-  } catch (err) {
-    console.error("[contact] notify failed:", err);
-  }
+// The Resend call itself lives in lib/notify.ts since 2026-09-23 — the portal
+// sends the owner a line on every new order request through the same path, and
+// two copies of it would drift. What stays here is the enquiry's own wording.
+async function notifyInquiry(fields: Record<string, string>, stored: boolean) {
+  await notify(
+    `${stored ? "" : "⚠ لم يُحفظ — "}استفسار جديد من الموقع — ${fields.name || "بدون اسم"}`,
+    (stored ? "" : "<p><b>⚠ فشل الحفظ في قاعدة البيانات — هذه الرسالة هي النسخة الوحيدة.</b></p>") +
+      line("الاسم", fields.name) + line("الشركة", fields.company) +
+      line("الهاتف", fields.phone) + line("البريد", fields.email) +
+      line("النوع", fields.inquiry_type) + line("الرسالة", fields.message) +
+      line("المصدر", fields.source) + line("utm_source", fields.utm_source) +
+      line("utm_campaign", fields.utm_campaign) + line("gclid", fields.gclid) +
+      line("fbclid", fields.fbclid) + line("صفحة الوصول", fields.landing_path),
+    "contact",
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -122,9 +109,9 @@ export async function POST(req: NextRequest) {
     await addInquiry(fields);
   } catch (err) {
     console.error("[contact] store failed:", err);
-    await notify(fields, false);
+    await notifyInquiry(fields, false);
     return NextResponse.json({ ok: false, reason: "store_failed" }, { status: 500 });
   }
-  await notify(fields, true);
+  await notifyInquiry(fields, true);
   return NextResponse.json({ ok: true });
 }

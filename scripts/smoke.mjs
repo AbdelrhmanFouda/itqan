@@ -5,7 +5,7 @@
  *   node scripts/smoke.mjs                              # http://localhost:3000
  *   node scripts/smoke.mjs --base=https://itqan-taupe.vercel.app
  *   node scripts/smoke.mjs --token=<Firebase ID token>  # adds the signed-in checks
- *   node scripts/smoke.mjs --only=pages|open|guarded|mutating|signed
+ *   node scripts/smoke.mjs --only=pages|open|guarded|mutating|portal|signed
  *
  * What it proves, with no login at all:
  *   PAGES     every page answers, in the right language for the cookie
@@ -13,15 +13,25 @@
  *             sitemap, the OG image.
  *   OPEN      the documented open operational reads answer 200 with the shape
  *             the pages expect; the public showcase carries counts and NO names.
+ *             That group shrank to three on 2026-09-23 (customer portal, phase
+ *             0b): runs, machines and the product/mould/machine sheet views
+ *             moved into GUARDED, where they are now expected to answer 401.
  *   GUARDED   every guarded read answers 401 without a token, and 401 with a
  *             bogus one — nothing leaks past a missing header.
  *   MUTATING  every write answers 401 without a token, so nothing here can
  *             touch the sheet (an empty body is sent; a guard that ran AFTER
  *             parsing would show up as a 400, which is also a failure).
+ *   PORTAL    the customer portal (2026-09-23): every /api/portal/* route and
+ *             every /api/requests* route answers 401 with no token AND 401
+ *             with a bogus one, on every method it serves. These two trees
+ *             are the only ones where a leak would show a buyer another
+ *             buyer's orders, or show a buyer the factory's order book.
  * And with --token (any approved role's ID token):
  *   SIGNED    the guarded reads answer 200 for a signed-in user; /api/molds
  *             carries a mould number per row, including the ones that live in
- *             the notes; the job detail carries Master's number.
+ *             the notes; the job detail carries Master's number. And the
+ *             account-kind split: a STAFF token is still refused by every
+ *             /api/portal/* route, because a customer is not a role.
  *
  * Getting a token: open the site signed in, DevTools → Network → any request
  * to /api/jobs → Request Headers → copy the value after "Bearer ". It is valid
@@ -113,13 +123,17 @@ for (const [p, ar, en] of [
     return `${a.ms}ms / ${e.ms}ms`;
   });
 }
-for (const p of ["/dashboard/downtime", "/dashboard/jobs", "/dashboard/storage", "/dashboard/stock", "/dashboard/performance", "/dashboard/issues", "/dashboard/assistant", "/dashboard/machines", "/dashboard/reports", "/dashboard/approvals", "/dashboard/production", "/dashboard/quality", "/dashboard/finance", "/dashboard/sales"]) {
+for (const p of ["/dashboard/downtime", "/dashboard/jobs", "/dashboard/storage", "/dashboard/stock", "/dashboard/performance", "/dashboard/issues", "/dashboard/assistant", "/dashboard/machines", "/dashboard/reports", "/dashboard/approvals", "/dashboard/production", "/dashboard/quality", "/dashboard/finance", "/dashboard/sales", "/dashboard/requests",
+  // The customer portal, 2026-09-23. Its shell bounces a signed-out visitor to
+  // /portal/login on the client, so the HTML itself answers 200 like the
+  // dashboard's does.
+  "/portal", "/portal/login", "/portal/new"]) {
   await check(`${p} answers 200`, async () => { const r = await req(p); expect(r.status === 200, `HTTP ${r.status}`); return `${r.ms}ms`; });
 }
-await check("/robots.txt keeps the dashboard, the API and login out of search", async () => {
+await check("/robots.txt keeps the dashboard, the API, login and the portal out of search", async () => {
   const r = await req("/robots.txt");
   expect(r.status === 200, `HTTP ${r.status}`);
-  for (const d of ["/dashboard", "/api/", "/login"]) expect(r.text.includes(`Disallow: ${d}`), `missing Disallow: ${d}`);
+  for (const d of ["/dashboard", "/api/", "/login", "/portal"]) expect(r.text.includes(`Disallow: ${d}`), `missing Disallow: ${d}`);
 });
 await check("/sitemap.xml is an XML sitemap", async () => {
   const r = await req("/sitemap.xml");
@@ -136,36 +150,6 @@ await check("the share card is an image", async () => {
 /* ---------------------------------- OPEN ---------------------------------- */
 
 group("open");
-await check("GET /api/runs → an array of runs with product + downtime fields", async () => {
-  const r = await req("/api/runs");
-  expect(r.status === 200 && Array.isArray(r.json), `HTTP ${r.status}`);
-  if (r.json.length) for (const k of ["id", "date", "machine", "product", "goodUnits", "scrapUnits", "downtimeMin"]) expect(k in r.json[0], `run lacks ${k}`);
-  expect(!r.json.some((x) => "client" in x || "note" in x), "runs leak client/note fields");
-  return `${r.json.length} runs · ${r.ms}ms`;
-});
-await check("GET /api/oee → the OEE picture with readiness", async () => {
-  const r = await req("/api/oee");
-  expect(r.status === 200 && r.json && "overall" in r.json && "readiness" in r.json, `HTTP ${r.status}`);
-  return `${r.json.runCount ?? "?"} runs · ${r.ms}ms`;
-});
-await check("GET /api/machines → the registry with labels", async () => {
-  const r = await req("/api/machines");
-  expect(r.status === 200 && Array.isArray(r.json?.machines), `HTTP ${r.status}`);
-  expect(r.json.machines.every((m) => typeof m.label === "string" && m.label), "a machine has no label");
-  return `${r.json.machines.length} machines · ${r.ms}ms`;
-});
-await check("GET /api/issues → the faults log", async () => {
-  const r = await req("/api/issues");
-  expect(r.status === 200 && Array.isArray(r.json?.issues), `HTTP ${r.status}`);
-  return `${r.json.issues.length} issues · ${r.ms}ms`;
-});
-for (const e of ["molds", "products", "machines", "issues"]) {
-  await check(`GET /api/sheet/${e} → records + fields (documented open read)`, async () => {
-    const r = await req(`/api/sheet/${e}`);
-    expect(r.status === 200 && Array.isArray(r.json?.records) && Array.isArray(r.json?.fields), `HTTP ${r.status}`);
-    return `${r.json.records.length} rows · ${r.ms}ms`;
-  });
-}
 await check("GET /api/public/showcase → three counts and nothing else", async () => {
   const r = await req("/api/public/showcase");
   expect(r.status === 200 && r.json?.stats, `HTTP ${r.status}`);
@@ -218,6 +202,17 @@ const GUARDED = [
   "/api/reports/draft?month=2026-08", "/api/ai-review", "/api/inquiries", "/api/agent", "/api/molds",
   "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production", "/api/sheet/downtime",
   "/api/issues/audio?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+  // Closed 2026-09-23 (customer portal, phase 0b) — they answered 200 to
+  // anyone until then. The run rows carry the operator's name, the registry
+  // carries the machine count, and the product/mould views pair 502 product
+  // names with a real client name.
+  "/api/runs", "/api/machines", "/api/machines/x", "/api/machines/x/notes",
+  "/api/sheet/products", "/api/sheet/molds", "/api/sheet/machines",
+  // Closed the same day, on the review pass: the faults log names a product
+  // and a registry machine label on every row, and the OEE body carries one
+  // entry per machine WITH its label — the machine count — plus product names
+  // in standardsGap/suspects. There is no open entity left at all.
+  "/api/issues", "/api/oee", "/api/sheet/issues",
 ];
 for (const p of GUARDED) {
   await check(`GET ${p} without a token → 401`, async () => {
@@ -252,6 +247,58 @@ for (const [m, p] of MUTATING) {
   });
 }
 await check("GET /api/runs/1 → 405 (that route only deletes)", async () => { const r = await req("/api/runs/1"); expect(r.status === 405, `HTTP ${r.status}`); });
+
+/* --------------------------------- PORTAL --------------------------------- */
+//
+// The customer portal, 2026-09-23. Two trees, two different guards, and the
+// same expectation from outside: nothing without a verified token.
+//
+//   /api/portal/*   requireCustomer / requireCustomerAccount — they read
+//                   customers/{uid} AS THE CALLER. No token ⇒ no document ⇒
+//                   401, and that is also what a STAFF token gets (checked in
+//                   the signed group, where there is a real token to try).
+//   /api/requests*  requireRole(req, ["sales"]) — the factory's side of the
+//                   same queue. A customer's token is refused here for the
+//                   mirror reason: a customer has no role at all.
+//
+// Every method each route serves is exercised, because a guard that is on the
+// GET and missing from the PATCH is exactly the shape of mistake this catches.
+// A 400 or a 405 is a FAILURE here, not a pass: it would mean the body was
+// parsed, or the method dispatched, before anybody asked who was calling.
+
+group("portal");
+const PORTAL = [
+  ["GET", "/api/portal/me"],
+  ["GET", "/api/portal/products"],
+  ["GET", "/api/portal/orders"],
+  ["GET", "/api/requests"],
+  ["GET", "/api/requests/REQ-2026-0001/preview"],
+  ["POST", "/api/portal/register"],
+  ["POST", "/api/portal/requests"],
+  ["PATCH", "/api/portal/requests/REQ-2026-0001"],
+  ["POST", "/api/requests/REQ-2026-0001/approve"],
+  ["POST", "/api/requests/REQ-2026-0001/reject"],
+];
+for (const [m, p] of PORTAL) {
+  await check(`${m} ${p} without a token → 401`, async () => {
+    const r = await req(p, { method: m, body: m === "GET" ? undefined : {} });
+    expect(r.status === 401, `HTTP ${r.status}${r.json ? ` ${JSON.stringify(r.json).slice(0, 80)}` : ""}`);
+    return `${r.ms}ms`;
+  });
+}
+for (const [m, p] of PORTAL) {
+  await check(`${m} ${p} with a bogus token → 401`, async () => {
+    const r = await req(p, { method: m, token: "not-a-real-token", body: m === "GET" ? undefined : {} });
+    expect(r.status === 401, `HTTP ${r.status}${r.json ? ` ${JSON.stringify(r.json).slice(0, 80)}` : ""}`);
+  });
+}
+await check("a refused portal answer carries no order, no product and no customer", async () => {
+  for (const [m, p] of PORTAL) {
+    const r = await req(p, { method: m, token: "not-a-real-token", body: m === "GET" ? undefined : {} });
+    expect(!/requests|orders|products|clients|@/.test(r.text), `${m} ${p} says «${r.text.slice(0, 80)}»`);
+  }
+  return `${PORTAL.length} routes · unauthorized only`;
+});
 
 /* --------------------------------- SIGNED --------------------------------- */
 
@@ -303,6 +350,55 @@ if (!TOKEN) {
   for (const p of ["/api/storage", "/api/downtime?quick=1", "/api/reports"]) {
     await check(`GET ${p} with the token → 200`, async () => { const r = await req(p, { token: TOKEN }); expect(r.status === 200, `HTTP ${r.status}`); return `${r.ms}ms`; });
   }
+  // The two reads that moved out of the open group on 2026-09-23: they must
+  // still SERVE, and serve the same shape, to a signed-in caller. Closing a
+  // route and breaking the page that needs it look identical from outside
+  // without these.
+  await check("GET /api/runs with the token → the run list, still with no client/note field", async () => {
+    const r = await req("/api/runs", { token: TOKEN });
+    expect(r.status === 200 && Array.isArray(r.json), `HTTP ${r.status}`);
+    if (r.json.length) for (const k of ["id", "date", "machine", "product", "goodUnits", "scrapUnits", "downtimeMin"]) expect(k in r.json[0], `run lacks ${k}`);
+    expect(!r.json.some((x) => "client" in x || "note" in x), "runs leak client/note fields");
+    return `${r.json.length} runs · ${r.ms}ms`;
+  });
+  await check("GET /api/machines with the token → the registry with labels", async () => {
+    const r = await req("/api/machines", { token: TOKEN });
+    expect(r.status === 200 && Array.isArray(r.json?.machines), `HTTP ${r.status}`);
+    expect(r.json.machines.every((m) => typeof m.label === "string" && m.label), "a machine has no label");
+    return `${r.json.machines.length} machines · ${r.ms}ms`;
+  });
+  for (const e of ["molds", "products", "machines"]) {
+    await check(`GET /api/sheet/${e} with the token → records + fields`, async () => {
+      const r = await req(`/api/sheet/${e}`, { token: TOKEN });
+      expect(r.status === 200 && Array.isArray(r.json?.records) && Array.isArray(r.json?.fields), `HTTP ${r.status}`);
+      return `${r.json.records.length} rows · ${r.ms}ms`;
+    });
+  }
+  // The account-kind split, 2026-09-23. This is the check that a valid STAFF
+  // token cannot open a customer's portal: `requireCustomer` reads
+  // customers/{uid}, a staff member has no such document, and the answer is
+  // 401 — not 403, because the portal does not admit that the caller exists.
+  // A 200 here would mean the portal had fallen back to a role lookup.
+  for (const p of ["/api/portal/me", "/api/portal/products", "/api/portal/orders"]) {
+    await check(`GET ${p} with a STAFF token → still 401 (a customer is not a role)`, async () => {
+      const r = await req(p, { token: TOKEN });
+      expect(r.status === 401, `HTTP ${r.status}${r.json ? ` ${JSON.stringify(r.json).slice(0, 80)}` : ""}`);
+      return `HTTP 401 (role ${role})`;
+    });
+  }
+  // The staff side of the same queue. Sales, manager and owner may read it;
+  // every other approved role must be refused — and refused with a 403, which
+  // is what says the guard ran and the ROLE was the reason.
+  await check("GET /api/requests with the token → the queue for sales/manager/owner, 403 for anyone else", async () => {
+    const r = await req("/api/requests", { token: TOKEN });
+    if (["owner", "manager", "sales"].includes(role)) {
+      expect(r.status === 200 && Array.isArray(r.json?.requests), `HTTP ${r.status}`);
+      expect(typeof r.json.pending === "number", "no pending count for the jobs-page badge");
+      return `${r.json.requests.length} requests · ${r.json.pending} pending · ${r.ms}ms`;
+    }
+    expect(r.status === 403, `HTTP ${r.status} for role ${role} — expected 403`);
+    return `403 (role ${role})`;
+  });
   await check("PATCH /api/molds with no changes → a no-op 200 for any approved role (nothing written)", async () => {
     const r = await req("/api/molds", { method: "PATCH", token: TOKEN, body: { row: 3, name: "x", changes: {} } });
     expect(r.status === 200 && r.json?.ok === true, `HTTP ${r.status}`);

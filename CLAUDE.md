@@ -46,6 +46,36 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-23) — the customer portal
+
+A buyer signs up, the owner approves and LINKS the account to «العملاء» rows, and the
+buyer sees their own orders and asks for new ones. `../CHANGES-2026-09-23-customer-portal.md`.
+
+- **A customer is an ACCOUNT KIND, never a `Role`** — `lib/roles.ts` is untouched and a
+  test pins that. The account is `customers/{uid}`; `requireCustomer` /
+  `requireCustomerAccount` read it **as the caller** over Firestore REST, bounded and
+  never cached. `requireRole` refuses a customer; the portal guards refuse staff.
+- **The link is the access boundary.** `clients` (list of «العملاء» rows + aliases) is
+  admin-only in `firestore.rules`. A row belongs to a customer iff
+  `clientKey(row.client)` is EXACTLY one of their keys (`lib/customer-link.ts`) — never
+  a substring, never `foldWord`. Both portal reads filter server-side.
+- **«طلبات العملاء»** (entity `customerRequests`, 16 cols, `lib/customer-requests.ts`) is
+  created LAZILY by the first real submit (append → `no_tab` → `ensureTab` → append), the
+  `logIssue` pattern. States stored in Arabic; `REQ-YYYY-NNNN` from a fresh read; 15-minute
+  replay window; 5 open per customer. Column D is «اسم العميل / Client Name» on purpose —
+  «العميل» alone would read the client NUMBER out of column C.
+- **Two whitelists, pinned exactly** (`PORTAL_REQUEST_KEYS` / `PORTAL_ORDER_KEYS`): a
+  customer never sees machine, scrap, operator, priority, notes, material or progress.
+- **ONE code path creates a work order**: `lib/work-orders-write.ts` `createWorkOrder`,
+  called by `POST /api/jobs` and by the approval. The `[REQ-…]` marker in «ملاحظات» is
+  what stops a second tap creating a second order.
+- **Reads closed the same day:** `/api/runs`, `/api/machines*` and the products / moulds /
+  machines sheet views are guarded, and so — after the review pass the same day —
+  are `/api/issues` and `/api/oee` (a fault row names a product and a registry machine
+  label; the OEE body carries one entry per machine with its label, so the machine
+  count, plus product names). **`OPEN_READS` is EMPTY**, and `customerRequests` is
+  sales-only on the entity route, not merely guarded.
+
 ## Recently landed (2026-09-22) — a «عطلة» row is every machine's day off
 
 Owner: "automatically set all machines as vacation in the vacations" — the vacations
@@ -77,8 +107,9 @@ the shift cell, nothing else). Full note: `../CHANGES-2026-09-22-day-off.md`.
   tab cannot be read). The page fires it beside the full answer — never in front of the
   today-list — and on a day off shows a banner and a «عطلة» tag on every machine button.
   Buttons stay tappable; the flow gains no tap; nothing is written.
-- **`uniqueByLabel()` (lib/run-row.ts, 2026-09-23):** the registry holds `PQ 7` on two
-  rows (one per product), and `/api/machines` returns every row on purpose (the register
+- **`uniqueByLabel()` (lib/run-row.ts, 2026-09-23):** the registry held `PQ 7` on two
+  rows (one per product) until the owner had row 16 deleted the same day; the dedupe stays
+  for the next duplicate, and `/api/machines` returns every row on purpose (the register
   page edits rows). Every PICKER dedupes by label — downtime (live + remembered list),
   issues, job detail, production form, dashboard home count. A new machine picker must
   do the same or it draws the duplicate.
@@ -1270,11 +1301,23 @@ own «المتوقع». It is a domain question that outlived the feature.
   exhaustive: a read not on it is either guarded or it is a leak**, which is exactly how
   jobs and storage sat open for weeks. The list lives in ONE place — `DOCUMENTED_OPEN`
   in `tests/api-guards.test.ts`, checked against every route file on disk; today it is
-  `google/callback`, `google/connect`, `health`, `issues`, `machines`, `machines/[id]`,
-  `machines/[id]/notes`, `oee`, `public/showcase`, `runs`, `warm`. The entity reads on
+  `google/callback`, `google/connect`, `health`, `public/showcase`, `warm` — **nothing
+  open carries factory data any more.** Seven reads left that list on 2026-09-23:
+  `runs` (every shift row carries the operator's NAME, which the production and quality
+  pages print, so the field could not simply be dropped), `machines`, `machines/[id]` and
+  `machines/[id]/notes` (the registry, the machine COUNT the owner's rule of 2026-09-20
+  keeps off public surfaces, and a fitter's own words), and — on the entity route —
+  `products` and `molds`, which answered a token-less caller with 503 product names, 502
+  of them paired with a real client name; then, on the same day's review pass, `issues`
+  and `oee`, because **a fault row names «المنتج» and the registry label «الماكينة», and
+  the OEE body carries one entry per machine WITH its label (so the machine count) plus
+  product names in `standardsGap`/`suspects`** — the same data phase 0b had just closed,
+  served through two other doors. The entity reads on
   `/api/sheet/[entity]` are the conditional case: `lib/open-reads.ts` holds `OPEN_READS`
-  (molds, products, machines, issues) and `WRITABLE_ENTITIES` (products, clients), both
-  DENY-BY-DEFAULT and pinned by `tests/open-reads.test.ts`. Quote no other list here —
+  (**EMPTY since 2026-09-23** — every entity needs a token) and `WRITABLE_ENTITIES`
+  (products, clients), both DENY-BY-DEFAULT and pinned by `tests/open-reads.test.ts`;
+  `customerRequests` is stricter still, sales-only like `clients`, because a row there
+  names a customer and one tap on it creates a work order. Quote no other list here —
   two copies is how this one drifted.
   `/api/molds` (Master for the register, 2026-09-04) is GUARDED — any approved role
   reads and writes (owner's word). `tests/api-guards.test.ts` pins every route file and

@@ -6,12 +6,18 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function ownerEmail() { return 'abdelrhman.2003.16@gmail.com'; }
     function isOwner() { return isSignedIn() && request.auth.token.email == ownerEmail(); }
-    // Admins = the owner email OR any signed-in user whose granted role is "manager".
-    // (Managers can run approvals; the owner is always an admin via email.)
+    // Admins = the owner email OR any signed-in user whose granted role is
+    // "manager" AND whose account is APPROVED.
+    //
+    // ⚠ The status check is not decoration. Without it a manager whose account
+    // had been rejected or revoked kept full admin rights over every profile in
+    // this collection — including the right to write `status: 'approved'` back
+    // onto his own document. Revoking a manager did nothing until this line.
     function isManager() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
     }
     function isAdmin() { return isOwner() || isManager(); }
 
@@ -36,6 +42,26 @@ service cloud.firestore {
       );
 
       allow delete: if isAdmin();
+    }
+
+    // -- Customer accounts (the buyer portal). A customer is an ACCOUNT KIND,
+    //    never one of the staff roles: their document lives here, not in
+    //    /users, so they never receive a role and every requireRole() handler
+    //    refuses them by a property of the system rather than a remembered
+    //    check.
+    //
+    //    The LINK to a client name («العملاء») lives in `clients` on this
+    //    document and is the access boundary for everything the portal serves.
+    //    It therefore cannot be written by the account itself — not at sign-up
+    //    (the create rule forbids the field outright) and not afterwards (only
+    //    an admin may update). The portal's own register route creates the
+    //    document as the caller, pending and unlinked.
+    match /customers/{uid} {
+      allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == uid
+                    && request.resource.data.status == 'pending'
+                    && !('clients' in request.resource.data);
+      allow update, delete: if isAdmin();
     }
 
     // -- Operational + public collections.

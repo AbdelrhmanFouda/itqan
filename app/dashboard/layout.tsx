@@ -8,12 +8,16 @@ import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
 import { t } from "@/lib/i18n";
 import { ad } from "@/lib/i18n.auth";
+import { cp } from "@/lib/i18n.portal";
 import { navFor, canAccess, landingFor, type NavKey } from "@/lib/roles";
 import { Spinner } from "@/components/dashboard/ui";
+// Lifted out of this file on 2026-09-23 so the customer portal can show the
+// same card with its own words. The look here is unchanged.
+import { StatusScreen } from "@/components/dashboard/status-screen";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
   BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Warehouse,
-  TimerOff, Boxes,
+  TimerOff, Boxes, Inbox,
 } from "lucide-react";
 
 const ICON: Record<NavKey, React.ElementType> = {
@@ -25,6 +29,7 @@ const ICON: Record<NavKey, React.ElementType> = {
   molds: Box,
   products: Layers,
   jobs: FileText,
+  requests: Inbox,
   production: Layers,
   downtime: TimerOff,
   issues: AlertTriangle,
@@ -39,7 +44,7 @@ const ICON: Record<NavKey, React.ElementType> = {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { lang, setLang } = useLang();
-  const { user, profile, loading, profileLoading, signOut } = useAuth();
+  const { user, profile, loading, profileLoading, isCustomer, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const isAr = lang === "ar";
@@ -54,6 +59,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [loading, user, router]);
+
+  // A CUSTOMER who lands here → the portal (2026-09-23). They hold no staff
+  // profile, so without this they would sit on "Setting up your account…"
+  // forever — the branch below waits for a document that is never written.
+  useEffect(() => {
+    if (!loading && user && isCustomer) router.replace("/portal");
+  }, [loading, user, isCustomer, router]);
 
   // Approved but visiting a route their role can't see → send to their landing
   useEffect(() => {
@@ -83,6 +95,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "molds": return p.nav.molds;
       case "products": return p.nav.products;
       case "jobs": return p.nav.jobs;
+      // The portal's own namespace — the staff half of lib/i18n.portal.ts.
+      case "requests": return cp[lang].staff.reqs.nav;
       case "production": return p.nav.production;
       case "downtime": return p.nav.downtime;
       case "issues": return p.nav.issues;
@@ -211,59 +225,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </aside>
 
         <main className="flex-1 min-w-0 p-4 sm:p-6 md:p-8 overflow-auto">{children}</main>
-      </div>
-    </div>
-  );
-}
-
-function StatusScreen(props: {
-  isAr: boolean;
-  title: string;
-  body: string;
-  email: string;
-  requestedLabel?: string;
-  signedInAs: string;
-  signOutLabel: string;
-  backLabel: string;
-  onSignOut: () => void;
-  langBtn: string;
-  onLang: () => void;
-}) {
-  return (
-    <div dir={props.isAr ? "rtl" : "ltr"} className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="h-14 flex items-center px-6">
-        <Link href="/" className="font-bold text-gray-900 text-sm">
-          إتقان <span className="text-blue-600">Itqan</span>
-        </Link>
-        <button
-          onClick={props.onLang}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-11 sm:min-h-0 transition-colors ms-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
-        >
-          <Globe size={12} />
-          {props.langBtn}
-        </button>
-      </header>
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm bg-white border border-gray-200 rounded-2xl shadow-sm p-7 text-center">
-          <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-          </div>
-          <h1 className="text-lg font-bold text-gray-900 mb-2">{props.title}</h1>
-          <p className="text-sm text-gray-500 leading-relaxed mb-4">{props.body}</p>
-          {props.requestedLabel && (
-            <p className="inline-block text-xs px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 mb-4">
-              {props.requestedLabel}
-            </p>
-          )}
-          <p className="text-xs text-gray-400 mb-5">{props.signedInAs}: {props.email}</p>
-          <button
-            onClick={props.onSignOut}
-            className="w-full border border-gray-300 hover:bg-gray-50 active:bg-gray-100 text-gray-700 text-sm px-4 py-2 min-h-11 sm:min-h-0 inline-flex items-center justify-center rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"
-          >
-            {props.signOutLabel}
-          </button>
-          <Link href="/" className="block text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5">{props.backLabel}</Link>
-        </div>
       </div>
     </div>
   );

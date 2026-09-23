@@ -58,14 +58,16 @@ export default function MachinesPage() {
   const [form, setForm] = useState({ code: "", name: "", manufacturer: "", status: "Active", shiftLength: "720", product: "" });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // `/api/machines` is an open read, so a plain bounded fetch is right here.
+  // `/api/machines` is GUARDED since 2026-09-23 (it published the registry and
+  // its count to anyone), so the read carries the token — a plain fetch here
+  // would answer 401 and the page would say "no machines".
   // A stalled bridge must not blank a registry the person was reading a second
   // ago, and an EMPTY answer never replaces a registry that has rows — "no
   // machines" read as the truth is the lie those two rules guard against.
   const { data, loading, failed, reload: load } = useRemembered<Data>({
     key: LAST_KEY,
     read: async () => {
-      const r = await timedJson<Data>(fetch, "/api/machines");
+      const r = await timedJson<Data>(authedFetch, "/api/machines");
       return r.ok && !Array.isArray(r.data?.machines) ? { ok: false, status: 0, timedOut: false } : r;
     },
     valid: (snap) => Array.isArray(snap?.machines),

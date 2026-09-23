@@ -40,12 +40,18 @@ const OPEN_APIS = [
   // First on purpose: /api/health touches nothing (no sheet, no Firebase), so
   // it is the zero-dependency baseline every other number is read against.
   "/api/health",
-  "/api/machines", "/api/runs", "/api/oee", "/api/issues", "/api/sheet/molds", "/api/sheet/products",
   "/api/public/showcase",
 ];
 const GUARDED_APIS = [
   "/api/molds", "/api/jobs", "/api/storage", "/api/downtime?quick=1", "/api/downtime", "/api/reports",
   "/api/sheet/master",
+  // Moved here on 2026-09-23 (customer portal, phase 0b). Timed without a
+  // token they would answer 401 in a millisecond and report the sheet as
+  // instant — a fast lie is worse than a slow truth.
+  "/api/machines", "/api/runs", "/api/sheet/molds", "/api/sheet/products",
+  // And here on the same day'''s review pass, for the same reason: the faults
+  // log and the OEE set are guarded now.
+  "/api/oee", "/api/issues",
 ];
 
 let errored = false;

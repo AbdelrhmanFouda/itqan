@@ -131,7 +131,7 @@ export default function IssuesPage() {
   const load = useCallback(async () => {
     inFlight.current = true;
     setRefreshing(true);
-    const r = await timedJson<IssuesResp>(fetch, "/api/issues");
+    const r = await timedJson<IssuesResp>(authedFetch, "/api/issues");
     inFlight.current = false;
     setRefreshing(false);
     if (r.ok && Array.isArray(r.data.issues)) {
@@ -165,9 +165,12 @@ export default function IssuesPage() {
         // the bridge serialises, and they feed nothing but the form's machine
         // dropdown and product datalist — started first, they queued the tab
         // the page is actually waiting for behind them.
-        void timedJson<{ machines?: Machine[] }>(fetch, "/api/machines")
+        // Both carry the token since 2026-09-23: the registry and the product
+        // list are no longer open reads (a product name comes paired with a
+        // real client name in «الرئيسي»).
+        void timedJson<{ machines?: Machine[] }>(authedFetch, "/api/machines")
           .then((r) => { if (alive && r.ok) setMachines(uniqueByLabel(r.data.machines ?? [])); });
-        void timedJson<{ records?: { name?: string }[] }>(fetch, "/api/sheet/products")
+        void timedJson<{ records?: { name?: string }[] }>(authedFetch, "/api/sheet/products")
           .then((r) => {
             if (alive && r.ok) setProducts((r.data.records ?? []).map((x) => x.name || "").filter(Boolean));
           });

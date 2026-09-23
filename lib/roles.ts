@@ -23,6 +23,24 @@ export const REQUESTABLE_ROLES: Role[] = [
 ];
 export const ALL_ROLES: Role[] = ["owner", ...REQUESTABLE_ROLES];
 
+/**
+ * The ONLY way an untrusted string becomes a `Role`.
+ *
+ * A granted role arrives from Firestore as free text and used to be cast
+ * straight to `Role` (`d.role as Role`), so a profile hand-written with any
+ * word at all — `status: "approved", role: "customer"` — passed every bare
+ * `requireRole(req)` in the site. Nothing in the type system catches that: the
+ * cast is a promise, not a check. Validate here, in the one zero-import module
+ * that owns the list, and an unknown word resolves to null → 401 everywhere.
+ *
+ * Pinned by tests/role-hardening.test.ts.
+ */
+export function asRole(value: unknown): Role | null {
+  return typeof value === "string" && (ALL_ROLES as string[]).includes(value)
+    ? (value as Role)
+    : null;
+}
+
 // Roles that can see and do everything: the owner plus any manager.
 const FULL_ACCESS: Role[] = ["owner", "manager"];
 export function hasFullAccess(role: Role): boolean {
@@ -61,7 +79,7 @@ export function landingFor(role: Role): string {
 
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
-  | "machines" | "molds" | "products" | "jobs" | "production" | "performance"
+  | "machines" | "molds" | "products" | "jobs" | "requests" | "production" | "performance"
   | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock";
 
 /**
@@ -93,6 +111,12 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/molds", key: "molds", roles: ["worker"] },
   { href: "/dashboard/products", key: "products", roles: ["sales"] },
   { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
+  // «طلبات العملاء» — the customer portal's review queue (2026-09-23, owner's
+  // decision 6: sales, manager and the owner approve). NOT production and NOT
+  // quality: a row here names a customer and turns into a real work order with
+  // material bought against it. Without an entry of its own the page would be
+  // inherited through the overview prefix by exactly those two roles.
+  { href: "/dashboard/requests", key: "requests", roles: ["sales"] },
   // «المتاح في المخزن» (2026-09-09 brief): the production side reads the
   // warehouse to answer «can I promise this?» — المتوفر, المحجوز on open work
   // orders, المتاح — and writes NOTHING there. Not the storekeeper's page

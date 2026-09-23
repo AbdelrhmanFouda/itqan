@@ -13,6 +13,11 @@ import { pd } from "@/lib/i18n.prod";
 import { bounded } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import type { Tone } from "@/lib/prod-meta";
+// «حسابات العملاء» (2026-09-23) — the customer portal's accounts and the link
+// that decides what each of them can see. Its own component because it reads a
+// different collection AND «العملاء» through the sheet route; this page keeps
+// doing staff profiles exactly as it did.
+import CustomerAccounts from "@/components/dashboard/customer-accounts";
 
 const statusTone = (s: string): Tone => (s === "approved" ? "green" : s === "rejected" ? "red" : "amber");
 
@@ -88,6 +93,10 @@ export default function ApprovalsPage() {
             <Spinner text={p.common.loading} />
           </div>
         )}
+        {/* The customer section reads a different collection, so a slow or
+            failed STAFF list must not hide it — approving a buyer is not
+            blocked by the staff queue being unavailable. */}
+        <CustomerAccounts />
       </div>
     );
   }
@@ -238,6 +247,8 @@ export default function ApprovalsPage() {
         </table>
         </div>
       </div>
+
+      <CustomerAccounts />
     </div>
   );
 }

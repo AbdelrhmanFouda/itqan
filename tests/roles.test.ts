@@ -118,7 +118,11 @@ test("the pages production and quality lost are really gone", () => {
 
 test("maintenance, sales, finance and storage are unchanged", () => {
   assert.deepEqual(keysFor("maintenance").sort(), ["downtime", "issues", "machines"]);
-  assert.deepEqual(keysFor("sales").sort(), ["clients", "jobs", "products", "sales"]);
+  // Sales gained `requests` on 2026-09-23 — a DELIBERATE move of this pin, not
+  // drift: the customer portal's review queue is theirs, the owner's and the
+  // manager's, and nobody else's (owner's decision 6). The matrix row is in
+  // tests/views-matrix.test.ts.
+  assert.deepEqual(keysFor("sales").sort(), ["clients", "jobs", "products", "requests", "sales"]);
   assert.deepEqual(keysFor("finance").sort(), ["finance", "reports"]);
   assert.deepEqual(keysFor("storage").sort(), ["storage"]);
 });

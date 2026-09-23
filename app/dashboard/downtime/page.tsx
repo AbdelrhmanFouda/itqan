@@ -221,7 +221,7 @@ export default function DowntimePage() {
   const refreshMachines = useCallback(async () => {
     if (machinesAsked.current) return;
     machinesAsked.current = true;
-    const r = await timedJson<{ machines?: MachineInfo[] }>(fetch, "/api/machines");
+    const r = await timedJson<{ machines?: MachineInfo[] }>(authedFetch, "/api/machines");
     if (!r.ok) { setMachines((prev) => prev ?? []); return; }
     // One button per machine LABEL — the registry holds «PQ 7» on two rows
     // (one per product), which used to draw two «PQ 7 — 100» buttons.

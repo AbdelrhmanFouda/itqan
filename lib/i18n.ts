@@ -10,6 +10,9 @@ export const t = {
       tools: "Equipment",
       contact: "Contact",
       dashboard: "Dashboard",
+      // «بوابة العملاء» (2026-09-23) — beside the staff link, in the navbar and
+      // the footer. The portal itself is Disallow-ed in robots.ts.
+      customerLogin: "Customer login",
       call: "Call us",
       whatsapp: "WhatsApp",
     },
@@ -150,6 +153,7 @@ export const t = {
       tools: "المعدات",
       contact: "تواصل معنا",
       dashboard: "لوحة التحكم",
+      customerLogin: "دخول العملاء",
       call: "اتصل بنا",
       whatsapp: "واتساب",
     },

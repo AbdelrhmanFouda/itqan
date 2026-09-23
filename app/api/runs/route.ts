@@ -92,7 +92,18 @@ function publicRun(r: ReturnType<typeof shape>) {
   };
 }
 
+/**
+ * GUARDED since 2026-09-23 (any approved role).
+ *
+ * The payload carries `operator` — the name of the person who ran the shift —
+ * on every one of ~1,000 rows, and the production and quality pages both print
+ * that column, so dropping the field was not open to us. A staff name is not an
+ * operational read; it is a person. The four pages that read this route
+ * (overview, finance, production, quality) go through authedFetch now.
+ */
 export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const prodRead = getRecords("production");
     // Days off («عطلة» rows — every machine off), from the read already in
@@ -147,9 +158,10 @@ export async function GET(req: NextRequest) {
     });
 
     runs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : Number(b.id) - Number(a.id)));
-    // Open operational read — a browser may reuse it briefly. The server-side
-    // sheet cache (lib/sheets.ts, 45s) is the real one; this only spares a
-    // phone re-downloading the same list on every poll.
+    // Per-browser reuse only (`private`) — never a shared cache, now that a
+    // token decides who may see this. The server-side sheet cache
+    // (lib/sheets.ts, 45s) is the real one; this only spares a phone
+    // re-downloading the same list on every poll.
     return NextResponse.json(runs.map(publicRun), {
       headers: { "Cache-Control": "private, max-age=30" },
     });

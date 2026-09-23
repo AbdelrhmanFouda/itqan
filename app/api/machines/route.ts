@@ -24,7 +24,16 @@ export type MachineInfo = {
   shiftLength: number;  // minutes (720 default when blank)
 };
 
-export async function GET() {
+/**
+ * GUARDED since 2026-09-23 (any approved role). It answered the whole registry
+ * — every press, its tonnage, its manufacturer and the product standing in it —
+ * to a caller with no token, and with it the machine COUNT, which the owner's
+ * rule of 2026-09-20 keeps off every public surface. Nothing on the public site
+ * reads this route; the dashboard pages that do now go through authedFetch.
+ */
+export async function GET(req: NextRequest) {
+  const g = await requireRole(req);
+  if ("deny" in g) return g.deny;
   try {
     const tab = await getRecords("machines");
     const machines: MachineInfo[] = [];
@@ -55,8 +64,9 @@ export async function GET() {
         writable: sheetsWritable(),
         configured: tab.records.length > 0 || tab.fields.length > 0,
       },
-      // Open operational read — browsers may reuse it briefly. The empty
-      // fallback below carries no cache header on purpose.
+      // Per-browser reuse only (`private`) — never a shared cache, now that a
+      // token decides who may see this. The empty fallback below carries no
+      // cache header on purpose.
       { headers: { "Cache-Control": "private, max-age=30" } },
     );
   } catch (err) {

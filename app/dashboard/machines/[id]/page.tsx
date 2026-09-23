@@ -48,10 +48,12 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
   const [saving, setSaving] = useState(false);
   const [newStatus, setNewStatus] = useState("");
 
-  // Both GETs are open reads; both are bounded, so neither can spin for ever.
+  // Both GETs are GUARDED since 2026-09-23 (the registry row and a fitter's
+  // notes), so both carry the token; both are bounded, so neither can spin for
+  // ever.
   const loadMachine = useCallback(async () => {
     setState((s) => (s === "ok" ? s : "loading"));
-    const r = await timedJson<Machine>(fetch, `/api/machines/${id}`);
+    const r = await timedJson<Machine>(authedFetch, `/api/machines/${id}`);
     if (r.ok && r.data) {
       setMachine(r.data);
       setNewStatus(r.data.status);
@@ -65,7 +67,7 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
   }, [id]);
 
   const loadNotes = useCallback(async () => {
-    const r = await timedJson<Note[]>(fetch, `/api/machines/${id}/notes`);
+    const r = await timedJson<Note[]>(authedFetch, `/api/machines/${id}/notes`);
     // A failed notes read leaves the notes that are on screen alone.
     if (r.ok && Array.isArray(r.data)) setNotes(r.data);
   }, [id]);

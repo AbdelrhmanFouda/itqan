@@ -7,19 +7,31 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OPEN_READS, WRITABLE_ENTITIES } from "../lib/open-reads.ts";
+import { OPEN_READS, SALES_ONLY, WRITABLE_ENTITIES, READONLY_FIELDS, readonlyFields } from "../lib/open-reads.ts";
+import fs from "node:fs";
+import path from "node:path";
 
-test("OPEN_READS is exactly the four documented open operational reads", () => {
+test("OPEN_READS is EMPTY — every entity needs a token", () => {
   // A change here is a decision to publish or unpublish factory data, not
   // housekeeping. If this assertion is in your way, that decision is being
   // made — say so in the department brief, don't just edit the list.
-  assert.deepEqual([...OPEN_READS].sort(), ["issues", "machines", "molds", "products"]);
+  //
+  // Moved DELIBERATELY on 2026-09-23 (customer portal, phase 0b): it was
+  // ["issues", "machines", "molds", "products"]. `products` and `molds` each
+  // answered a token-less caller with 503 product names, 502 of them paired
+  // with a real client name; `machines` published the registry and its count.
+  // `issues` went the same day, on the review pass: ENTITIES.issues declares
+  // `product` and `machine`, so the faults log served real product names and
+  // registry labels — and the machine count with them.
+  assert.deepEqual([...OPEN_READS].sort(), []);
 });
 
 test("the entities that carry client data or PII are NOT open", () => {
   // jobs/production/master name clients and quantities; downtime rows carry a
   // staff email («سُجل بواسطة»); clients is contact details, sales-only.
-  for (const entity of ["clients", "jobs", "production", "master", "downtime"]) {
+  // molds/products name the client beside the product (closed 2026-09-23);
+  // machines is the registry and its count, which no public surface may show.
+  for (const entity of ["clients", "jobs", "production", "master", "downtime", "molds", "products", "machines", "issues", "customerRequests"]) {
     assert.equal(OPEN_READS.has(entity), false, `"${entity}" must stay guarded`);
   }
 });
@@ -35,4 +47,46 @@ test("the operational tabs with dedicated write routes are NOT generically writa
   for (const entity of ["production", "jobs", "master", "molds", "machines", "issues", "downtime"]) {
     assert.equal(WRITABLE_ENTITIES.has(entity), false, `"${entity}" must be written by its own route`);
   }
+});
+
+test("«العملاء»!A «الرقم» can never be written by the generic PATCH", () => {
+  // It stopped being a label on 2026-09-23: a customer-portal account stores
+  // {no, name} as its link, so renumbering a row by hand through the sheet
+  // editor would point an approved buyer at a different company. The route
+  // strips these keys; SheetSection renders them as text.
+  assert.deepEqual([...readonlyFields("clients")].sort(), ["no"]);
+  assert.deepEqual(Object.keys(READONLY_FIELDS).sort(), ["clients"]);
+  // Every entity that has read-only fields must still be writable at all —
+  // otherwise the list is describing a PATCH that cannot happen.
+  for (const entity of Object.keys(READONLY_FIELDS)) {
+    assert.ok(WRITABLE_ENTITIES.has(entity), `"${entity}" has read-only fields but is not writable`);
+  }
+  // An entity with no entry answers an empty set, never undefined — the route
+  // iterates this without a null check.
+  assert.equal(readonlyFields("products").size, 0);
+  assert.equal(readonlyFields("nonesuch").size, 0);
+});
+
+/* ------------------------- the sales-only entities ------------------------- */
+
+test("SALES_ONLY is «العملاء» and «طلبات العملاء», and the route uses it", () => {
+  // The generic door must not be wider than the dedicated one. /api/requests
+  // is sales-only (owner decision 6) and /dashboard/requests is owner+manager+
+  // sales — but registering the tab in ENTITIES made /api/sheet/customerRequests
+  // serve the same rows, with the buyer's note and the reject reason, to any
+  // approved role. Found on the 2026-09-23 review pass.
+  assert.deepEqual([...SALES_ONLY].sort(), ["clients", "customerRequests"]);
+  for (const entity of SALES_ONLY) {
+    assert.equal(OPEN_READS.has(entity), false, `"${entity}" must never also be open`);
+  }
+  const src = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "app", "api", "sheet", "[entity]", "route.ts"), "utf8",
+  );
+  assert.ok(/SALES_ONLY\.has\(entity\)/.test(src), "the route must consult SALES_ONLY");
+  assert.ok(
+    src.indexOf("SALES_ONLY.has(entity)") < src.indexOf("OPEN_READS.has(entity)"),
+    "the strict branch must be checked before the deny-by-default one",
+  );
+  // A hand-written entity name in the route is how the two drift apart again.
+  assert.equal(/entity === "clients"/.test(src), false, "the strict list lives in lib/open-reads.ts");
 });

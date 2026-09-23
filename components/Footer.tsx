@@ -21,9 +21,14 @@ export default function Footer() {
           <p className="text-xs text-gray-600 text-center">
             © {new Date().getFullYear()} Itqan · إتقان · {tr.footer.location} · {tr.footer.rights}
           </p>
-          <Link href="/dashboard" className="text-xs text-gray-600 hover:text-blue-400 transition-colors py-2.5 min-h-11 inline-flex items-center">
-            {tr.nav.dashboard} {isAr ? "←" : "→"}
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/portal/login" className="text-xs text-gray-600 hover:text-blue-400 transition-colors py-2.5 min-h-11 inline-flex items-center">
+              {tr.nav.customerLogin} {isAr ? "←" : "→"}
+            </Link>
+            <Link href="/dashboard" className="text-xs text-gray-600 hover:text-blue-400 transition-colors py-2.5 min-h-11 inline-flex items-center">
+              {tr.nav.dashboard} {isAr ? "←" : "→"}
+            </Link>
+          </div>
         </div>
       </div>
     </footer>
