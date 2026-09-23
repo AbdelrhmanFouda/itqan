@@ -46,6 +46,43 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-22) — a «عطلة» row is every machine's day off
+
+Owner: "automatically set all machines as vacation in the vacations" — the vacations
+being the «عطلة» / «يوم جمعة» rows in «الإنتاج» (one row per holiday: date + marker in
+the shift cell, nothing else). Full note: `../CHANGES-2026-09-22-day-off.md`.
+
+- **The rule lives in `lib/run-join.ts`** — `isDayOffMarker` / `isDayOffRow` /
+  `dayOffDates(records, normalizeDate)` (zero imports, tested). Spelling is folded
+  (عطلة/عطله/إجازة/اجازه/يوم جمعة/جمعه, hamza, Arabic digits); a marker followed by
+  words still counts; «عطل» does not. A machine typed on the row changes nothing.
+- **Downtime:** `sliceDowntime(events, dayOff)` in `lib/downtime.ts` (pure) is the
+  per-factory-day split PLUS removal of the slices on days off; `loadDowntimeTotals(month,
+  { dayOff })` uses it, so `byKey`, `byReason` and `events` never carry a holiday minute
+  (an event's `minutes` is what remains; a row wholly on a day off leaves the list). The
+  removed minutes come back as `dayOffMin` → `readiness.downtimeDayOffMin` → the panel
+  line `rDayOff` and a report-draft line. **The loader takes the days off from its
+  CALLER** (a promise from the production read already in flight — `lib/oee-data.ts`,
+  `app/api/runs`, `lib/jobs.ts` all do it the same way); it adds no tab read, so the floor
+  page's path is untouched. A new consumer of `loadDowntimeTotals` that reads production
+  must pass `dayOff` too, or its totals drift from the other three.
+- **`/api/runs` rows carry `dayOff: true`**; the production page renders them
+  «عطلة · كل الماكينات», greyed, no unit figures. `readiness.dayOffRows` / `dayOffDays`
+  keep them out of the `stubs` count.
+- Measured live the same day: 2 days off (2026-07-23/24), 226 «التوقفات» rows,
+  329,794 min before and after — **0 removed**; nothing moves until a stoppage spans a
+  holiday. Read side only; the CSV export and the floor's today-list still list full rows.
+- **The floor page (2026-09-23):** `GET /api/downtime?dayoff=1` answers whether today's
+  factory day has a «عطلة» row (production tab read, guarded; `unknown: true` when the
+  tab cannot be read). The page fires it beside the full answer — never in front of the
+  today-list — and on a day off shows a banner and a «عطلة» tag on every machine button.
+  Buttons stay tappable; the flow gains no tap; nothing is written.
+- **`uniqueByLabel()` (lib/run-row.ts, 2026-09-23):** the registry holds `PQ 7` on two
+  rows (one per product), and `/api/machines` returns every row on purpose (the register
+  page edits rows). Every PICKER dedupes by label — downtime (live + remembered list),
+  issues, job detail, production form, dashboard home count. A new machine picker must
+  do the same or it draws the duplicate.
+
 ## Recently landed (2026-09-13) — jobs: the product from «الرئيسي», four fields, no warnings
 
 Owner: "only pick the product and how much is required and the due date and the start
@@ -769,7 +806,7 @@ sidebar and `canAccess()`.
 | `الرئيسي` (Master) | Source of truth, header row 2, data rows 3+. *(REVISED 2026-08-27)* A new «الفئة / Category» column at E shifted the letters: F weight → **G نوع الخام, I cavities (DESIGN count), J cycle(s), K worst cycle**. Column matching is by keyword so code was unaffected — but don't trust old letters. 485 rows; **26 product names exist twice** (was just «سماعة اريون») |
 | `الاسطمبات` (Molds), `المنتجات` (Products) | Row-aligned formula views of Master — READ ONLY |
 | `الماكينات` (machines) | Registry, one row per physical machine. **The code label «PQ n — ton» (hidden col J) is the machine's identity everywhere** — production col C, OEE grouping, issue dropdowns. Tonnages repeat, so the code is the key. The registry has been renumbered four times: never hardcode it, always re-read. |
-| `الإنتاج` (production) | One row per machine/**shift**: A date, B shift, C machine LABEL, E product (must match Master name EXACTLY — joins are by name). *(REVISED 2026-08-27)* The tab now carries QUALITY natively: H سليم, **I «الأجمالي سستم» (new), J هالك — FILLED on 374 of 593 rows, exactly سستم − سليم — and K «حالة السجل»** (سليم / لم يُعد بعد / الفعلي أكبر من العداد). Downtime/reason/operator/notes columns are still never filled — downtime still joins from «التوقفات». B also holds «عطلة» / «يوم جمعة» day-off markers |
+| `الإنتاج` (production) | One row per machine/**shift**: A date, B shift, C machine LABEL, E product (must match Master name EXACTLY — joins are by name). *(REVISED 2026-08-27)* The tab now carries QUALITY natively: H سليم, **I «الأجمالي سستم» (new), J هالك — FILLED on 374 of 593 rows, exactly سستم − سليم — and K «حالة السجل»** (سليم / لم يُعد بعد / الفعلي أكبر من العداد). Downtime/reason/operator/notes columns are still never filled — downtime still joins from «التوقفات». B also holds «عطلة» / «يوم جمعة» day-off markers — **one such row = every machine off that day (owner, 2026-09-22; `lib/run-join.ts` `dayOffDates`)** |
 | `تسجيل الإنتاج` | **DELETED from the workbook — 2026-08-27, deliberately.** The bridge answers `no_tab` under every spelling, and the workbook holds ZERO `#REF!` cells, which is what deleting a referenced tab would have left. Quality moved onto «الإنتاج»'s own row. Nothing in the site reads it any more |
 | `تقرير الإنتاج` | Per-product rollup (UNIQUE spill in A + ARRAYFORMULAs). Owner-built, maintained by `../production-report-v3.gs` |
 | `التوقفات` | **The stoppage log — the source of truth for downtime since 2026-08-14.** Header row 1, data row 2+. A date, B machine (dropdown ← «الماكينات»!J), C reason (Arabic dropdown), **D minutes — the only field anything computes from, validated > 0**, E/F optional clock times, G تقديري؟ نعم/لا, H سُجل بواسطة, I ملاحظات. Joins to «الإنتاج» on `date` + the machine label. Built by `../production/scripts/downtime-tab.gs` |

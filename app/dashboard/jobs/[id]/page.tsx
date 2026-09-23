@@ -1,4 +1,5 @@
 "use client";
+import { uniqueByLabel } from "@/lib/run-row";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
@@ -110,7 +111,7 @@ export default function JobDetailPage() {
   const listsStarted = useRef(false);
   const loadLists = useCallback(() => {
     listsStarted.current = true;
-    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
     // A hand-typed product name that doesn't match Master exactly breaks the
     // join, so offer the real names the same way the add form does — from
     // MASTER through the guarded /api/molds, not from the «الاسطمبات» formula

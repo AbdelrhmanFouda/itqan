@@ -135,3 +135,68 @@ export const isStubRun = (r: Record<string, unknown>): boolean => {
   const blank = (v: unknown) => !v || !String(v).trim();
   return blank(r.goodUnits) && blank(r.scrapUnits) && blank(r.downtimeMin);
 };
+
+/* -------------------------------- days off -------------------------------- */
+
+/**
+ * A day the factory was closed — a «عطلة» / «يوم جمعة» row in «الإنتاج».
+ *
+ * The crew records a holiday as ONE row: the date, the marker in the shift
+ * cell, everything else blank. Owner's rule (2026-09-22, "automatically set all
+ * machines as vacation"): that one row stands for EVERY machine that day —
+ * nobody types fourteen rows. Three consumers, all through this module:
+ *
+ *   - the downtime tally drops the minutes of any stoppage slice that falls on
+ *     such a day (a press standing still on a holiday is not downtime) —
+ *     `sliceDowntime()` in lib/downtime.ts, fed by `dayOffDates()`;
+ *   - the production log shows the row as «عطلة · كل الماكينات»;
+ *   - the readiness panel counts these rows apart from the empty ones.
+ *
+ * Spelling is folded the way the crew types it (hamza forms, ة/ه, ى/ي,
+ * Arabic-Indic digits, spaces), and a marker followed by more words still
+ * counts («عطلة عيد الأضحى»). A machine written on such a row changes nothing:
+ * the day is off for all of them.
+ */
+const DAY_OFF_MARKERS = [
+  "عطله", "يوم عطله", "عطله رسميه", "اجازه", "يوم اجازه", "يوم جمعه", "جمعه",
+  "holiday", "day off",
+];
+
+/** Arabic fold for the marker match only — NOT a join key. */
+const foldArabic = (s: string): string =>
+  latinDigits(s)
+    .replace(/[ً-ْـ‎‏]/g, "") // harakat, tatweel, bidi marks
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Does this shift-cell text mark a day off? */
+export const isDayOffMarker = (shift: unknown): boolean => {
+  const s = foldArabic(String(shift ?? ""));
+  return s !== "" && DAY_OFF_MARKERS.some((m) => s === m || s.startsWith(m + " "));
+};
+
+/** A «الإنتاج» row that marks a day off — its shift cell is a marker. */
+export const isDayOffRow = (r: Record<string, unknown>): boolean => isDayOffMarker(r.shift);
+
+/**
+ * Every day off in a production tab, as ISO dates. `normDate` is
+ * `normalizeDate` from lib/dates — passed in so this module keeps zero imports.
+ * A marker row whose date will not parse marks nothing (guessing a date would
+ * silently move minutes between days).
+ */
+export function dayOffDates(
+  records: readonly Record<string, unknown>[],
+  normDate: (raw: string) => string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const r of records) {
+    if (!isDayOffRow(r)) continue;
+    const d = normDate(String(r.date ?? ""));
+    if (d) out.add(d);
+  }
+  return out;
+}

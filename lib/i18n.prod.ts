@@ -194,6 +194,8 @@ export const pd = {
       machine: "Machine",
       planned: "Planned (min)",
       shifts: ["Day", "Night"],
+      dayOff: "Day off",
+      allMachines: "All machines",
       good: "Good Units",
       scrap: "Scrap Units",
       openCav: "Open cavities (this run)",
@@ -307,6 +309,9 @@ export const pd = {
       failed: "Could not save — try again.",
       export: "Export CSV",
       machinesFailed: "Could not load the machine list.",
+      dayOffTitle: "Today is a day off — every machine is off.",
+      dayOffBody: "There is a «عطلة» row for today in the Production tab. A stoppage recorded today is not counted in any total.",
+      dayOffTag: "day off",
       // Stoppages still running past their factory day. They KEEP recording
       // (owner's rule, 2026-08-20) — these strings feed the owner's dashboard
       // banner, which is informational, not a call to close anything.
@@ -501,6 +506,8 @@ export const pd = {
       machine: "الماكينة",
       planned: "الزمن المخطط (د)",
       shifts: ["نهارية", "ليلية"],
+      dayOff: "عطلة",
+      allMachines: "كل الماكينات",
       good: "وحدات سليمة",
       scrap: "وحدات هالك",
       openCav: "التجاويف الشغالة (هذا التشغيل)",
@@ -608,6 +615,9 @@ export const pd = {
       failed: "مقدرناش نسجل — جرّب تاني.",
       export: "تنزيل CSV",
       machinesFailed: "مقدرناش نحمّل قائمة الماكينات.",
+      dayOffTitle: "النهاردة عطلة — كل الماكينات في إجازة.",
+      dayOffBody: "في صف «عطلة» للنهاردة في تبويب الإنتاج. أي توقف يتسجل النهاردة مش هيتحسب في الأرقام.",
+      dayOffTag: "عطلة",
       staleTitle: "ماكينات واقفة من يوم سابق",
       staleBody:
         "لسه بتحسب — التوقف مستمر لحد ما حد يضغط «رجعت تشتغل». الدقايق بتتسجل ساعة الإيقاف، وقبلها مش داخلة في الجاهزية.",

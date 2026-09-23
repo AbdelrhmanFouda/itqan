@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   distributeDowntime, downtimeKey, downtimeCsv, isStaleOpen,
-  summarizeDowntime, countsTowardDowntime, splitAcrossFactoryDays, addDaysISO,
+  summarizeDowntime, countsTowardDowntime, splitAcrossFactoryDays, addDaysISO, sliceDowntime,
   type DowntimeRun, type DowntimeCountable,
 } from "../lib/downtime.ts";
 import { factoryDayEnd, factoryDay } from "../lib/dates.ts";
@@ -320,4 +320,46 @@ test("CSV quotes separators and carries a BOM for Excel", () => {
   assert.ok(csv.includes('"أخرى, ""خاصة"""'), "comma and quotes escaped");
   assert.ok(csv.includes("PQ 7 — 100"));
   assert.ok(csv.trimEnd().split("\r\n").length === 2);
+});
+
+/* ------------------------- days off (owner, 2026-09-22) ------------------- */
+
+const stop = (date: string, minutes: number, startClockMin: number | null = null, reason = "Maintenance") =>
+  ({ date, machine: "PQ 7 — 100", reason, minutes, startClockMin });
+
+test("a stoppage that runs into a day off keeps only its working-day minutes", () => {
+  // Thursday 22:00 start, 1,200 min: 600 before Friday 08:00, 600 on the Friday holiday.
+  const s = sliceDowntime([stop("2026-07-23", 1200, 22 * 60)], new Set(["2026-07-24"]));
+  assert.deepEqual(s.slices.map((x) => [x.date, x.minutes]), [["2026-07-23", 600]]);
+  assert.deepEqual(s.removed.map((x) => [x.date, x.minutes]), [["2026-07-24", 600]]);
+  assert.equal(s.events.length, 1);
+  assert.equal(s.events[0].minutes, 600, "the row's own figure shrinks by the holiday");
+  assert.equal(s.events[0].dayOffMin, 600);
+  const t = summarizeDowntime(s.slices);
+  assert.equal(t.byReason.get("Maintenance"), 600, "the Pareto never sees a holiday minute");
+  assert.equal(t.byKey.has(downtimeKey("2026-07-24", "PQ 7 — 100")), false, "no holiday key for the spread");
+});
+
+test("a stoppage lying wholly on a day off leaves the events — reported, not silently dropped", () => {
+  const s = sliceDowntime([stop("2026-07-24", 300)], new Set(["2026-07-24"]));
+  assert.equal(s.slices.length, 0);
+  assert.equal(s.events.length, 0);
+  assert.equal(s.removed.reduce((a, x) => a + x.minutes, 0), 300);
+});
+
+test("with no days off, sliceDowntime is the plain day split the tally always used", () => {
+  const rows = [
+    stop("2026-07-23", 1200, 22 * 60),
+    stop("2026-07-25", 90),
+    { date: "", machine: "PQ 7 — 100", reason: "Other", minutes: 5 }, // undated: never counted
+  ];
+  const s = sliceDowntime(rows);
+  assert.deepEqual(
+    s.slices.map((x) => [x.date, x.minutes]),
+    [["2026-07-23", 600], ["2026-07-24", 600], ["2026-07-25", 90]],
+  );
+  assert.equal(s.removed.length, 0);
+  assert.equal(s.events.length, 2);
+  assert.equal(s.events[1].dayOffMin, 0);
+  assert.equal(s.slices[2], rows[1], "a single-day row passes through as the same object");
 });

@@ -12,9 +12,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_SHIFT_MIN, buildShiftLengthIndex, machineKeyOf, resolvePlannedMin,
-  plannedMinSource, isStubRun, latinDigits,
+  plannedMinSource, isStubRun, latinDigits, isDayOffMarker, isDayOffRow, dayOffDates,
 } from "../lib/run-join.ts";
-import { latinDigits as datesLatinDigits } from "../lib/dates.ts";
+import { latinDigits as datesLatinDigits, normalizeDate } from "../lib/dates.ts";
 import { distributeDowntime, downtimeKey } from "../lib/downtime.ts";
 
 const REGISTRY = [
@@ -155,4 +155,31 @@ test("summing per-run downtime reproduces the day's captured total", () => {
   assert.equal(spread.perRun[2], 45, "PQ 10's stoppage stays on PQ 10");
   // PQ 7's 150 min split across its two runs, and NOT onto the PQ 5 stub.
   assert.equal(spread.perRun[0] + spread.perRun[1], 150);
+});
+
+/* -------------------------------- days off -------------------------------- */
+
+test("the shift cell's day-off markers, as the crew spells them", () => {
+  for (const s of ["عطلة", "عطله", " عطلة ", "يوم جمعة", "يوم جمعه", "إجازة", "اجازه", "عطلة عيد الأضحى", "Holiday", "day off"]) {
+    assert.ok(isDayOffMarker(s), `should mark: ${JSON.stringify(s)}`);
+  }
+  // Real shifts, blanks, and «عطل» (the retired Breakdown reason) are not holidays.
+  for (const s of ["الصباحية", "المسائية", "Day", "Night", "", undefined, "عطل", "عطلةx"]) {
+    assert.ok(!isDayOffMarker(s), `must not mark: ${JSON.stringify(s)}`);
+  }
+});
+
+test("one «عطلة» row = that day off for every machine, whatever else the row holds", () => {
+  const rows = [
+    { date: "23/07 /2026", shift: "عطلة" },                             // the live row: machine blank
+    { date: "24/07 /2026", shift: "يوم جمعة", machine: "PQ 7 — 100" },  // a machine typed — still the whole day
+    { date: "25/07 /2026", shift: "الصباحية", machine: "PQ 7 — 100", goodUnits: "10" },
+    { date: "", shift: "عطلة" },                                        // no date → marks nothing
+    { date: "26/07 /2026", shift: "عطلة" },
+    { date: "26/07 /2026", shift: "عطلة" },                             // twice → one day
+  ];
+  assert.ok(isDayOffRow(rows[0]) && isDayOffRow(rows[1]) && !isDayOffRow(rows[2]));
+  assert.ok(isStubRun(rows[0]), "a marker row is also a stub — OEE never counts it as a run");
+  const days = dayOffDates(rows, normalizeDate);
+  assert.deepEqual(Array.from(days).sort(), ["2026-07-23", "2026-07-24", "2026-07-26"]);
 });

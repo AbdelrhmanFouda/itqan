@@ -6,7 +6,7 @@ import { resolveScrap } from "@/lib/scrap";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
-  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, num,
+  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, isDayOffRow, dayOffDates, num,
 } from "@/lib/run-join";
 
 // Production runs now live in the Google Sheet's "Production" tab (Sheet-only
@@ -37,6 +37,8 @@ function shape(r: SheetRecord) {
     id: String(r.row),
     date: normalizeDate(r.date) || (r.date ?? ""),
     shift: r.shift ?? "",
+    // A «عطلة» / «يوم جمعة» row: the day off, for every machine (lib/run-join.ts).
+    dayOff: isDayOffRow(r),
     machine: r.machine ?? "",
     machineCode: r.machineCode ?? "",
     mold: r.mold ?? "",
@@ -77,6 +79,7 @@ function publicRun(r: ReturnType<typeof shape>) {
     id: r.id,
     date: r.date,
     shift: r.shift,
+    dayOff: r.dayOff,
     machine: r.machine,
     machineCode: r.machineCode,
     mold: r.mold,
@@ -91,13 +94,19 @@ function publicRun(r: ReturnType<typeof shape>) {
 
 export async function GET(req: NextRequest) {
   try {
+    const prodRead = getRecords("production");
+    // Days off («عطلة» rows — every machine off), from the read already in
+    // flight, so the downtime loader leaves those days out. Same as buildOEEData.
+    const dayOff = prodRead
+      .then((p) => dayOffDates(p.records, normalizeDate))
+      .catch(() => new Set<string>());
     const [{ records }, machinesTab, captured] = await Promise.all([
-      getRecords("production"),
+      prodRead,
       // Best-effort: a registry or Firestore that is briefly unreachable
       // degrades this route to "downtime not measured" rather than failing the
       // whole run list.
       getRecords("machines").catch(() => ({ records: [] as SheetRecord[] })),
-      loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME),
+      loadDowntimeTotals(null, { dayOff }).catch(() => EMPTY_DOWNTIME),
     ]);
     const runs = records.map(shape);
 

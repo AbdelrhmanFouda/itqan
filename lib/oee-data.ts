@@ -12,7 +12,7 @@ import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 // The run-join rules are SHARED with /api/runs and lib/jobs.ts — see lib/run-join.ts.
 import {
   DEFAULT_SHIFT_MIN, buildShiftLengthIndex, machineKeyOf, resolvePlannedMin,
-  plannedMinSource, isStubRun, num,
+  plannedMinSource, isStubRun, isDayOffRow, dayOffDates, num,
 } from "@/lib/run-join";
 
 /**
@@ -42,16 +42,25 @@ const normKey = (s: string | undefined) =>
 export type OEEData = Awaited<ReturnType<typeof buildOEEData>>;
 
 export async function buildOEEData(month: string | null) {
+  const prodRead = getRecords("production");
+  // The factory's days off — «عطلة» rows in «الإنتاج», one row = every machine
+  // off that day (owner's rule 2026-09-22). Derived from the read already in
+  // flight and handed to the downtime loader, which leaves out the stoppage
+  // minutes that fell on those days. Same in /api/runs and lib/jobs.ts.
+  const dayOff = prodRead
+    .then((p) => dayOffDates(p.records, normalizeDate))
+    .catch(() => new Set<string>());
   const [prod, master, machinesTab, captured] = await Promise.all([
-    getRecords("production"),
+    prodRead,
     getRecords("master"),
     getRecords("machines"),
     // Downtime from «التوقفات», narrowed to the period being computed. The tab
     // rides the same 45s sheet cache as everything above it. Best-effort: if it
     // is unreachable the OEE picture degrades to "downtime not measured" rather
     // than failing the whole page.
-    loadDowntimeTotals(month).catch(() => EMPTY_DOWNTIME),
+    loadDowntimeTotals(month, { dayOff }).catch(() => EMPTY_DOWNTIME),
   ]);
+  const dayOffSet = await dayOff;
 
   // Per-mold standards from Master, keyed by normalized code AND name.
   // Cavities go through sumCavities — Master's H holds «4+4» for a two-part
@@ -82,6 +91,7 @@ export async function buildOEEData(month: string | null) {
   const isStub = isStubRun; // shared with /api/runs — see isStubRun()
 
   let stubs = 0;
+  let dayOffRows = 0;
   const plannedSource = { column: 0, machines: 0, default: 0 };
   const moldUnits = new Map<string, { label: string; units: number; hasStd: boolean }>();
 
@@ -93,6 +103,9 @@ export async function buildOEEData(month: string | null) {
     scrapSource: "logged" | "system" | "none"; hasMold: boolean; hasSheetDowntime: boolean;
   })[] = [];
   for (const r of prod.records) {
+    // A day-off marker row is not a run and not an "empty row" either — it is
+    // the holiday, counted on its own so the panel does not call it a mistake.
+    if (isDayOffRow(r)) { dayOffRows++; continue; }
     if (isStub(r)) { stubs++; continue; }
 
     // Physical machine = the code label when logged (several tonnages have
@@ -333,6 +346,12 @@ export async function buildOEEData(month: string | null) {
     downtimeFromCapture,
     downtimeEventsInPeriod: capturedInPeriod.length,
     downtimeUnallocatedMin: spread.unallocatedMin,
+    // Days off («عطلة» rows — every machine off) in the period, the marker rows
+    // behind them (whole tab, like `stubs`), and the stoppage minutes that fell
+    // on those days and were left out of every downtime figure above.
+    dayOffDays: Array.from(dayOffSet).filter((d) => !month || d.startsWith(month)).length,
+    dayOffRows,
+    downtimeDayOffMin: captured.dayOffMin,
     // Minutes that are a reviewed ESTIMATE rather than a tapped stop.
     downtimeEstimatedMin: captured.estimatedMin,
     downtimeEstimatedCount: captured.estimatedCount,

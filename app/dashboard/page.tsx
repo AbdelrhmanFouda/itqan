@@ -1,4 +1,5 @@
 "use client";
+import { uniqueByLabel } from "@/lib/run-row";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useLang } from "@/context/LangContext";
 import { pd } from "@/lib/i18n.prod";
@@ -103,7 +104,8 @@ export default function DashboardPage() {
      * for `lastLoggedDate` (the days-since-last-stoppage tile).
      */
     fetch("/api/machines").then((r) => r.json()).then((m) => {
-      const list: Machine[] = m.machines ?? [];
+      // One per registry LABEL — «PQ 7» sits on two rows (one per product).
+      const list: Machine[] = uniqueByLabel<Machine & { label: string }>(m.machines ?? []);
       setMachines(list); snap.current.machines = list; remember();
     }).catch(() => {});
     authedFetch("/api/downtime").then((r) => (r.ok ? r.json() : null)).then((d) => {

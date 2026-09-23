@@ -12,6 +12,7 @@ import { DOWNTIME_CAPTURE_REASONS, ALL_DOWNTIME_REASONS } from "@/lib/prod-meta"
 import { BACKDATE_STEP_MIN, BACKDATE_CAP_MIN, planResumeEarly } from "@/lib/downtime";
 import { hasFullAccess } from "@/lib/roles";
 import { fill, LOCALE_AR } from "@/lib/format";
+import { uniqueByLabel } from "@/lib/run-row";
 
 /**
  * PHASE 2 — downtime capture, built for a phone on the factory floor.
@@ -114,7 +115,7 @@ export default function DowntimePage() {
   const [machines, setMachines] = useState<MachineInfo[] | null>(() => {
     try {
       const raw = localStorage.getItem(MACHINES_KEY);
-      return raw ? (JSON.parse(raw) as MachineInfo[]) : null;
+      return raw ? uniqueByLabel(JSON.parse(raw) as MachineInfo[]) : null;
     } catch { return null; }
   });
   const [data, setData] = useState<Data | null>(null);
@@ -130,6 +131,10 @@ export default function DowntimePage() {
   const [loadErr, setLoadErr] = useState<"auth" | "role" | "net" | "timeout" | null>(null);
   // Ticks once a minute so a running stoppage counts up on its own.
   const [now, setNow] = useState(() => Date.now());
+  // Is today a day off? A «عطلة» row in «الإنتاج» means EVERY machine is off
+  // (owner's rule, 2026-09-22): the page says so, tags every machine, and the
+  // totals leave out any stoppage recorded on such a day. null = not known yet.
+  const [dayOff, setDayOff] = useState<boolean | null>(null);
   // ---- Owner-only review of «أخرى» rows (never rendered for the floor) ----
   const role = profile?.role;
   const isBoss = !!role && hasFullAccess(role);
@@ -193,11 +198,24 @@ export default function DowntimePage() {
     writeLastSeen(LAST_KEY, { today: r.data.today ?? [], todayDate: r.data.todayDate });
   }, []);
 
+  /**
+   * The day-off check — its own small call, fired beside the full answer, so
+   * the today-list is never held behind a production-tab read. Asked once per
+   * page open; best-effort — unknown stays unknown and nothing is tagged.
+   */
+  const dayOffAsked = useRef(false);
+  const loadDayOff = useCallback(async () => {
+    if (dayOffAsked.current) return;
+    dayOffAsked.current = true;
+    const r = await timedJson<{ dayOff?: boolean; unknown?: boolean }>(authedFetch, "/api/downtime?dayoff=1");
+    if (r.ok && !r.data.unknown && typeof r.data.dayOff === "boolean") setDayOff(r.data.dayOff);
+  }, []);
+
   const load = useCallback(async () => {
     // The sheet half is fired, not awaited — a stop must not stay «busy» for
     // the length of a cold «التوقفات» read.
-    if (await loadQuick()) void loadFull();
-  }, [loadQuick, loadFull]);
+    if (await loadQuick()) { void loadFull(); void loadDayOff(); }
+  }, [loadQuick, loadFull, loadDayOff]);
 
   const machinesAsked = useRef(false);
   const refreshMachines = useCallback(async () => {
@@ -205,7 +223,9 @@ export default function DowntimePage() {
     machinesAsked.current = true;
     const r = await timedJson<{ machines?: MachineInfo[] }>(fetch, "/api/machines");
     if (!r.ok) { setMachines((prev) => prev ?? []); return; }
-    const list = r.data.machines ?? [];
+    // One button per machine LABEL — the registry holds «PQ 7» on two rows
+    // (one per product), which used to draw two «PQ 7 — 100» buttons.
+    const list = uniqueByLabel(r.data.machines ?? []);
     setMachines(list);
     try { localStorage.setItem(MACHINES_KEY, JSON.stringify(list)); } catch { /* private mode */ }
   }, []);
@@ -223,9 +243,9 @@ export default function DowntimePage() {
     // call behind it. The buttons come from the remembered list meanwhile.
     void loadQuick().then((ok) => {
       void refreshMachines();
-      if (ok) void loadFull();
+      if (ok) { void loadFull(); void loadDayOff(); }
     });
-  }, [authLoading, user, loadQuick, loadFull, refreshMachines]);
+  }, [authLoading, user, loadQuick, loadFull, loadDayOff, refreshMachines]);
 
   // Today's finished list as this device last saw it, at once.
   useEffect(() => {
@@ -416,6 +436,13 @@ export default function DowntimePage() {
         <Stat label={t.todayEvents} value={todayShown ? todayList.length.toLocaleString(LOCALE_AR) : "…"} />
       </div>
 
+      {dayOff && (
+        <div className="mb-6 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-gray-700">
+          <div className="font-semibold">{t.dayOffTitle}</div>
+          <div className="text-sm text-gray-500 mt-0.5">{t.dayOffBody}</div>
+        </div>
+      )}
+
       {failed && (
         <div className="mb-4 rounded-xl border-2 border-red-200 bg-red-50 px-4 py-3 text-red-700">
           {t.failed}
@@ -552,10 +579,17 @@ export default function DowntimePage() {
                       className={`${TAP} ${
                         down
                           ? "border-red-200 bg-red-50 text-red-400"
+                          : dayOff
+                          ? "border-dashed border-gray-300 bg-gray-50 text-gray-500 hover:border-blue-400"
                           : "border-gray-300 bg-white text-gray-900 hover:border-blue-400"
                       }`}
                     >
                       {m.label}
+                      {/* On a day off every machine is off — still tappable (a
+                          press can still break), but the tap changes no total. */}
+                      {dayOff && !down ? (
+                        <span className="block text-xs font-normal text-gray-400">{t.dayOffTag}</span>
+                      ) : null}
                     </button>
                   );
                 })}

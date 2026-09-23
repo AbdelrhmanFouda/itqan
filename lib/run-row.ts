@@ -16,12 +16,37 @@
  *    tonnage: PQ 5 and PQ 7 are both 100 t.
  */
 import { moldKey } from "@/lib/mold-number";
+import { latinDigits } from "@/lib/dates";
+
+/**
+ * One entry per machine LABEL, first row wins.
+ *
+ * The registry has held the same code twice — «PQ 7» on rows 8 and 16, one per
+ * product it runs — which put two «PQ 7 — 100» buttons on the downtime page
+ * (three on a phone that also remembered an older list). The label IS the
+ * machine's identity, so every picker offers each label once; only the
+ * register page keeps every row, because it edits rows. Blank labels pass
+ * through untouched.
+ */
+export function uniqueByLabel<T extends { label: string }>(list: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const m of list) {
+    const k = latinDigits(m.label ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (k && seen.has(k)) continue;
+    if (k) seen.add(k);
+    out.push(m);
+  }
+  return out;
+}
 
 /** A «الإنتاج» row as /api/runs serves it. */
 export type RunRow = {
   id: string;
   date: string;
   shift: string;
+  /** a «عطلة» / «يوم جمعة» row — the day off, for every machine (lib/run-join.ts). */
+  dayOff?: boolean;
   machine: string;
   machineCode: string;
   /** «كود الاسطمبة» — empty on every row of the live tab. */

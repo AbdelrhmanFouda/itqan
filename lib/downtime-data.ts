@@ -2,9 +2,7 @@ import { getRecords, appendRecord, type SheetRecord, type UpdateResult } from "@
 import {
   getOpenDowntimeEvents, getPendingDowntimeEvents, markDowntimeSynced, type DowntimeEvent,
 } from "@/lib/db";
-import {
-  summarizeDowntime, countsTowardDowntime, isStaleOpen, splitAcrossFactoryDays,
-} from "@/lib/downtime";
+import { summarizeDowntime, sliceDowntime, isStaleOpen } from "@/lib/downtime";
 import {
   normalizeDate, latinDigits, factoryDay, parseClockMinutes, factoryDaySpan, formatClock,
 } from "@/lib/dates";
@@ -71,6 +69,12 @@ type DowntimeTotals = {
   estimatedMin: number;
   estimatedCount: number;
   /**
+   * Stoppage minutes in the period that fell on a DAY OFF («عطلة» row in
+   * «الإنتاج» — every machine off) and were therefore left out of every total
+   * above. Reported so the readiness panel can say so; never silently dropped.
+   */
+  dayOffMin: number;
+  /**
    * Stoppages still running after their factory day ended — the silent
    * under-count. NOT bounded by the period: an unclosed event from March still
    * needs the owner's attention in August.
@@ -85,6 +89,7 @@ export const EMPTY_DOWNTIME: DowntimeTotals = {
   events: [],
   estimatedMin: 0,
   estimatedCount: 0,
+  dayOffMin: 0,
   staleOpen: [],
 };
 
@@ -170,16 +175,28 @@ export async function loadDowntimeRecords(
  * were unchanged. Unclosed stoppages are not thrown away: those whose factory
  * day has ended come back as `staleOpen` so the owner can see what the crew
  * forgot to stop.
+ *
+ * `opts.dayOff` — the factory's days off as ISO dates («عطلة» rows in
+ * «الإنتاج», `dayOffDates()` in lib/run-join.ts; owner's rule 2026-09-22: one
+ * such row means every machine is off that day). Handed in by the caller,
+ * which is already reading the production tab — this loader must not add a
+ * tab read of its own to the floor page's path. A promise is accepted so the
+ * caller can start both reads at once; a rejected one costs the holiday rule,
+ * not the minutes.
  */
-export async function loadDowntimeTotals(month: string | null = null): Promise<DowntimeTotals> {
+export async function loadDowntimeTotals(
+  month: string | null = null,
+  opts: { dayOff?: ReadonlySet<string> | Promise<ReadonlySet<string>> } = {},
+): Promise<DowntimeTotals> {
   const { from, to } = monthRange(month);
-  const [all, open] = await Promise.all([
+  const [all, open, dayOff] = await Promise.all([
     loadDowntimeRecords(),
     // Caught here, not by the caller: a Firestore outage should cost the
     // stale-stoppage banner and nothing else. Letting it reject would take the
     // whole call down to EMPTY_DOWNTIME and silently zero the sheet's minutes
     // on every page — the exact failure shape this feature keeps producing.
     getOpenDowntimeEvents().catch(() => [] as DowntimeEvent[]),
+    Promise.resolve(opts.dayOff ?? new Set<string>()).catch(() => new Set<string>()),
   ]);
 
   /**
@@ -189,20 +206,18 @@ export async function loadDowntimeTotals(month: string | null = null): Promise<D
    * a stoppage that started 31 July and ran into 2 August must contribute its
    * August minutes to August, and its July minutes must not leak in. A row
    * without a start clock stays whole on its start day (the old behaviour).
+   * Slices on a day off are taken out here too (`sliceDowntime`), so neither
+   * the by-day spread nor the Pareto ever sees a holiday minute.
    */
-  const slices = all.flatMap((e) => {
-    if (!countsTowardDowntime(e)) return [e];
-    const parts = splitAcrossFactoryDays(e.date, e.startClockMin, e.minutes);
-    if (parts.length <= 1) return [e];
-    return parts.map((p) => ({ ...e, date: p.date, minutes: p.minutes }));
-  });
-  const tally = summarizeDowntime(slices.filter((s) => s.date >= from && s.date <= to));
+  const inRange = (s: { date: string }) => s.date >= from && s.date <= to;
+  const sliced = sliceDowntime(all, dayOff);
+  const tally = summarizeDowntime(sliced.slices.filter(inRange));
+  const dayOffMin = sliced.removed.filter(inRange).reduce((a, s) => a + s.minutes, 0);
   // `events` stays one entry per ROW (Pareto listing, report, CSV counts) —
   // membership by start day, same predicate as the tally so they cannot
-  // disagree about which rows are real.
-  const events = all
-    .filter((e) => e.date >= from && e.date <= to)
-    .filter(countsTowardDowntime);
+  // disagree about which rows are real. A row's `minutes` here is what is left
+  // after its day-off slices; a row that lay entirely on a day off is gone.
+  const events = sliced.events.filter(inRange);
 
   const today = factoryDay();
   const staleOpen = open
@@ -216,6 +231,7 @@ export async function loadDowntimeTotals(month: string | null = null): Promise<D
     events,
     estimatedMin: tally.estimatedMin,
     estimatedCount: tally.estimatedCount,
+    dayOffMin,
     staleOpen,
   };
 }

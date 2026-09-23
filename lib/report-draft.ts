@@ -39,6 +39,8 @@ export type DraftOEE = {
     downtimeEstimatedMin: number;
     downtimeEstimatedCount: number;
     downtimeUnallocatedMin: number;
+    /** stoppage minutes that fell on a day off (every machine off) and were left out. */
+    downtimeDayOffMin?: number;
     staleOpen: { machine: string; date: string; reason: string }[];
   };
   explain: {
@@ -185,6 +187,14 @@ export function buildReportDraft(
     issues.push(
       `⚠ ${int(d.readiness.downtimeUnallocatedMin)} دقيقة توقف مسجلة بدون صف إنتاج مقابل لها ` +
         "(أو أطول من زمن الوردية) — محتاجة مراجعة.",
+      "",
+    );
+  }
+
+  if ((d.readiness.downtimeDayOffMin ?? 0) > 0) {
+    issues.push(
+      `ℹ ${int(d.readiness.downtimeDayOffMin ?? 0)} دقيقة توقف وقعت في أيام عطلة ` +
+        "(كل الماكينات في إجازة) — لم تُحسب ضمن التوقف.",
       "",
     );
   }

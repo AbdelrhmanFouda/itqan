@@ -39,6 +39,8 @@ export const pf = {
     rMachinesPartial: (n: number, d: number) => `${n} runs fell back to the default ${d} min shift — add those machines to the Machines tab`,
     rStd: (k: number, s: number) => `${k}/${s} logged molds have a cycle standard in Master`,
     rStubs: (n: number) => `${n} empty rows in the Production tab were ignored`,
+    rDayOff: (days: number, min: number) =>
+      `${days} day(s) off («عطلة» rows) — every machine counts as off; ${min} stoppage minutes on those days were left out`,
     rMissingTabs: (names: string) => `The workbook has no tab named ${names} — anything it fed is missing, not zero`,
     fillMaster: "Fill cycle + cavities in Master for:", units: "pcs",
     explainTitle: "How is this number calculated?",
@@ -94,6 +96,8 @@ export const pf = {
     rMachinesPartial: (n: number, d: number) => `${n} تشغيلات استخدمت الوردية الافتراضية ${d} دقيقة — أضف هذه الماكينات إلى تبويب Machines`,
     rStd: (k: number, s: number) => `${k}/${s} من الاسطمبات المسجَّلة لها معيار دورة في Master`,
     rStubs: (n: number) => `تم تجاهل ${n} صفوف فارغة في تبويب Production`,
+    rDayOff: (days: number, min: number) =>
+      `${days} أيام عطلة (صفوف «عطلة») — كل الماكينات تُحسب في إجازة؛ استُبعدت ${min} دقيقة توقف وقعت في تلك الأيام`,
     rMissingTabs: (names: string) => `لا يوجد في الملف تبويب باسم ${names} — ما كان يعتمد عليه ناقص، وليس صفرًا`,
     fillMaster: "أكمل زمن الدورة + الكافيتي في Master لـ:", units: "قطعة",
     explainTitle: "كيف يُحسب هذا الرقم؟",

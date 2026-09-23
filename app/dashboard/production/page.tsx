@@ -9,7 +9,7 @@ import { SHIFTS, downtimeReasonLabel, localize } from "@/lib/prod-meta";
 import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
-import { moldsByName, moldNumberOf, productOf, type MachineRow, type MoldRow, type RunRow } from "@/lib/run-row";
+import { moldsByName, moldNumberOf, productOf, uniqueByLabel, type MachineRow, type MoldRow, type RunRow } from "@/lib/run-row";
 import { LogRunModal } from "@/components/dashboard/log-run-modal";
 import { fmtNum } from "@/lib/format";
 import { factoryDay } from "@/lib/dates";
@@ -45,7 +45,7 @@ export default function ProductionPage() {
     // Master (guarded) rather than the open «الاسطمبات» view: only Master
     // carries the notes column where 26 products keep their mould number.
     authedFetch("/api/molds").then((x) => x.json()).then((mo) => setMolds(Array.isArray(mo.molds) ? mo.molds : [])).catch(() => {});
-    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(ma.machines ?? [])).catch(() => {});
+    fetch("/api/machines").then((x) => x.json()).then((ma) => setMachines(uniqueByLabel(ma.machines ?? []))).catch(() => {});
   }, []);
 
   // Snapshot → paint → bounded read (90 s) → keep what is on screen when the
@@ -69,6 +69,9 @@ export default function ProductionPage() {
   const nameOf = (r: RunRow) => productOf(r, molds);
   const numberOf = (r: RunRow) => moldNumberOf(r, numberByName);
   const shiftLabel = (s: string) => localize(s, SHIFTS, p.runs.shifts);
+  // A «عطلة» / «يوم جمعة» row is the day off for EVERY machine (owner's rule,
+  // 2026-09-22) — one row in the sheet, shown as one line here, no numbers.
+  const isOff = (r: RunRow) => !!r.dayOff;
   /** Every label the shared log-run modal prints — one table, two pages. */
   const logLabels = {
     title: p.runs.add,
@@ -155,11 +158,11 @@ export default function ProductionPage() {
         {/* Phone: stacked run cards */}
         <div className="md:hidden space-y-3">
           {(runs ?? []).map((r) => (
-            <div key={r.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+            <div key={r.id} className={`${isOff(r) ? "bg-gray-50 border-dashed" : "bg-white"} border border-gray-200 rounded-xl px-4 py-3`}>
               <div className="flex items-center justify-between gap-3 min-w-0">
                 <span className="font-medium text-gray-900 leading-snug min-w-0 truncate">
-                  {nameOf(r)}
-                  {numberOf(r) ? (
+                  {isOff(r) ? p.runs.dayOff : nameOf(r)}
+                  {!isOff(r) && numberOf(r) ? (
                     <span className="ms-2 text-xs font-normal text-gray-500 whitespace-nowrap">
                       {p.runs.moldNumber} <span dir="ltr" className="font-mono">{numberOf(r)}</span>
                     </span>
@@ -174,8 +177,12 @@ export default function ProductionPage() {
                 </button>
               </div>
               <div className="text-xs text-gray-500 mt-0.5">
-                {r.date}{r.shift ? ` · ${shiftLabel(r.shift)}` : ""} · {r.machineCode || r.machine || "—"}
+                {r.date}
+                {isOff(r)
+                  ? ` · ${p.runs.allMachines}`
+                  : `${r.shift ? ` · ${shiftLabel(r.shift)}` : ""} · ${r.machineCode || r.machine || "—"}`}
               </div>
+              {isOff(r) ? null : (
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
                 <span className="text-green-600 font-medium">{fmt(r.goodUnits)} ✓</span>
                 {r.scrapUnits ? <span className="text-red-500">{fmt(r.scrapUnits)} ✗</span> : null}
@@ -188,6 +195,7 @@ export default function ProductionPage() {
                   </span>
                 ) : null}
               </div>
+              )}
               {r.operator ? <div className="text-xs text-gray-400 mt-1">{r.operator}</div> : null}
             </div>
           ))}
@@ -212,14 +220,14 @@ export default function ProductionPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {(runs ?? []).map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
+                <tr key={r.id} className={`${isOff(r) ? "bg-gray-50/70" : "hover:bg-gray-50/50"} transition-colors`}>
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap tabular-nums" dir="ltr">{r.date}</td>
-                  <td className="px-4 py-3 text-gray-500">{r.shift ? shiftLabel(r.shift) : "—"}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{nameOf(r)}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono tabular-nums whitespace-nowrap" dir="ltr">{numberOf(r) || "—"}</td>
-                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap" dir="ltr">{r.machineCode || r.machine || "—"}</td>
-                  <td className="px-4 py-3 text-green-600 font-medium text-end tabular-nums">{fmt(r.goodUnits)}</td>
-                  <td className="px-4 py-3 text-red-500 text-end tabular-nums">{r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
+                  <td className="px-4 py-3 text-gray-500">{isOff(r) ? p.runs.dayOff : r.shift ? shiftLabel(r.shift) : "—"}</td>
+                  <td className="px-4 py-3 font-medium text-gray-800">{isOff(r) ? <span className="font-normal text-gray-400">—</span> : nameOf(r)}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono tabular-nums whitespace-nowrap" dir="ltr">{isOff(r) ? "—" : numberOf(r) || "—"}</td>
+                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap" dir={isOff(r) ? undefined : "ltr"}>{isOff(r) ? p.runs.allMachines : r.machineCode || r.machine || "—"}</td>
+                  <td className="px-4 py-3 text-green-600 font-medium text-end tabular-nums">{isOff(r) ? <span className="text-gray-400 font-normal">—</span> : fmt(r.goodUnits)}</td>
+                  <td className="px-4 py-3 text-red-500 text-end tabular-nums">{!isOff(r) && r.scrapUnits ? fmt(r.scrapUnits) : "—"}</td>
                   <td className="px-4 py-3 text-gray-500 tabular-nums">
                     {r.downtimeMin ? `${fmt(r.downtimeMin)} ${p.overview.minutes}` : "—"}
                     {r.downtimeMin && r.downtimeReason && r.downtimeReason !== "None"

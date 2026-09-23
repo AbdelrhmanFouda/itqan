@@ -41,6 +41,7 @@ type Readiness = {
   plannedSource: { column: number; machines: number; default: number };
   machinesTabFound: boolean; defaultShiftMin: number; missingTabs?: string[];
   standardsInMaster: number; moldsSeen: number; moldsSeenWithStd: number;
+  dayOffDays?: number; downtimeDayOffMin?: number;
 };
 type Suspect = {
   mold: string; units: number; runtimeMin: number; ratio: number;
@@ -194,6 +195,7 @@ export default function PerformancePage() {
     else if (r.plannedSource.default > 0) readinessItems.push({ ok: false, text: t.rMachinesPartial(r.plannedSource.default, r.defaultShiftMin) });
     if (r.moldsSeen > 0 && r.moldsSeenWithStd < r.moldsSeen) readinessItems.push({ ok: false, text: t.rStd(r.moldsSeenWithStd, r.moldsSeen) });
     if (r.stubs > 0) readinessItems.push({ ok: true, text: t.rStubs(r.stubs) });
+    if (r.dayOffDays) readinessItems.push({ ok: true, text: t.rDayOff(r.dayOffDays, r.downtimeDayOffMin ?? 0) });
   }
   // Outside the `runs > 0` guard on purpose: a missing tab is exactly the case
   // where there may be no runs to count.

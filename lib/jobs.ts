@@ -5,7 +5,7 @@ import { jobStatusFromSheet, jobPriorityFromSheet } from "@/lib/prod-meta";
 import { distributeDowntime, downtimeKey } from "@/lib/downtime";
 import { loadDowntimeTotals, EMPTY_DOWNTIME } from "@/lib/downtime-data";
 import {
-  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, num,
+  buildShiftLengthIndex, machineKeyOf, resolvePlannedMin, isStubRun, dayOffDates, num,
 } from "@/lib/run-join";
 import { sumCavities } from "@/lib/cavities";
 import { resolveMoldNumber } from "@/lib/mold-number";
@@ -150,9 +150,15 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   const downtime = (opts.downtime ?? true) && production;
   const machines = (opts.machines ?? true) || downtime;
   const none = () => ({ records: [] as SheetRecord[], readAt: Date.now() });
+  const prodRead = production ? getRecords("production") : Promise.resolve(none());
+  // Days off («عطلة» rows — every machine off), so the downtime loader leaves
+  // those days out — the same rule as /api/runs and buildOEEData.
+  const dayOff = prodRead
+    .then((p) => dayOffDates(p.records, normalizeDate))
+    .catch(() => new Set<string>());
   const [jobsTab, prodTab, masterTab, machinesTab, captured] = await Promise.all([
     getRecords("jobs"),
-    production ? getRecords("production") : Promise.resolve(none()),
+    prodRead,
     getRecords("master"),
     // Downtime is not on the production row — «الإنتاج»!J has never been
     // filled. It lives in «التوقفات» and is joined on below, the same way
@@ -161,7 +167,7 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
     // either source is unreachable the page degrades to "no downtime measured"
     // instead of failing.
     machines ? getRecords("machines").catch(none) : Promise.resolve(none()),
-    downtime ? loadDowntimeTotals(null).catch(() => EMPTY_DOWNTIME) : Promise.resolve(EMPTY_DOWNTIME),
+    downtime ? loadDowntimeTotals(null, { dayOff }).catch(() => EMPTY_DOWNTIME) : Promise.resolve(EMPTY_DOWNTIME),
   ]);
   const readAt = Math.min(jobsTab.readAt, prodTab.readAt, masterTab.readAt, machinesTab.readAt);
 

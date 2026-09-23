@@ -10,7 +10,9 @@ import {
   markDowntimeSynced,
 } from "@/lib/db";
 import { requireRole } from "@/lib/api-guard";
-import { factoryDay } from "@/lib/dates";
+import { factoryDay, normalizeDate } from "@/lib/dates";
+import { getRecords } from "@/lib/sheets";
+import { dayOffDates } from "@/lib/run-join";
 import { isStaleOpen, BACKDATE_STEP_MIN } from "@/lib/downtime";
 import {
   loadDowntimeRecords, appendDowntimeRow, flushPendingDowntime,
@@ -70,6 +72,20 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       console.error(err);
       return NextResponse.json({ quick: true, open: [], stale: [], todayDate: today });
+    }
+  }
+  // `?dayoff=1` — is today a day off? A «عطلة» row in «الإنتاج» for today means
+  // EVERY machine is off (owner's rule, 2026-09-22; lib/run-join.ts). Its own
+  // call, fired by the floor page beside the full answer, so the today-list is
+  // never held behind a production-tab read. A tab that cannot be read answers
+  // `unknown: true` rather than a false "working day".
+  if (req.nextUrl.searchParams.get("dayoff") === "1") {
+    try {
+      const { records } = await getRecords("production");
+      return NextResponse.json({ dayOff: dayOffDates(records, normalizeDate).has(today), todayDate: today });
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ dayOff: false, unknown: true, todayDate: today });
     }
   }
   try {

@@ -235,6 +235,61 @@ export function summarizeDowntime(events: readonly DowntimeCountable[]): Downtim
   return { byKey, dominantByKey, byReason, estimatedMin, estimatedCount, counted };
 }
 
+/** A stoppage as the loader shapes it: countable, plus the start clock the
+ *  day-splitter needs (null or absent = the row stays whole on its start day). */
+export type DowntimeSliceable = DowntimeCountable & { startClockMin?: number | null };
+
+export type SlicedDowntime<E extends DowntimeSliceable> = {
+  /** one entry per (row, factory day) on a WORKING day — what the tally sums. */
+  slices: E[];
+  /** the (row, factory day) entries that fell on a day off — reported, never
+   *  silently dropped; the caller sums the ones in its period. */
+  removed: E[];
+  /** one entry per ROW that still has minutes on a working day. `minutes` is
+   *  what remains; `dayOffMin` is what the days off took from that row. */
+  events: (E & { dayOffMin: number })[];
+};
+
+/**
+ * Slice every countable stoppage across the factory days it covered, and take
+ * out the days the factory was closed.
+ *
+ * A «عطلة» row in «الإنتاج» stands for every machine that day (owner's rule,
+ * 2026-09-22 — `dayOffDates()` in lib/run-join.ts), so a press that stayed
+ * broken through a holiday was not losing production then: those minutes are
+ * not downtime. They are removed per SLICE — a stoppage that ran Thursday
+ * night into a Friday holiday keeps its Thursday minutes and loses Friday's —
+ * and a row that lies entirely on a day off leaves `events` too, because
+ * nothing of it can be counted. The sheet row itself is untouched; this is a
+ * read-time rule like the day split it sits on.
+ *
+ * Rows that fail `countsTowardDowntime` are skipped, exactly as
+ * `summarizeDowntime` would skip them. With an empty `dayOff` this is the
+ * plain day split the tally has used since 2026-08-27.
+ */
+export function sliceDowntime<E extends DowntimeSliceable>(
+  events: readonly E[],
+  dayOff: ReadonlySet<string> = new Set<string>(),
+): SlicedDowntime<E> {
+  const slices: E[] = [];
+  const removed: E[] = [];
+  const kept: (E & { dayOffMin: number })[] = [];
+  for (const e of events) {
+    if (!countsTowardDowntime(e)) continue;
+    const parts = splitAcrossFactoryDays(e.date, e.startClockMin ?? null, e.minutes);
+    let taken = 0;
+    for (const p of parts) {
+      // A single-day row is passed through as-is (the old behaviour); only a
+      // split row is re-dated per day.
+      const slice = parts.length === 1 ? e : { ...e, date: p.date, minutes: p.minutes };
+      if (dayOff.has(p.date)) { taken += p.minutes; removed.push(slice); continue; }
+      slices.push(slice);
+    }
+    if (taken < e.minutes) kept.push({ ...e, minutes: e.minutes - taken, dayOffMin: taken });
+  }
+  return { slices, removed, events: kept };
+}
+
 export type DowntimeRun = {
   date: string;
   machine: string;

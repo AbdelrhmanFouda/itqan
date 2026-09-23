@@ -1,4 +1,5 @@
 "use client";
+import { uniqueByLabel } from "@/lib/run-row";
 /**
  * The issues log («الأعطال») — rebuilt 2026-09-09 around the worker's VOICE.
  *
@@ -165,7 +166,7 @@ export default function IssuesPage() {
         // dropdown and product datalist — started first, they queued the tab
         // the page is actually waiting for behind them.
         void timedJson<{ machines?: Machine[] }>(fetch, "/api/machines")
-          .then((r) => { if (alive && r.ok) setMachines(r.data.machines ?? []); });
+          .then((r) => { if (alive && r.ok) setMachines(uniqueByLabel(r.data.machines ?? [])); });
         void timedJson<{ records?: { name?: string }[] }>(fetch, "/api/sheet/products")
           .then((r) => {
             if (alive && r.ok) setProducts((r.data.records ?? []).map((x) => x.name || "").filter(Boolean));
