@@ -117,8 +117,8 @@ the shift cell, nothing else). Full note: `../CHANGES-2026-09-22-day-off.md`.
 ## Recently landed (2026-09-13) — jobs: the product from «الرئيسي», four fields, no warnings
 
 Owner: "only pick the product and how much is required and the due date and the start
-date", "no errors to be facing the one using the software". Full story, the sheet cells
-fixed first and the numbers after: `../CHANGES-2026-09-13-jobs.md`.
+date", "no errors to be facing the one using the software". The sheet cells were fixed
+first, then the numbers.
 
 - **`components/dashboard/master-product-picker.tsx`** — the ONLY way the jobs pages take
   a product: Arabic-folded search over Master's name/client/mould number, tap to pick, a
@@ -182,7 +182,7 @@ fixed first and the numbers after: `../CHANGES-2026-09-13-jobs.md`.
 > is awaited, always. Read the paragraphs below with that in mind — the shared copy is
 > opt-in, not the default.
 
-Measured on production first (`../CHANGES-2026-09-09-speed.md` has the table): page HTML
+Measured on production first: page HTML
 ~100 ms; every sheet-backed route 100–300 ms on an instance that holds a copy; **2.2–11.5 s
 per tab on one that does not** (and `/api/jobs` reads four); **`/api/storage` and
 `/api/stock` 3–6 s on EVERY call** — the storage bridge had no cache at all. Five changes:
@@ -215,8 +215,8 @@ per tab on one that does not** (and `/api/jobs` reads four); **`/api/storage` an
 
 ## Recently landed (2026-09-09, second chat) — the order flow: «المتاح في المخزن» + «أوامر الشغل»
 
-Brief from the management chat (`../website-brief-order-flow-2026-09-09.md`); full
-story and the owner's steps in `../CHANGES-2026-09-09-order-flow.md`. Two measured
+Brief from the management chat (`../website-brief-order-flow-2026-09-09.md`); the
+owner's remaining step is item 14 in `../CLAUDE.md`. Two measured
 problems: 401 machine-hours of «لا يوجد أمر شغل», and no reserved quantity anywhere.
 
 - **`/dashboard/stock` — «المتاح في المخزن», READ-ONLY, production role** (NAV key
@@ -265,7 +265,6 @@ problems: 401 machine-hours of «لا يوجد أمر شغل», and no reserved 
 ## Recently landed (2026-09-09) — the issues log speaks (voice notes)
 
 Owner's ask: the worker records Arabic audio of the issue and of the solution.
-Full story and the owner's deploy steps in `../CHANGES-2026-09-09.md`.
 
 **Repo state at the end of that night:** the feature is commit `e1e4010`, pushed, and
 production serves it (`/api/issues` answers `audio.supported: true`). The fixes from the
@@ -330,7 +329,7 @@ shows them). Commit them with whatever the next chat changes; they are tested
 
 ## Recently landed (2026-09-04) — the mould number, the worker's register, the view tests
 
-Full story in `../CHANGES-2026-09-04.md`. The facts that change how code behaves:
+The facts that change how code behaves:
 
 - **The mould number has ONE rule: `lib/mold-number.ts`.** «الرئيسي»!D «كود الاسطمبة»
   (201 rows, always a bare number, eleven of them repeated across customers), else the
@@ -486,7 +485,7 @@ green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تر�
   `missing_contact`) — a lead with neither cannot be answered. Fields also gained
   `id`/`htmlFor`/`autoComplete`, so labels are announced and phones offer autofill.
 
-## Recently landed (2026-08-20 → 27) — see ../CHANGES-2026-08-27.md for the full story
+## Recently landed (2026-08-20 → 27)
 
 - **«تسجيل الإنتاج» was deleted from the workbook and the site was rewired off it**
   (2026-08-27, second session) — scrap now comes off the run's own «الإنتاج» row via
@@ -534,7 +533,7 @@ green line says «رجعت تشتغل 15:23 — هيتسجل 3:32», and «تر�
   lib/scrap.ts was rewritten around the run's own row* — and a
   multi-day stoppage's minutes are now split across the factory days it covered at READ
   time (`splitAcrossFactoryDays` in lib/downtime.ts — the sheet stays one tap = one row).
-- **Front door + review tools (second wave, ../CHANGES-2026-08-27.md §7):** the contact
+- **Front door + review tools (second wave, 27 Aug):** the contact
   form only claims success on a confirmed 2xx; `/api/contact` gained a per-IP rate limit,
   field caps, a utm/referrer `source` on every inquiry and a Resend notify hook (env-
   gated); WhatsApp/call buttons render only when `NEXT_PUBLIC_CONTACT_PHONE` exists — no
