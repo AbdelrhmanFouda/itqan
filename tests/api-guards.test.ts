@@ -38,7 +38,11 @@ type Kind =
   | "customerAccount"  // requireCustomerAccount(req): any status (the /me card)
   | "customerRegister" // verifies the ID token itself + an IP limiter; NO role lookup
   | "public"      // the contact form: unauthenticated by nature, rate-limited
-  | "conditional"; // sheet/[entity]: open for OPEN_READS, guarded otherwise
+  | "conditional" // sheet/[entity]: open for OPEN_READS, guarded otherwise
+  // ---- the Claude connector (2026-09-28). Claude is not a Firebase user, so
+  // it carries a token the site sealed itself (lib/mcp-auth.ts), owner-only.
+  | "connector"   // mcp: verifies the sealed access token + the owner email, before the body
+  | "oauth";      // mcp/oauth/register + token: stateless OAuth, no factory data in reach
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -71,6 +75,13 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   // its tonnage and the product standing in it — answered anyone with no
   // token, and with it the machine COUNT that the owner's rule of 2026-09-20
   // keeps off every public surface. The notes are a fitter's own words.
+  // The Claude connector (2026-09-28): the MCP endpoint answers only a token
+  // sealed by the owner's own approval; approve is the owner's sign-in step;
+  // register and token hand out and redeem those seals and read no sheet.
+  "mcp":                 { POST: "connector" },
+  "mcp/oauth/approve":   { POST: "owner" },
+  "mcp/oauth/register":  { POST: "oauth" },
+  "mcp/oauth/token":     { POST: "oauth" },
   "machines":            { GET: "guard", POST: "guard" },
   "machines/[id]":       { GET: "guard", PATCH: "guard", DELETE: "guard" },
   "machines/[id]/notes": { GET: "guard", POST: "guard" },
@@ -234,6 +245,20 @@ test("each handler does what its classification says", () => {
         case "public":
           assert.ok(/rateLimited\(/.test(body), `${where}: the public endpoint must rate-limit`);
           assert.equal(guarded, false, `${where}: the contact form cannot require a login`);
+          break;
+        case "connector": {
+          const tokenAt = body.search(/verifyConnectorToken\(/);
+          assert.ok(tokenAt >= 0, `${where}: must verify the connector token`);
+          assert.ok(/isOwnerEmail\(/.test(body), `${where}: the connector is owner-only`);
+          const readAt = body.search(/req\.(json|text|formData)\(\)/);
+          assert.ok(readAt < 0 || tokenAt < readAt, `${where}: reads the body before the token`);
+          assert.equal(guarded, false, `${where}: Claude has no Firebase session to guard with`);
+          break;
+        }
+        case "oauth":
+          assert.equal(guarded, false, `${where}: OAuth endpoints are reached before any sign-in`);
+          assert.equal(/@\/lib\/(sheets|mcp-tools|storage|jobs|oee-data|stock-data)"/.test(FILES[route]), false,
+            `${where}: an OAuth endpoint must not import a data loader`);
           break;
         case "conditional":
           assert.ok(/OPEN_READS\.has\(/.test(body), `${where}: must consult OPEN_READS`);

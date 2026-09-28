@@ -46,6 +46,36 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-28) — the Claude connector (MCP)
+
+Owner: "make Claude have a connector to the website". `/api/mcp` is a remote MCP server
+(JSON-RPC over streamable HTTP, plain JSON answers, no session) that claude.ai / the
+desktop and phone apps / Claude Code add as a custom connector:
+**`https://itqan-taupe.vercel.app/api/mcp`**.
+
+- **Owner-only and READ-ONLY.** Five tools in `lib/mcp-tools.ts`, each wrapping a loader
+  the dashboard already uses: `read_sheet` (production, downtime, jobs, issues, master,
+  machines, clients — search, date range, paging), `get_oee` (the ai-review digest),
+  `get_jobs` (`loadJobs({downtime:false})`, as `/api/jobs`), `get_stock` (`loadStock()`,
+  moved out of `app/api/stock/route.ts` into `lib/stock-data.ts` unchanged), `get_storage`.
+  No write tool — one would need the confirm-before-write preview first.
+- **OAuth, stateless** (`lib/mcp-auth.ts`, pure, `tests/mcp.test.ts`): a 401 with
+  `WWW-Authenticate` → `/.well-known/oauth-protected-resource` + `oauth-authorization-server`
+  → dynamic registration (`/api/mcp/oauth/register`) → **`/connect/claude`**, where the
+  owner signs in with the site's own Google login and taps «سماح» (`/api/mcp/oauth/approve`,
+  `requireRole(req, [])` + `isOwnerEmail`) → `/api/mcp/oauth/token` (PKCE S256, refresh).
+  Client ids, codes and tokens are HMAC-sealed JSON with a `typ` — nothing is stored.
+  Access 1 h, refresh 30 days, code 5 min (a code is not single-use; PKCE is what binds it).
+  Codes go only to `https://claude.ai|claude.com` or a loopback port.
+- **The key** is `MCP_TOKEN_SECRET`, else derived from `GOOGLE_APPS_SCRIPT_SECRET` — no new
+  env var needed. **To disconnect every Claude at once: set `MCP_TOKEN_SECRET` to a new
+  random value in Vercel and redeploy.** The owner email is re-checked on every call.
+- `tests/api-guards.test.ts` gained two kinds: `connector` (token before body, owner check)
+  and `oauth` (no data loader imported). `/connect` is in robots' Disallow.
+- Verified locally against the live sheet: 401 → discovery → registration (evil redirect
+  refused) → approval in the browser pane → token → refresh → all five tools. A cold
+  `get_jobs` takes ~25 s locally; warm 0.1 s.
+
 ## Recently landed (2026-09-23) — the customer portal
 
 A buyer signs up, the owner approves and LINKS the account to «العملاء» rows, and the

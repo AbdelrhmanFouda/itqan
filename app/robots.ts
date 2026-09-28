@@ -7,8 +7,9 @@ import type { MetadataRoute } from "next";
 // sign-in wall, so a crawler finds nothing there — but an indexed sign-in page
 // invites credential-stuffing traffic, and the portal's own pages carry a
 // buyer's order history behind it. Pinned by tests/portal-access.test.ts.
+// /connect (2026-09-28) is the Claude connector's sign-in step — same reason.
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: "*", allow: "/", disallow: ["/dashboard", "/api/", "/login", "/portal"] }],
+    rules: [{ userAgent: "*", allow: "/", disallow: ["/dashboard", "/api/", "/login", "/portal", "/connect"] }],
   };
 }
