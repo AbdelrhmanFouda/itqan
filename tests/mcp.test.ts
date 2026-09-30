@@ -15,16 +15,24 @@ import {
 } from "../lib/mcp-auth.ts";
 import { handleRpc, negotiateVersion, toolText, MAX_TEXT, type ServerSpec } from "../lib/mcp-protocol.ts";
 
-const KEY = connectorKey({ GOOGLE_APPS_SCRIPT_SECRET: "bridge-secret" })!;
+const KEY = connectorKey({ STORAGE_APPS_SCRIPT_SECRET: "storage-secret" })!;
 const OTHER = connectorKey({ MCP_TOKEN_SECRET: "rotated" })!;
 
-test("the key: MCP_TOKEN_SECRET wins, else derived from the bridge secret, else off", () => {
+test("the key: MCP_TOKEN_SECRET wins, else derived from the storage secret, else off", () => {
   assert.equal(connectorKey({}), null);
   assert.ok(KEY && KEY.length === 32);
   assert.notDeepEqual(KEY, OTHER);
-  // The bridge secret itself is never the key.
-  assert.notEqual(KEY.toString(), "bridge-secret");
-  assert.deepEqual(connectorKey({ MCP_TOKEN_SECRET: "rotated", GOOGLE_APPS_SCRIPT_SECRET: "bridge-secret" }), OTHER);
+  assert.notEqual(KEY.toString(), "storage-secret", "the secret itself is never the key");
+  assert.deepEqual(connectorKey({ MCP_TOKEN_SECRET: "rotated", STORAGE_APPS_SCRIPT_SECRET: "storage-secret" }), OTHER);
+});
+
+test("the main bridge secret is never key material — it is in the public repo", () => {
+  // apps-script.gs carries GOOGLE_APPS_SCRIPT_SECRET in plain text and the repo
+  // was found public on 2026-09-28: a key derived from it could be computed by
+  // anyone. Alone it must leave the connector OFF, and beside the storage
+  // secret it must change nothing.
+  assert.equal(connectorKey({ GOOGLE_APPS_SCRIPT_SECRET: "bridge-secret" }), null);
+  assert.deepEqual(connectorKey({ GOOGLE_APPS_SCRIPT_SECRET: "bridge-secret", STORAGE_APPS_SCRIPT_SECRET: "storage-secret" }), KEY);
 });
 
 test("a seal opens only with its key, its type, and before it expires", () => {

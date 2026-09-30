@@ -67,8 +67,10 @@ desktop and phone apps / Claude Code add as a custom connector:
   Client ids, codes and tokens are HMAC-sealed JSON with a `typ` — nothing is stored.
   Access 1 h, refresh 30 days, code 5 min (a code is not single-use; PKCE is what binds it).
   Codes go only to `https://claude.ai|claude.com` or a loopback port.
-- **The key** is `MCP_TOKEN_SECRET`, else derived from `GOOGLE_APPS_SCRIPT_SECRET` — no new
-  env var needed. **To disconnect every Claude at once: set `MCP_TOKEN_SECRET` to a new
+- **The key** is `MCP_TOKEN_SECRET`, else derived from `STORAGE_APPS_SCRIPT_SECRET` — no new
+  env var needed. ⚠ **Never from `GOOGLE_APPS_SCRIPT_SECRET`**: it is written in
+  `apps-script.gs` and the GitHub repo was found PUBLIC (2026-09-28), so a key derived from
+  it could be computed by anyone. Pinned in `tests/mcp.test.ts`. **To disconnect every Claude at once: set `MCP_TOKEN_SECRET` to a new
   random value in Vercel and redeploy.** The owner email is re-checked on every call.
 - `tests/api-guards.test.ts` gained two kinds: `connector` (token before body, owner check)
   and `oauth` (no data loader imported). `/connect` is in robots' Disallow.

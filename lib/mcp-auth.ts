@@ -13,9 +13,12 @@
  * `typ` inside the seal is checked on every open, so a client id can never be
  * replayed as an access token, nor a refresh token as a code.
  *
- * The key is MCP_TOKEN_SECRET when set, else derived from the bridge secret
- * (GOOGLE_APPS_SCRIPT_SECRET) under a fixed label — so the connector needs no
- * new env var to work, and anyone holding that secret already holds the sheet.
+ * The key is MCP_TOKEN_SECRET when set, else derived from the STORAGE bridge
+ * secret under a fixed label — so the connector needs no new env var to work.
+ * ⚠ NEVER from GOOGLE_APPS_SCRIPT_SECRET: that token is written in
+ * apps-script.gs, and the GitHub repo was found PUBLIC on 2026-09-28, so a key
+ * derived from it could be computed by anyone and every token forged. This
+ * file is public too — the key must come from a value that is only in env.
  * **To cut every connected Claude off at once, set MCP_TOKEN_SECRET to a new
  * random value in Vercel and redeploy.**
  *
@@ -53,9 +56,11 @@ export const nowS = (ms: number = Date.now()) => Math.floor(ms / 1000);
 export function connectorKey(env: Record<string, string | undefined> = process.env): Buffer | null {
   const own = (env.MCP_TOKEN_SECRET || "").trim();
   if (own) return createHmac("sha256", own).update("itqan-mcp-key").digest();
-  const base = (env.GOOGLE_APPS_SCRIPT_SECRET || "").trim();
+  // The storage token lives only in env and in the storage sheet's own script,
+  // never in this repo (checked 2026-09-30). The main bridge's does not qualify.
+  const base = (env.STORAGE_APPS_SCRIPT_SECRET || "").trim();
   if (!base) return null;
-  return createHmac("sha256", base).update("itqan-mcp-connector-v1").digest();
+  return createHmac("sha256", base).update("itqan-mcp-connector-v2").digest();
 }
 
 const mac = (key: Buffer, body: string) => createHmac("sha256", key).update(body).digest();
