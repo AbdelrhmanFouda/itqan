@@ -35,6 +35,7 @@ import {
 // (pure, zero imports, unit-tested against the real header rows) since
 // 2026-09-04. Re-exported so every importer of ENTITIES keeps working.
 export { ENTITIES, type EntityConfig } from "@/lib/sheet-entities";
+import { ANSWERS_TAB, LOG_TAB } from "@/lib/changeover";
 
 const SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL;
 const SCRIPT_SECRET = process.env.GOOGLE_APPS_SCRIPT_SECRET;
@@ -117,6 +118,12 @@ const sheetInflight = new Map<string, Promise<SheetRead>>();
  * Per-instance, which is enough: it is populated by the read that just ran in
  * this request, and a tab that is back simply never gets added again.
  */
+/**
+ * Tabs that are created by their first save («خطة الاسطمبات», 2026-09-30).
+ * Not being there yet is their normal state, not a workbook change, so it is
+ * neither logged as an error nor reported to the readiness panel.
+ */
+const LAZY_TABS = new Set<string>([ANSWERS_TAB, LOG_TAB]);
 const MISSING_TABS = new Set<string>();
 /** Tab names the bridge has refused as non-existent on this instance. */
 export const missingTabs = (): string[] => Array.from(MISSING_TABS);
@@ -503,6 +510,7 @@ async function fetchSheetUncached(tab: string): Promise<SheetRead> {
         if (b.kind === "ok") return { title: alias, values: b.values };
         if (b.kind !== "no_tab") break;
       }
+      if (LAZY_TABS.has(tab)) return { title: tab, values: [] };
       MISSING_TABS.add(tab);
       console.error(`[sheets] tab "${tab}" does not exist in the workbook (tried: ${[tab, ...(TAB_ALIASES[tab] ?? [])].join(", ")}). Was it renamed or deleted?`);
       return { title: tab, values: [] };

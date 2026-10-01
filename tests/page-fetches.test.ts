@@ -35,7 +35,7 @@ const OPEN_PREFIXES = [
 const GUARDED_PREFIXES = [
   "/api/jobs", "/api/storage", "/api/downtime", "/api/reports", "/api/ai-review", "/api/inquiries",
   "/api/molds", "/api/sheet/clients", "/api/sheet/master", "/api/sheet/jobs", "/api/sheet/production",
-  "/api/sheet/downtime", "/api/agent", "/api/stock",
+  "/api/sheet/downtime", "/api/agent", "/api/stock", "/api/changeover",
   // The faults log and the OEE set, closed on the 2026-09-23 review pass:
   // every fault row names a product and a registry machine label, and the OEE
   // body carries one entry per machine WITH its label — the machine count the

@@ -17,7 +17,7 @@ import { StatusScreen } from "@/components/dashboard/status-screen";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
   BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Warehouse,
-  TimerOff, Boxes, Inbox,
+  TimerOff, Boxes, Inbox, Replace,
 } from "lucide-react";
 
 const ICON: Record<NavKey, React.ElementType> = {
@@ -35,6 +35,7 @@ const ICON: Record<NavKey, React.ElementType> = {
   issues: AlertTriangle,
   storage: Warehouse,
   stock: Boxes,
+  changeover: Replace,
   performance: Gauge,
   assistant: Sparkles,
   reports: FileText,
@@ -102,6 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "issues": return p.nav.issues;
       case "storage": return p.nav.storage;
       case "stock": return p.nav.stock;
+      case "changeover": return p.nav.changeover;
       case "performance": return p.nav.performance;
       case "assistant": return p.nav.assistant;
       case "finance": return a.roles.finance;

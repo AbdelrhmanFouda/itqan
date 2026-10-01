@@ -77,10 +77,13 @@ test("production sees exactly its eight pages", () => {
   // this?» — production's, not quality's and not the storekeeper's.
   assert.deepEqual(
     keysFor("production").sort(),
-    ["assistant", "downtime", "issues", "jobs", "overview", "performance", "production", "stock"],
+    ["assistant", "changeover", "downtime", "issues", "jobs", "overview", "performance", "production", "stock"],
   );
   assert.equal(canAccess("quality", "/dashboard/stock"), false, "quality was not given stock");
   assert.equal(canAccess("storage", "/dashboard/stock"), false, "the storekeeper has the full storage page instead");
+  // «خطة الاسطمبات» (2026-09-30) is the production engineer's alone.
+  assert.equal(canAccess("worker", "/dashboard/changeover"), false, "the floor does not plan mould changes");
+  assert.equal(canAccess("quality", "/dashboard/changeover"), false, "not inherited through the overview prefix");
 });
 
 test("quality sees exactly its five pages", () => {

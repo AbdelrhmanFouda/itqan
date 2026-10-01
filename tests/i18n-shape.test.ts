@@ -23,13 +23,14 @@ import { st } from "../lib/i18n.stock.ts";
 import { pf } from "../lib/i18n.performance.ts";
 import { cp } from "../lib/i18n.portal.ts";
 import { cn } from "../lib/i18n.connector.ts";
+import { co } from "../lib/i18n.changeover.ts";
 import { ALL_ROLES } from "../lib/roles.ts";
 import {
   MACHINE_STATUSES, JOB_STATUSES, JOB_PRIORITIES, DOWNTIME_REASONS, SHIFTS,
 } from "../lib/prod-meta.ts";
 
 type Table = { en: unknown; ar: unknown };
-const TABLES: Record<string, Table> = { t, pd, ad, ag, sd, mr, st, pf, cp, cn };
+const TABLES: Record<string, Table> = { t, pd, ad, ag, sd, mr, st, pf, cp, cn, co };
 
 /** Every leaf of a value as "path = kind" lines; arrays contribute their length. */
 function shape(v: unknown, at = ""): string[] {

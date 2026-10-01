@@ -80,7 +80,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "requests" | "production" | "performance"
-  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock";
+  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock" | "changeover";
 
 /**
  * Sidebar entries with the (non-full-access) roles allowed to see/visit them.
@@ -123,6 +123,12 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   // (`storage`, which records movements); the two are deliberately separate
   // so a production account never holds a warehouse write button.
   { href: "/dashboard/stock", key: "stock", roles: ["production"] },
+  // «خطة الاسطمبات» (2026-09-30): which mould goes on which machine next.
+  // The production engineer's page — it names clients and orders and one tap
+  // on it rewrites a work order's machine, so NOT the floor's `worker` role
+  // and not quality. An entry of its own, or the overview prefix would hand
+  // it to quality as well.
+  { href: "/dashboard/changeover", key: "changeover", roles: ["production"] },
   { href: "/dashboard/production", key: "production", roles: ["production"] },
   // Downtime capture is the shop floor's own surface: the worker who stops the
   // machine, the supervisor who runs it, and maintenance who fix it.

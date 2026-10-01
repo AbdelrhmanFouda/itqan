@@ -28,6 +28,7 @@ import {
   ENTITIES, colIndex, findHeaderRow, normHeader, splitLabel, clean,
 } from "../lib/sheet-entities.ts";
 import { REQUEST_HEADERS, REQUEST_TAB } from "../lib/customer-requests.ts";
+import { ANSWERS_HEADERS, ANSWERS_TAB, LOG_HEADERS, LOG_TAB } from "../lib/changeover.ts";
 
 /* ------------------------------ fixtures --------------------------------- */
 // Each value is the FULL tab prefix up to and including the header row, as the
@@ -71,6 +72,15 @@ const HEADERS: Record<string, string[][]> = {
   // and that is what makes them worth having.
   customerRequests: [
     REQUEST_HEADERS,
+  ],
+  // «خطة الاسطمبات» (2026-09-30) — both tabs are created by the page's first
+  // save with exactly these rows (lib/changeover.ts), so the fixture IS the
+  // array `ensureTab` sends.
+  changeoverAnswers: [
+    ANSWERS_HEADERS,
+  ],
+  changeoverLog: [
+    LOG_HEADERS,
   ],
   master: [
     ["Master — المصدر الرئيسي (حرّر هنا فقط)", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
@@ -231,6 +241,26 @@ test("«طلبات العملاء»: an appended request lands every value in it
     "qtyAsked", "unit", "qtyKg", "wantedDate", "note", "state",
     "rejectReason", "jobCode", "decidedBy", "decidedAt",
   ]);
+});
+
+test("«خطة الاسطمبات»: both tabs — one bilingual header per field, read and append agree", () => {
+  for (const [entity, headers, tab] of [
+    ["changeoverAnswers", ANSWERS_HEADERS, ANSWERS_TAB],
+    ["changeoverLog", LOG_HEADERS, LOG_TAB],
+  ] as const) {
+    const fields = ENTITIES[entity].fields.map((f) => f.key);
+    assert.equal(ENTITIES[entity].tab, tab);
+    assert.equal(headers.length, fields.length, `${entity}: one header per field`);
+    for (const h of headers) {
+      const { ar, en } = splitLabel(h);
+      assert.ok(ar && en && ar !== en, `«${h}» is not bilingual`);
+    }
+    // READ: field i reads column i. APPEND: column i takes field i's value.
+    // «المنتج السابق» / «المنتج الجديد» and «اللون السابق» / «اللون الجديد»
+    // are the pairs a bare keyword would have crossed.
+    assert.deepEqual(readMap(entity), Object.fromEntries(fields.map((k, i) => [k, i])), `${entity}: read`);
+    assert.deepEqual(appendMap(entity), fields, `${entity}: append`);
+  }
 });
 
 test("no two fields of one entity resolve to the same column", () => {

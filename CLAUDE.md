@@ -46,6 +46,55 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-09-30) — «خطة الاسطمبات»: which mould goes on which machine next
+
+Owner + the production engineer: today the engineer decides "by what is priority and what
+finished"; the page should ASK what the sheet does not know, remember it, and rank.
+`/dashboard/changeover` (production + owner/manager): tap a machine → the waiting work
+orders ranked for THAT machine, each with its reasons as chips and an estimate of the
+change. It suggests; only «ركّب دي» → checklist → confirm writes.
+
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 25 tests, and the page ranks with
+  the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
+  الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
+  anything → transparent worst), material family from Master's free text, drying hours,
+  and the minutes — all in `CHANGEOVER_NUMBERS`. ⚠ Three numbers and two tie-breaks there
+  are marked ASSUMPTION (easy = ½, to-transparent = ×2, ordinary swap 45 min; "fits only
+  this machine" sorts after late; least remaining first) — his to correct.
+- **Blocked, never ranked:** the engineer said the mould does not fit; transparent while
+  other machines are kept for transparent; something is still missing.
+- **The page owns two tabs, created lazily by the first save** — «إجابات خطة الاسطمبات»
+  (one row per save, one column per question, the LATEST non-blank cell per kind+name
+  wins — append-only, so at-least-once is harmless) and «تغييرات الاسطمبات» (one row per
+  change; the LAST row for a machine is what stands on it; «الراكب الآن» is the same row
+  with nothing before it). **No column was added to «الرئيسي», «أوامر العمل»,
+  «الماكينات» or «العملاء»** — validation, the O:X spill and the hidden J made that the
+  riskier half. `LAZY_TABS` in `lib/sheets.ts` keeps their absence out of the readiness panel.
+- **A confirm writes three things, reported separately** (`recordMount`): the log row, then
+  «أوامر العمل»!«الماكينة» (expect-checked on the job code) and «الماكينات»!«أسم المنتج»
+  (Master's exact spelling only — the cell is a dropdown; skipped when the registry lists
+  the machine twice, as PQ 7 is). Never the order's status.
+- Machines kept for transparent, the big machine and key clients are ANSWERS, not code —
+  the registry has been renumbered four times. «عميل مهم» is owner/manager only.
+- A colour is GUESSED from the order's instructions / product name / Master material only
+  when the text names exactly one colour, and shown as a guess until tapped.
+- **Four** things block (added on the first live run, 2026-10-01): an order whose quantity
+  is already made but is still «جاري التشغيل» was ranked FIRST by "least remaining" — it
+  is now listed as «الكمية خلصت — اقفل الأمر» instead.
+- **A failed-looking save is re-read before it is reported.** The first live save created
+  «إجابات خطة الاسطمبات», wrote the row, and the bridge answered 404 — the page said
+  «تعذّر الحفظ» about a row sitting in the sheet. `answerLanded()` / the same check in
+  `recordMount` read the tab fresh and report success when the standing answer says what
+  was sent. (At-least-once again; see "Write semantics".)
+- **Run live on 2026-10-01 (localhost, bridge transport):** the ranking over the seven open
+  orders, the questions form, two real answers saved and read back (PQ 1 «ماكينة كبيرة»,
+  Job 483 «أبيض»), the checklist. ⚠ **A confirmed mount has NOT been run live** — it would
+  have rewritten a real order's machine with nothing actually mounted. «تغييرات
+  الاسطمبات» is created by the first real one.
+- ⚠ If every guarded route answers 401 locally, check the laptop CLOCK first: on
+  2026-09-30 it was ~15.5 h behind and `verifyIdToken` refused every token as
+  `issued_in_future`.
+
 ## Recently landed (2026-09-28) — the Claude connector (MCP)
 
 Owner: "make Claude have a connector to the website". `/api/mcp` is a remote MCP server
@@ -653,7 +702,7 @@ sidebar and `canAccess()`.
 | Role | Pages |
 |---|---|
 | `worker` (عامل) | downtime, issues, assistant, **molds** (added 2026-09-04, owner's word; editing open to every role) |
-| `production` | overview, production, jobs, downtime, performance, assistant, issues |
+| `production` | overview, production, jobs, downtime, performance, assistant, issues, **changeover** (2026-09-30) |
 | `quality` | overview, quality, issues, performance, assistant |
 | `maintenance` | machines, downtime, issues |
 | `sales` | sales, products, jobs, clients |

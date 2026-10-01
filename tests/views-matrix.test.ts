@@ -48,6 +48,9 @@ const MATRIX: Record<NavKey, Role[]> = {
   // The production side's read-only warehouse view (2026-09-09): «can I
   // promise this?». Not the storekeeper's page, and not the floor's.
   stock:       ["owner", "manager", "production"],
+  // «خطة الاسطمبات» (2026-09-30): the production engineer's — it names
+  // clients and orders, and one tap rewrites a work order's machine.
+  changeover:  ["owner", "manager", "production"],
   production:  ["owner", "manager", "production"],
   downtime:    ["owner", "manager", "production", "worker", "maintenance"],
   storage:     ["owner", "manager", "storage"],
@@ -108,7 +111,7 @@ test("every role lands inside its own matrix row", () => {
 test("pages that name a client, a quantity or a stock are closed to the floor", () => {
   // The worker sees the floor's pages and the mould register — never the
   // order book, the warehouse, the money or the customer list.
-  for (const key of ["jobs", "clients", "storage", "stock", "finance", "sales", "reports", "products", "machines", "performance", "quality", "overview", "approvals"] as NavKey[]) {
+  for (const key of ["jobs", "clients", "storage", "stock", "changeover", "finance", "sales", "reports", "products", "machines", "performance", "quality", "overview", "approvals"] as NavKey[]) {
     assert.equal(MATRIX[key].includes("worker"), false, `worker was given ${key}`);
   }
   assert.deepEqual(MATRIX.molds.filter((r) => !hasFullAccess(r)), ["worker"]);

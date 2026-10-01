@@ -266,6 +266,53 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "decidedAt", keywords: ["تاريخ القرار", "decided on"] },
     ],
   },
+  // «خطة الاسطمبات» (2026-09-30) — the two tabs /dashboard/changeover owns,
+  // created lazily by its first save. The header rows they are created with
+  // live in lib/changeover.ts (ANSWERS_HEADERS / LOG_HEADERS) beside the rules.
+  //
+  // «إجابات خطة الاسطمبات»: what the engineer told the page — one row per
+  // save, one column per question, the latest non-blank cell wins.
+  // Every keyword is a phrase no OTHER header in the tab contains: `by` is
+  // «بواسطة»/"recorded by" and never a bare "by", `name` is «الاسم»/"name"
+  // and the machines column says "Fits machines", which holds neither.
+  changeoverAnswers: {
+    tab: "إجابات خطة الاسطمبات", titleEn: "Mould plan answers", titleAr: "إجابات خطة الاسطمبات",
+    fields: [
+      { key: "date", keywords: ["التاريخ", "date"] },
+      { key: "kind", keywords: ["النوع", "kind"] },
+      { key: "name", keywords: ["الاسم", "name"] },
+      { key: "colour", keywords: ["اللون", "colour"] },
+      { key: "fits", keywords: ["الماكينات المناسبة", "fits machines"] },
+      { key: "workers", keywords: ["عدد العمال", "workers"] },
+      { key: "oilCores", keywords: ["بساتم", "oil cores"] },
+      { key: "missing", keywords: ["النواقص", "missing"] },
+      { key: "keyClient", keywords: ["عميل مهم", "key client"] },
+      { key: "transparentOnly", keywords: ["مخصصة للشفاف", "transparent only"] },
+      { key: "bigMachine", keywords: ["ماكينة كبيرة", "big machine"] },
+      { key: "by", keywords: ["بواسطة", "recorded by"] },
+    ],
+  },
+  // «تغييرات الاسطمبات»: one row per confirmed mould change. The LAST row for
+  // a machine is what stands on it. `fromProduct`/`toProduct` and
+  // `fromColour`/`toColour` are full phrases («المنتج السابق», «اللون الجديد»)
+  // because a bare «المنتج» or «اللون» would be contained in both headers of
+  // its pair and the first would claim the second's column.
+  changeoverLog: {
+    tab: "تغييرات الاسطمبات", titleEn: "Mould changes", titleAr: "تغييرات الاسطمبات",
+    fields: [
+      { key: "date", keywords: ["التاريخ", "date"] },
+      { key: "machine", keywords: ["الماكينة", "machine"] },
+      { key: "fromProduct", keywords: ["المنتج السابق", "from product"] },
+      { key: "fromColour", keywords: ["اللون السابق", "from colour"] },
+      { key: "order", keywords: ["أمر الشغل", "work order"] },
+      { key: "toProduct", keywords: ["المنتج الجديد", "to product"] },
+      { key: "toColour", keywords: ["اللون الجديد", "to colour"] },
+      { key: "material", keywords: ["الخامة", "material"] },
+      { key: "minutes", keywords: ["الوقت المتوقع", "est. minutes"] },
+      { key: "reasons", keywords: ["الأسباب", "reasons"] },
+      { key: "by", keywords: ["بواسطة", "recorded by"] },
+    ],
+  },
   // The single source of truth. Read directly when we need the per-mold standards
   // (cycle time + cavities) that OEE's Performance factor depends on.
   master: {
