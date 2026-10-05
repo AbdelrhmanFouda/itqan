@@ -24,9 +24,9 @@ import { useLang } from "@/context/LangContext";
 import { authedFetch } from "@/lib/authed-fetch";
 import { co } from "@/lib/i18n.changeover";
 import { pd } from "@/lib/i18n.prod";
-import { formatDate } from "@/lib/dates";
+import { formatClock, formatDate, todayIso } from "@/lib/dates";
 import { ageLabel, fill, fmtInt } from "@/lib/format";
-import { type Tone } from "@/lib/prod-meta";
+import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MISSING_ITEMS,
   colourDef, colourKey, darkestColour, estimateChange, machineKey, mapRows, placeTile, rankFor, removeTile,
@@ -43,17 +43,29 @@ import { AlertTriangle, Check, HelpCircle, LayoutGrid, List, Moon, Pencil, Refre
 const LAST_KEY = "itqan.changeover.last.v2";
 const STALE_AFTER_MS = 60_000;
 const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "red", info: "blue" };
-const STATE_TONE: Record<MachineState, Tone> = { running: "green", idle: "amber", unknown: "gray" };
-const STATE_DOT: Record<MachineState, string> = { running: "bg-emerald-500", idle: "bg-amber-500", unknown: "bg-gray-300" };
+const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
+const STATE_DOT: Record<MachineState, string> = { running: "bg-emerald-500", stopped: "bg-red-500", idle: "bg-amber-500", unknown: "bg-gray-300" };
+const STATES: readonly MachineState[] = ["running", "stopped", "idle", "unknown"];
 const STATE_TILE: Record<MachineState, string> = {
   running: "border-emerald-400 bg-white",
+  stopped: "border-red-400 bg-red-50",
   idle: "border-amber-400 bg-amber-50",
   unknown: "border-gray-300 bg-gray-50",
 };
-const STATE_WORD: Record<MachineState, string> = { running: "text-emerald-700", idle: "text-amber-700", unknown: "text-gray-500" };
+const STATE_WORD: Record<MachineState, string> = { running: "text-emerald-700", stopped: "text-red-700", idle: "text-amber-700", unknown: "text-gray-500" };
 const CHECKS = ["material", "packaging", "connections", "mould", "sample", "workers"] as const;
 
 type Strings = (typeof co)["en"];
+
+/**
+ * An answer built on a read that failed. Every sheet read degrades to an
+ * EMPTY tab rather than an error, so a bad moment at the bridge arrives here
+ * as "not connected", "no machines" or "no production log" with a 200 — seen
+ * live on 2026-10-05, when it blanked a page that had been showing the floor
+ * a second earlier. Such an answer is shown only when there is nothing better.
+ */
+const degraded = (r: ChangeoverResponse): boolean =>
+  !r.ok || !r.configured || r.logRead === false || r.masterRead === false || r.machines.length === 0;
 type PostResult = { ok: boolean; reason?: string } & Record<string, unknown>;
 
 async function post(body: Record<string, unknown>): Promise<PostResult> {
@@ -115,7 +127,7 @@ function ColourTags({ colours, isAr, s, guessed }: { colours: readonly string[];
   );
 }
 
-const LAMP: Record<MachineState, string> = { running: "#10b981", idle: "#f59e0b", unknown: "#cbd5e1" };
+const LAMP: Record<MachineState, string> = { running: "#10b981", stopped: "#ef4444", idle: "#f59e0b", unknown: "#cbd5e1" };
 
 /** The hatch that stands for "colour not known" — defined once, used by every glyph. */
 function GlyphDefs() {
@@ -245,18 +257,19 @@ export default function ChangeoverPage() {
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
-  const { data, loading, failed, reload } = useRemembered<ChangeoverResponse>({
+  const { data, loading, failed, setFailed, reload } = useRemembered<ChangeoverResponse>({
     key: LAST_KEY,
     read: () => timedJson<ChangeoverResponse>(authedFetch, freshNext.current ? "/api/changeover?fresh=1" : "/api/changeover"),
     valid: (snap) => Array.isArray(snap?.machines) && Array.isArray(snap?.orders) && Array.isArray(snap?.layout),
     // A snapshot's age is the device's past, not now.
     hydrate: (snap) => ({ ...snap, dataAgeMs: 0 }),
-    // An answer without the production log is a degraded one: it is shown
-    // when there is nothing better, never remembered, and never allowed to
-    // replace a good answer that is already on screen.
-    worthRemembering: (next) => next.ok && next.logRead !== false,
-    merge: (prev, next) => (next.logRead === false && prev && prev.logRead !== false ? { ...prev, dataAgeMs: next.dataAgeMs } : next),
+    // A degraded answer is shown when there is nothing better, never
+    // remembered, and never allowed to replace a good one already on screen —
+    // the page keeps what it showed and says the refresh failed.
+    worthRemembering: (next) => !degraded(next),
+    merge: (prev, next) => (degraded(next) && prev && !degraded(prev) ? prev : next),
     onLoaded: (next) => {
+      if (degraded(next)) { setFailed({ timedOut: false }); return; }
       // An old copy was served (and is being refreshed server-side): ask once
       // more in a few seconds. Bounded, the same way the stock page does it —
       // a bridge that stays down must not turn this into a poll.
@@ -291,7 +304,7 @@ export default function ChangeoverPage() {
   // Open on a machine that needs a decision — one standing idle — else the first.
   useEffect(() => {
     if (selected && machines.some((m) => m.label === selected)) return;
-    const first = machines.find((m) => m.state === "idle") ?? machines[0];
+    const first = machines.find((m) => m.state === "stopped") ?? machines.find((m) => m.state === "idle") ?? machines[0];
     if (first) setSelected(first.label);
   }, [machines, selected]);
 
@@ -326,6 +339,18 @@ export default function ChangeoverPage() {
   const missingText = useCallback((keys: string) =>
     keys.split(",").map((k) => { const it = MISSING_ITEMS.find((x) => x.key === k); return it ? (isAr ? it.ar : it.en) : k; }).join("، "), [isAr]);
 
+  /** «توقف مسجّل: لا يوجد أمر شغل — من 08:02», with the day when it is not today's. */
+  const stoppageText = useCallback((m: PlanMachine) => {
+    if (!m.stoppage) return "";
+    const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === m.stoppage!.reason);
+    const day = todayIso(m.stoppage.since);
+    const clock = formatClock(m.stoppage.since);
+    return fill(s.now.stoppage, {
+      reason: r ? (isAr ? r.ar : r.en) : m.stoppage.reason,
+      since: day === data?.today ? clock : `${formatDate(day, lang)} ${clock}`,
+    });
+  }, [s, isAr, lang, data?.today]);
+
   const pick = useCallback((label: string) => {
     setSelected(label);
     // The panel is under the map on a phone; bring it into view.
@@ -347,7 +372,11 @@ export default function ChangeoverPage() {
     return (
       <div dir={isAr ? "rtl" : "ltr"}>
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{s.title}</h1>
-        <EmptyState text={s.notConnected} />
+        {/* A read that failed looks exactly like a sheet that is not connected;
+            `failed` is set for every degraded answer, so offer the retry. */}
+        {failed
+          ? <LoadError variant="empty" text={s.loadError} retry={p.common.retry} onRetry={reload} loading={loading} />
+          : <EmptyState text={s.notConnected} />}
       </div>
     );
   }
@@ -407,6 +436,7 @@ export default function ChangeoverPage() {
             {m.now.since && <> · {fill(m.state === "idle" ? s.now.idleSince : s.now.lastShift, { date: formatDate(m.now.since, lang) })}</>}
           </span>
         )}
+        {m.stoppage && <span className="block text-xs text-red-700 mt-1">{stoppageText(m)}</span>}
       </button>
     );
   };
@@ -486,8 +516,15 @@ export default function ChangeoverPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      {data.stoppagesRead === false && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.stoppagesDown}
+        </p>
+      )}
+
+      <div className="grid grid-cols-4 gap-2 mb-3">
         <StatTile label={s.summary.running} value={fmtInt(count("running"), isAr)} tone="green" />
+        <StatTile label={s.summary.stopped} value={fmtInt(count("stopped"), isAr)} tone="red" />
         <StatTile label={s.summary.idle} value={fmtInt(count("idle"), isAr)} tone="amber" />
         <StatTile label={s.summary.waiting} value={fmtInt(waiting, isAr)} />
       </div>
@@ -538,7 +575,7 @@ export default function ChangeoverPage() {
         )}
 
         <p className="text-xs text-gray-500 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {(["running", "idle", "unknown"] as const).map((st) => (
+          {STATES.map((st) => (
             <span key={st} className="inline-flex items-center gap-1"><span className={`w-2.5 h-2.5 rounded-full ${STATE_DOT[st]}`} />{s.states[st]}</span>
           ))}
           {data.logDate && <span>{fill(s.asOf, { date: formatDate(data.logDate, lang) })}</span>}
@@ -582,6 +619,12 @@ export default function ChangeoverPage() {
                     {machine.now.since && <> · {fill(machine.state === "idle" ? s.now.idleSince : s.now.lastShift, { date: formatDate(machine.now.since, lang) })}</>}
                     {" · "}{s.now.source[machine.now.source]}
                   </p>
+                  {machine.stoppage && (
+                    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      <span className="font-medium">{stoppageText(machine)}</span>
+                      <span className="block text-xs text-red-600/90 mt-0.5">{s.now.stoppageHint}</span>
+                    </p>
+                  )}
                   {machine.now.coloursGuessed && (
                     <p className="text-xs text-amber-700 flex items-start gap-1.5"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{s.now.coloursGuessed}</p>
                   )}

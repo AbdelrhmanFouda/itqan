@@ -8,15 +8,16 @@ import { codeKey, machineMatch } from "@/lib/work-orders";
 import { latinDigits, normalizeDate, todayIso } from "@/lib/dates";
 import { cairoStamp, canonicalStamp } from "@/lib/customer-requests";
 import { isDayOffRow } from "@/lib/run-join";
+import { getOpenDowntimeEvents } from "@/lib/db";
 import { hasFullAccess, type Role } from "@/lib/roles";
 import {
   ANSWERS_HEADERS, ANSWERS_TAB, LOG_HEADERS, LOG_TAB, ANSWER_COLUMNS, ANY_COLOUR, MAP_NAME, MISSING_ITEMS,
   answersFor, colourKey, coloursFromSheet, coloursToSheet, fold, formatLayout, guessColour, isNightHour,
-  isRecent, kindFromSheet, kindToSheet, latestRuns, listFromSheet, listToSheet, machineKey, mergeAnswers,
+  kindFromSheet, kindToSheet, latestRuns, machineState, listFromSheet, listToSheet, machineKey, mergeAnswers,
   missingFromSheet, missingToSheet, parseLayout, parseYesNo, resolveNow, safeText, standingFromLog,
   validLayout, yesNo,
-  type AnswerColumn, type AnswerKind, type AnswerRow, type MachineState, type MapTile, type PlanMachine,
-  type PlanOrder, type PlanStanding,
+  type AnswerColumn, type AnswerKind, type AnswerRow, type MapTile, type PlanMachine,
+  type PlanOrder, type PlanStanding, type Stoppage,
 } from "@/lib/changeover";
 
 /**
@@ -50,6 +51,9 @@ export type ChangeoverResponse = {
    *  empty) and every machine is showing the registry's stale cell instead —
    *  the page must SAY so, not look like a quiet factory. */
   logRead: boolean;
+  /** «الرئيسي» answered with rows — without it no material is known and
+   *  every estimate is priced as "unknown material". */
+  masterRead: boolean;
   /** 20:00–08:00 Cairo: no mould changes and no samples on the night shift. */
   night: boolean;
   /** Only the owner and a manager mark a client as important. */
@@ -58,6 +62,9 @@ export type ChangeoverResponse = {
   orders: PlanOrder[];
   /** The floor map, as arranged on the page; [] until somebody arranges it. */
   layout: MapTile[];
+  /** The running stoppages were read. False = Firestore did not answer in
+   *  time, and no machine can show as stopped — the page says so. */
+  stoppagesRead: boolean;
   /** ms since the OLDEST read behind these rows. */
   dataAgeMs: number;
 };
@@ -115,6 +122,41 @@ function answerRows(records: readonly SheetRecord[]): AnswerRow[] {
   });
 }
 
+/**
+ * The stoppages running RIGHT NOW, per machine — the floor's own real-time
+ * word (/dashboard/downtime keeps them in Firestore until somebody taps stop).
+ * A stoppage whose resume was already reported («−30 دقيقة») is a machine
+ * that is back, so it is left out.
+ *
+ * BOUNDED, and unable to fail the page: a slow Firestore costs this page its
+ * red lamps, never the plan (the lesson of the 2026-09-09 outage — bound any
+ * new read-path dependency before awaiting it).
+ */
+const STOPPAGES_TIMEOUT_MS = 4000;
+async function openStoppages(): Promise<{ byMachine: Map<string, Stoppage>; read: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const events = await Promise.race([
+      getOpenDowntimeEvents(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("stoppages_timeout")), STOPPAGES_TIMEOUT_MS); }),
+    ]);
+    const byMachine = new Map<string, Stoppage>();
+    for (const e of events) {
+      if (e.endedAt != null || (typeof e.resumedAt === "number" && e.resumedAt > 0)) continue;
+      const k = machineKey(e.machine);
+      const cur = byMachine.get(k);
+      // Two open on one machine: the one that started first is how long it has stood.
+      if (k && (!cur || e.startedAt < cur.since)) byMachine.set(k, { reason: e.reason, since: e.startedAt });
+    }
+    return { byMachine, read: true };
+  } catch (err) {
+    console.error("[changeover] running stoppages not read:", err instanceof Error ? err.message : err);
+    return { byMachine: new Map(), read: false };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const logRows = (records: readonly SheetRecord[]) => records.map((r) => ({
   machine: r.machine || "", order: r.order || "", toProduct: r.toProduct || "",
   toColour: r.toColour || "", material: r.material || "", date: r.date || "",
@@ -122,7 +164,7 @@ const logRows = (records: readonly SheetRecord[]) => records.map((r) => ({
 
 export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Promise<ChangeoverResponse> {
   const fresh = { fresh: !!opts.fresh };
-  const [jobsData, machinesTab, masterTab, prodTab, answersTab, logTab] = await Promise.all([
+  const [jobsData, machinesTab, masterTab, prodTab, answersTab, logTab, stops] = await Promise.all([
     // The list needs what is LEFT to make, so «الإنتاج» is joined; downtime is not.
     loadJobs({ downtime: false }),
     getRecords("machines"),
@@ -131,6 +173,7 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     getRecords("production"),
     getRecords("changeoverAnswers", fresh).catch(none),
     getRecords("changeoverLog", fresh).catch(none),
+    openStoppages(),
   ]);
   const today = todayIso();
 
@@ -207,13 +250,12 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     const runAtPlan = plan && run && plan.date ? latestRuns(shiftRows, plan.date).byMachine.get(mk) ?? null : null;
     const base = resolveNow(plan, run, m.product, runAtPlan);
 
-    // Running = the newest evidence (a logged shift, or a change confirmed
-    // here) is within a day of the newest date the log holds — or of today,
-    // for a mould that went up after the log was last typed.
-    const state: MachineState =
-      base.source === "plan" || base.source === "production"
-        ? (isRecent(base.since, runs.latestDate) || isRecent(base.since, today) ? "running" : "idle")
-        : "unknown";
+    // A stoppage running on the downtime page beats the log; else the log's
+    // newest evidence decides (lib/changeover.ts machineState).
+    const stoppage = stops.byMachine.get(mk) ?? null;
+    const state = machineState({
+      source: base.source, since: base.since, latestDate: runs.latestDate, today, stopped: !!stoppage,
+    });
 
     // The work order behind it: the one confirmed here, else the open order
     // for the same product — the product name is the only link there is.
@@ -243,7 +285,7 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
 
     const a = answersFor(answers, "machine", mk);
     machines.push({
-      label: m.label, tonnage: m.tonnage, state,
+      label: m.label, tonnage: m.tonnage, state, stoppage,
       now: {
         products: base.products, colours, colourNow, coloursGuessed, material, order,
         source: base.source, since: base.since, shift: base.shift,
@@ -322,10 +364,12 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     today,
     logDate: runs.latestDate,
     logRead: shiftRows.length > 0,
+    masterRead: masterTab.records.length > 0,
     night: isNightHour(cairoHour()),
     canSetKeyClient: !!opts.role && hasFullAccess(opts.role),
     machines, orders,
     layout: validLayout(layout) ? layout : [],
+    stoppagesRead: stops.read,
     dataAgeMs: Math.max(0, Date.now() - readAt),
   };
 }

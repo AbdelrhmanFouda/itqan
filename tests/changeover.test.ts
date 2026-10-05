@@ -14,14 +14,14 @@ import {
   ANY_COLOUR, CHANGEOVER_NUMBERS, MAP_COLS, MISSING_ITEMS, NOTHING_MISSING,
   answersFor, bestStart, colourKey, colourRelation, colourToSheet, coloursFromSheet, coloursIn, coloursToSheet,
   darkestColour, dryingFor, estimateChange, formatLayout, guessColour, isNightHour, isRecent, kindFromSheet,
-  kindToSheet, latestRuns, listFromSheet, listToSheet, machineKey, mapRows, materialFamily, mergeAnswers,
+  kindToSheet, latestRuns, listFromSheet, listToSheet, machineKey, machineState, mapRows, materialFamily, mergeAnswers,
   missingFromSheet, missingToSheet, parseLayout, parseYesNo, placeTile, rankFor, removeTile, resolveNow,
   safeText, splitMinutes, standingFromLog, validLayout,
   type MapTile, type PlanMachine, type PlanOrder,
 } from "../lib/changeover.ts";
 
 const machine = (o: Partial<PlanMachine> & { now?: Partial<PlanMachine["now"]> } = {}): PlanMachine => ({
-  label: "PQ 5 — 100", tonnage: "100", state: "idle", transparentOnly: false, bigMachine: false,
+  label: "PQ 5 — 100", tonnage: "100", state: "idle", stoppage: null, transparentOnly: false, bigMachine: false,
   ...o,
   now: {
     products: ["غطاء"], colours: ["white"], colourNow: "", coloursGuessed: false, material: "بروبلين بيور", order: "",
@@ -233,12 +233,35 @@ test("on one date the evening shift is the later one — a mould changed at midd
   assert.deepEqual(r.byMachine.get(machineKey("PQ 9 — 140"))?.products, ["الثلاثية"]);
 });
 
-test("running is measured against the newest date in the log, not against today", () => {
+test("recent is measured against the newest date in the log, not against today — and three days back", () => {
   assert.equal(isRecent("2026-10-04", "2026-10-04"), true);
   assert.equal(isRecent("2026-10-03", "2026-10-04"), true, "typed up a day behind is still running");
-  assert.equal(isRecent("2026-10-02", "2026-10-04"), false);
+  // The owner's correction (2026-10-05): PQ 1's last logged shift was 2 Oct,
+  // the log ran to 4 Oct, the page called it idle — «PQ1 is working».
+  assert.equal(isRecent("2026-10-02", "2026-10-04"), true);
+  assert.equal(isRecent("2026-10-01", "2026-10-04"), true);
+  assert.equal(isRecent("2026-09-30", "2026-10-04"), false);
   assert.equal(isRecent("2026-09-23", "2026-10-04"), false);
   assert.equal(isRecent("", "2026-10-04"), false);
+  // The one-day rule that was wrong, for the record.
+  assert.equal(isRecent("2026-10-02", "2026-10-04", 1), false);
+});
+
+test("a machine's state: a stoppage running on the downtime page beats whatever the log says", () => {
+  const at = { latestDate: "2026-10-04", today: "2026-10-05", stopped: false };
+  // Logged within three days of the newest log date: running.
+  assert.equal(machineState({ ...at, source: "production", since: "2026-10-02" }), "running");
+  // Nothing logged for a week and nothing said about it: idle.
+  assert.equal(machineState({ ...at, source: "production", since: "2026-09-25" }), "idle");
+  // A change confirmed on the page today, not in the log yet: running.
+  assert.equal(machineState({ ...at, source: "plan", since: "2026-10-05" }), "running");
+  // The log shows a shift yesterday, but the floor tapped a stoppage this
+  // morning (PQ 13, «كسر المصب», live 2026-10-05): stopped.
+  assert.equal(machineState({ ...at, source: "production", since: "2026-10-04", stopped: true }), "stopped");
+  // Only the registry knows it, or nothing does: unknown — unless it is stopped.
+  assert.equal(machineState({ ...at, source: "registry", since: "" }), "unknown");
+  assert.equal(machineState({ ...at, source: "none", since: "" }), "unknown");
+  assert.equal(machineState({ ...at, source: "none", since: "", stopped: true }), "stopped");
 });
 
 test("the shift log and a confirm on this page: whichever is newer is what stands on the machine", () => {
@@ -402,6 +425,16 @@ test("a mould still standing on an IDLE machine: cheapest to restart there, and 
   // On another machine: still a candidate, with the mould's whereabouts.
   const chip = rankFor(machine(), [o], ctx).ranked[0].chips.find((c) => c.key === "mountedElsewhere");
   assert.deepEqual(chip?.vars, { machine: "PQ 11 — 180" });
+});
+
+test("a STOPPED machine is offered its own mould's order first, like an idle one", () => {
+  // Stopped for «لا يوجد أمر شغل» or a mould change is exactly when the
+  // engineer opens this page; the order whose mould is already up is cheapest.
+  const stopped = machine({ state: "stopped", stoppage: { reason: "No order", since: 1 }, now: { products: ["عظمة"] } });
+  const mine = order({ code: "mine", product: "عظمة", mountedOn: "PQ 5 — 100", mountedRunning: false, colours: ["black"] });
+  const r = rankFor(stopped, [order({ code: "other" }), mine], ctx);
+  assert.deepEqual(r.ranked.map((x) => x.order.code), ["mine", "other"]);
+  assert.equal(r.ranked[0].mountedHere, true);
 });
 
 test("a mould that fits only this machine goes before one that could go elsewhere", () => {

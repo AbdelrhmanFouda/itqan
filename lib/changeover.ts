@@ -521,18 +521,29 @@ export function latestRuns(rows: readonly ShiftRow[], today: string): { byMachin
   return { byMachine, latestDate };
 }
 
-const dayBefore = (iso: string): string => {
-  const t = Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - 86_400_000;
+const daysBefore = (iso: string, days: number): string => {
+  const t = Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - days * 86_400_000;
   return new Date(t).toISOString().slice(0, 10);
 };
 
 /**
- * Running = its last shift is within a day of the NEWEST date in the log —
- * not of today's date, because the log is typed up a day behind as often as
- * not and "today" would call the whole factory idle every morning.
+ * How far back a machine's last logged shift may be and still count as
+ * running. ONE day was the first rule and it was wrong (owner, 2026-10-05:
+ * «PQ1 is working» while the page called it idle): the log is typed up
+ * machine by machine, a day or two behind, and a press that runs every day
+ * still shows two-day gaps in it — PQ 5 went 30 Sep → 3 Oct without stopping
+ * being a mould change. Three days is the widest gap the live log shows
+ * between two shifts of one uninterrupted job.
  */
-export const isRecent = (date: string, latestDate: string): boolean =>
-  ISO.test(date) && ISO.test(latestDate) && date >= dayBefore(latestDate);
+export const RECENT_DAYS = 3;
+
+/**
+ * Is this date recent, measured against the NEWEST date in the log — not
+ * against today, because the log is typed up behind and "today" would call
+ * the whole factory idle every morning.
+ */
+export const isRecent = (date: string, latestDate: string, days: number = RECENT_DAYS): boolean =>
+  ISO.test(date) && ISO.test(latestDate) && date >= daysBefore(latestDate, days);
 
 /* ----------------------------- machines and orders ------------------------- */
 
@@ -560,19 +571,47 @@ export type MachineNow = {
   shift: string;
 };
 
-/** running = logged in the newest shifts; idle = a mould is standing but the
- *  machine has not run lately (THE machines a decision is needed for);
- *  unknown = nothing logged at all. */
-export type MachineState = "running" | "idle" | "unknown";
+/**
+ * running = logged in the last few days and nothing says it stopped;
+ * stopped = a stoppage is RUNNING on the downtime page right now — the
+ *           floor's own, real-time word, so it beats anything the log says;
+ * idle    = a mould is standing but no shift has been logged lately and no
+ *           stoppage is recorded either;
+ * unknown = nothing is known at all.
+ * stopped and idle are the machines a decision is needed for.
+ */
+export type MachineState = "running" | "stopped" | "idle" | "unknown";
+
+/** A stoppage running now on /dashboard/downtime: its reason key
+ *  (lib/prod-meta.ts DOWNTIME_CAPTURE_REASONS) and when it started (epoch ms). */
+export type Stoppage = { reason: string; since: number };
 
 export type PlanMachine = {
   label: string;
   tonnage: string;
   now: MachineNow;
   state: MachineState;
+  /** The stoppage running on it now, null when there is none (or it could not be read). */
+  stoppage: Stoppage | null;
   transparentOnly: boolean;
   bigMachine: boolean;
 };
+
+/**
+ * The one place a machine's state is decided.
+ *
+ * `since` is the day of the newest evidence for what stands on it — a logged
+ * shift, or a change confirmed on this page — and it is recent when it is
+ * within RECENT_DAYS of the newest date the log holds, OR of today (a mould
+ * that went up after the log was last typed).
+ */
+export function machineState(o: {
+  source: MachineNow["source"]; since: string; latestDate: string; today: string; stopped: boolean;
+}): MachineState {
+  if (o.stopped) return "stopped";
+  if (o.source !== "plan" && o.source !== "production") return "unknown";
+  return isRecent(o.since, o.latestDate) || isRecent(o.since, o.today) ? "running" : "idle";
+}
 
 /** What was confirmed on this page for a machine, from «تغييرات الاسطمبات». */
 export type PlanStanding = { date: string; products: string[]; colours: string[]; order: string; material: string };

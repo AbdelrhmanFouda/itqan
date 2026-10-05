@@ -61,11 +61,18 @@ and what is on them now … make me able to edit here … the machines shown on 
   registry's product cell and Active flag are typed once and go stale (it called PQ 6, 10
   and 13 inactive the day after each ran). v1 read them: it hid machines, showed moulds
   that had come off, and offered orders that were already running. `latestRuns` /
-  `isRecent` / `resolveNow` in `lib/changeover.ts`. Running = last shift within a day of
-  the NEWEST date in the log — not of today, the log is typed a day behind. A confirm on
+  `isRecent` / `resolveNow` / `machineState` in `lib/changeover.ts`. **A stoppage RUNNING
+  on the downtime page (Firestore, read bounded at 4 s) beats the log** — state
+  «توقف», with its reason; that is the floor's real-time word. Otherwise running = last
+  shift within `RECENT_DAYS` (3) of the NEWEST date in the log — not of today, the log
+  is typed behind. ⚠ It was ONE day at first and the owner corrected it the same day
+  («PQ1 is working»): a press that runs daily still shows two-day gaps in the log. A confirm on
   this page stands for as long as the log has not changed mould since (`runAtPlan`),
   which is also how an order stays tied to a machine whose log spells the product another
-  way. `logRead: false` in the response = the log could not be read; the page says so.
+  way. Every sheet read degrades to an EMPTY tab, never an error, so a bad moment at the
+  bridge arrives as a 200 that says "not connected" / "no machines": `logRead` /
+  `masterRead` flag it, and the page keeps its last good view and offers a retry
+  (`degraded()` in the page) instead of blanking — seen live on localhost, 2026-10-05.
 - **An order running on another machine is not a candidate; a mould STANDING on an idle
   machine is** (cheapest there, «الاسطمبة راكبة على…» elsewhere). Each list is sorted
   FIRST on whether the mould belongs on that machine (the engineer's answer, else
