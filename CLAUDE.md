@@ -54,6 +54,40 @@ finished"; the page should ASK what the sheet does not know, remember it, and ra
 orders ranked for THAT machine, each with its reasons as chips and an estimate of the
 change. It suggests; only «ركّب دي» → checklist → confirm writes.
 
+**Reworked 2026-10-05** — owner: *"the logic doesn't seem correct … show all the machines
+and what is on them now … make me able to edit here … the machines shown on a map"*.
+
+- **What is on a machine is its LATEST shift in «الإنتاج», not «الماكينات».** The
+  registry's product cell and Active flag are typed once and go stale (it called PQ 6, 10
+  and 13 inactive the day after each ran). v1 read them: it hid machines, showed moulds
+  that had come off, and offered orders that were already running. `latestRuns` /
+  `isRecent` / `resolveNow` in `lib/changeover.ts`. Running = last shift within a day of
+  the NEWEST date in the log — not of today, the log is typed a day behind. A confirm on
+  this page stands for as long as the log has not changed mould since (`runAtPlan`),
+  which is also how an order stays tied to a machine whose log spells the product another
+  way. `logRead: false` in the response = the log could not be read; the page says so.
+- **An order running on another machine is not a candidate; a mould STANDING on an idle
+  machine is** (cheapest there, «الاسطمبة راكبة على…» elsewhere). Each list is sorted
+  FIRST on whether the mould belongs on that machine (the engineer's answer, else
+  Master's tonnage as a hint) and the "Master says another machine" ones are folded
+  away — 27 orders were open at once. Unanswered questions are one hint on the button
+  («جاوب على الأسئلة»), not a row of grey chips.
+- **Colours are lists.** One job is made in several and nothing else in the workbook
+  holds them. Saved on the ORDER when there is one, else in the machine's
+  «تغييرات الاسطمبات» row; what a product was last made in is remembered as a default
+  (shown with «؟» until confirmed). `colourNow` = the colour in the barrel when it is
+  known; otherwise the machine is cleaned of the darkest.
+- **The floor map is DATA** — one cell («ترتيب الخريطة», kind «خريطة») of
+  «إجابات خطة الاسطمبات», arranged on the page (tap a machine, tap a square; 7-column
+  grid; `parseLayout` / `placeTile`). Never keyed on PQ numbers in code. ⚠ That column was
+  added to a tab that already existed, so `saveAnswers` calls `ensureHeaders` first: an
+  append silently DROPS a value whose header the tab lacks.
+- Tiles draw a side-view press (`MachineGlyph`): lamp = state, hopper = the job's
+  colours, barrel = the colour in it now, hatch = not known.
+- Run live 2026-10-05 (localhost, bridge transport): the map saved and read back, and
+  PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
+  «ركّب دي» confirm has still not been run.
+
 - **Rules: `lib/changeover.ts`** — pure, zero imports, 25 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,

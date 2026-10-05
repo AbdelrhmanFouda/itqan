@@ -290,6 +290,9 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "transparentOnly", keywords: ["مخصصة للشفاف", "transparent only"] },
       { key: "bigMachine", keywords: ["ماكينة كبيرة", "big machine"] },
       { key: "by", keywords: ["بواسطة", "recorded by"] },
+      // The floor map (2026-10-05) — one cell, every tile. Declared last
+      // because the column was added to a tab that already existed.
+      { key: "layout", keywords: ["ترتيب الخريطة", "map layout"] },
     ],
   },
   // «تغييرات الاسطمبات»: one row per confirmed mould change. The LAST row for

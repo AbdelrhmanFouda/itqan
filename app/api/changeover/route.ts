@@ -43,11 +43,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.action === "mount") {
+      const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
       const res = await recordMount({
         machine: String(body.machine ?? ""),
         order: String(body.order ?? ""),
-        product: String(body.product ?? ""),
-        colour: String(body.colour ?? ""),
+        products: list(body.products),
+        colours: list(body.colours),
+        fromProducts: list(body.fromProducts),
+        fromColours: list(body.fromColours),
         minutes: Number(body.minutes),
         reasons: String(body.reasons ?? ""),
         baseline: body.baseline === true,
