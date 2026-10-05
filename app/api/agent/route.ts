@@ -34,7 +34,7 @@ const API_KEY = process.env.ANTHROPIC_API_KEY?.trim();
 // Roles allowed to use the assistant. Workers get the full assistant, writes
 // included — the owner's call. Because a shop-floor account can now trigger a
 // sheet write, every confirmed write records who asked for it (see WRITE_ACTOR).
-const ALLOWED: Role[] = ["owner", "manager", "worker", "production", "quality"];
+const ALLOWED: Role[] = ["owner", "manager", "worker", "production", "quality", "storage"];
 
 /* --------------------------------- tools ---------------------------------- */
 

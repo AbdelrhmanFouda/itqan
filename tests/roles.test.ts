@@ -80,7 +80,7 @@ test("production sees exactly its eight pages", () => {
     ["assistant", "changeover", "downtime", "issues", "jobs", "overview", "performance", "production", "stock"],
   );
   assert.equal(canAccess("quality", "/dashboard/stock"), false, "quality was not given stock");
-  assert.equal(canAccess("storage", "/dashboard/stock"), false, "the storekeeper has the full storage page instead");
+  assert.equal(canAccess("storage", "/dashboard/stock"), true, "the storekeeper reads availability too (owner, 2026-10-05)");
   // «خطة الاسطمبات» (2026-09-30) is the production engineer's alone.
   assert.equal(canAccess("worker", "/dashboard/changeover"), false, "the floor does not plan mould changes");
   assert.equal(canAccess("quality", "/dashboard/changeover"), false, "not inherited through the overview prefix");
@@ -127,7 +127,9 @@ test("maintenance, sales, finance and storage are unchanged", () => {
   // tests/views-matrix.test.ts.
   assert.deepEqual(keysFor("sales").sort(), ["clients", "jobs", "products", "requests", "sales"]);
   assert.deepEqual(keysFor("finance").sort(), ["finance", "reports"]);
-  assert.deepEqual(keysFor("storage").sort(), ["storage"]);
+  // Storage gained stock, jobs, products and the assistant on 2026-10-05
+  // (owner's word) — a deliberate move of this pin.
+  assert.deepEqual(keysFor("storage").sort(), ["assistant", "jobs", "products", "stock", "storage"]);
 });
 
 /* ------------------------------ full access ------------------------------- */

@@ -748,7 +748,7 @@ sidebar and `canAccess()`.
 | `maintenance` | machines, downtime, issues |
 | `sales` | sales, products, jobs, clients |
 | `finance` | finance, reports |
-| `storage` | storage |
+| `storage` | storage, **stock, jobs, products, assistant** (2026-10-05, owner's word; also in `/api/agent` `ALLOWED`) |
 
 - **`production` and `quality` are no longer the same.** They used to share one `OPS`
   constant with a comment saying they must never drift apart; that coupling was

@@ -39,15 +39,15 @@ const MATRIX: Record<NavKey, Role[]> = {
   machines:    ["owner", "manager", "maintenance"],
   // worker added 2026-09-04 (owner's word): the floor reads the mould number.
   molds:       ["owner", "manager", "worker"],
-  products:    ["owner", "manager", "sales"],
-  jobs:        ["owner", "manager", "production", "sales"],
+  products:    ["owner", "manager", "sales", "storage"], // storage added 2026-10-05 (owner)
+  jobs:        ["owner", "manager", "production", "sales", "storage"], // storage added 2026-10-05 (owner)
   // The customer portal's review queue (2026-09-23). Sales, manager, owner —
   // and deliberately nobody else: the page shows who asked for what, and one
   // tap on it creates a work order. A NEW pin, not a moved one.
   requests:    ["owner", "manager", "sales"],
   // The production side's read-only warehouse view (2026-09-09): «can I
   // promise this?». Not the storekeeper's page, and not the floor's.
-  stock:       ["owner", "manager", "production"],
+  stock:       ["owner", "manager", "production", "storage"], // storage added 2026-10-05 (owner)
   // «خطة الاسطمبات» (2026-09-30): the production engineer's — it names
   // clients and orders, and one tap rewrites a work order's machine.
   changeover:  ["owner", "manager", "production"],
@@ -56,7 +56,7 @@ const MATRIX: Record<NavKey, Role[]> = {
   storage:     ["owner", "manager", "storage"],
   issues:      ["owner", "manager", "production", "quality", "worker", "maintenance"],
   performance: ["owner", "manager", "production", "quality"],
-  assistant:   ["owner", "manager", "production", "quality", "worker"],
+  assistant:   ["owner", "manager", "production", "quality", "worker", "storage"], // storage added 2026-10-05 (owner)
   reports:     ["owner", "manager", "finance"],
   clients:     ["owner", "manager", "sales"],
   approvals:   ["owner", "manager"],

@@ -201,10 +201,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
         <aside
           className={`bg-white border-gray-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-4 flex flex-col gap-1 ${isAr ? "border-l" : "border-r"}
-          fixed top-14 bottom-0 z-30 w-60 overflow-y-auto transition-transform duration-200
+          fixed top-14 bottom-0 z-30 w-60 overflow-y-auto transition-[translate,transform,visibility] duration-200
           ${isAr ? "right-0" : "left-0"}
-          ${navOpen ? "translate-x-0 shadow-xl" : isAr ? "translate-x-full" : "-translate-x-full"}
-          md:static md:z-auto md:w-48 md:translate-x-0 md:overflow-y-visible md:shadow-none md:transition-none`}
+          ${navOpen ? "translate-x-0 shadow-xl" : `invisible ${isAr ? "translate-x-full" : "-translate-x-full"}`}
+          md:visible md:static md:z-auto md:w-48 md:translate-x-0 md:overflow-y-visible md:shadow-none md:transition-none`}
+          // `invisible` when closed: Tailwind v4 slides with the standalone
+          // `translate` property, which browsers before ~2022 ignore — on such
+          // a phone the drawer never left the screen (reported 2026-10-05).
         >
           {items.map(({ href, key }) => {
             const Icon = ICON[key];

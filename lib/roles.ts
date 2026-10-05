@@ -109,8 +109,8 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   // (owner's word, 2026-09-04: "allow for editing for everyone"). This entry
   // only decides who can OPEN the page; /api/molds guards the write.
   { href: "/dashboard/molds", key: "molds", roles: ["worker"] },
-  { href: "/dashboard/products", key: "products", roles: ["sales"] },
-  { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales"] },
+  { href: "/dashboard/products", key: "products", roles: ["sales", "storage"] },
+  { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales", "storage"] },
   // «طلبات العملاء» — the customer portal's review queue (2026-09-23, owner's
   // decision 6: sales, manager and the owner approve). NOT production and NOT
   // quality: a row here names a customer and turns into a real work order with
@@ -122,7 +122,9 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   // orders, المتاح — and writes NOTHING there. Not the storekeeper's page
   // (`storage`, which records movements); the two are deliberately separate
   // so a production account never holds a warehouse write button.
-  { href: "/dashboard/stock", key: "stock", roles: ["production"] },
+  // The storekeeper reads stock, jobs, products and the assistant too (owner,
+  // 2026-10-05) — beside the storage page, not instead of it.
+  { href: "/dashboard/stock", key: "stock", roles: ["production", "storage"] },
   // «خطة الاسطمبات» (2026-09-30): which mould goes on which machine next.
   // The production engineer's page — it names clients and orders and one tap
   // on it rewrites a work order's machine, so NOT the floor's `worker` role
@@ -136,7 +138,7 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/storage", key: "storage", roles: ["storage"] },
   { href: "/dashboard/issues", key: "issues", roles: ["production", "quality", "worker", "maintenance"] },
   { href: "/dashboard/performance", key: "performance", roles: ["production", "quality"] },
-  { href: "/dashboard/assistant", key: "assistant", roles: ["production", "quality", "worker"] },
+  { href: "/dashboard/assistant", key: "assistant", roles: ["production", "quality", "worker", "storage"] },
   { href: "/dashboard/reports", key: "reports", roles: ["finance"] },
   { href: "/dashboard/clients", key: "clients", roles: ["sales"] },
   { href: "/dashboard/approvals", key: "approvals", roles: [] }, // owner + manager only
