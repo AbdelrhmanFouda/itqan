@@ -582,7 +582,7 @@ export default function ChangeoverPage() {
                     {machine.now.since && <> · {fill(machine.state === "idle" ? s.now.idleSince : s.now.lastShift, { date: formatDate(machine.now.since, lang) })}</>}
                     {" · "}{s.now.source[machine.now.source]}
                   </p>
-                  {(machine.now.coloursGuessed || machine.now.colours.length === 0) && (
+                  {machine.now.coloursGuessed && (
                     <p className="text-xs text-amber-700 flex items-start gap-1.5"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{s.now.coloursGuessed}</p>
                   )}
                 </div>
