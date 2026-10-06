@@ -163,9 +163,14 @@ export type ColourRelation = "same" | "any" | "darker" | "fromTransparent" | "li
 /** How the NEXT colour sits against the one on the machine now. */
 export function colourRelation(fromKey: string, toKey: string): ColourRelation {
   if (toKey === ANY_COLOUR) return "any";
-  if (!fromKey || !toKey || fromKey === ANY_COLOUR) return "unknown";
+  if (!toKey) return "unknown";
+  // Anything → transparent is the worst change there is, and "anything"
+  // includes a colour nobody has recorded: until the machine is KNOWN to be
+  // on transparent, a transparent job is priced as the hard one. (Colours are
+  // not in the sheet, so "not recorded" is the usual case, not the exception.)
+  if (toKey === "transparent" && fromKey !== "transparent") return "toTransparent";
+  if (!fromKey || fromKey === ANY_COLOUR) return "unknown";
   if (fromKey === toKey) return "same";
-  if (toKey === "transparent") return "toTransparent";
   if (fromKey === "transparent") return "fromTransparent";
   const a = colourDef(fromKey), b = colourDef(toKey);
   if (!a || !b) return "unknown";
@@ -232,12 +237,18 @@ export const CHANGEOVER_NUMBERS = {
   swapOilCoresMin: 150,
   /** The big machine, mount + run + samples: «حوالي 6 ساعات». */
   swapBigMin: 360,
+  /** ASSUMPTION: a mould with a hot runner — heating the manifold and purging
+   *  through it before the first good shot (owner, 2026-10-05: "some moulds
+   *  may have it"; he gave no time). */
+  hotRunnerMin: 20,
 } as const;
 
 export type Ease = "same" | "easy" | "unknown" | "hard" | "veryHard";
 const EASE_ORDER: Record<Ease, number> = { same: 0, easy: 1, unknown: 2, hard: 3, veryHard: 4 };
 
 export type Side = { product: string; colour: string; material: string };
+
+export type EstimateOptions = { bigMachine?: boolean; oilCores?: boolean | null; hotRunner?: boolean | null };
 
 export type Estimate = {
   ease: Ease;
@@ -247,6 +258,8 @@ export type Estimate = {
   sameMould: boolean;
   purgeMin: number;
   swapMin: number;
+  /** Extra minutes for a hot-runner mould; 0 when it has none or nothing changes. */
+  hotRunnerMin: number;
   totalMin: number;
   drying: Drying | null;
 };
@@ -258,13 +271,16 @@ export type Estimate = {
  * different material is never better than "hard", whatever the colours say —
  * the barrel is purged either way.
  */
-export function estimateChange(
-  from: Side, to: Side, opts: { bigMachine?: boolean; oilCores?: boolean | null } = {},
-): Estimate {
+export function estimateChange(from: Side, to: Side, opts: EstimateOptions = {}): Estimate {
   const N = CHANGEOVER_NUMBERS;
   const colour = colourRelation(colourKey(from.colour), colourKey(to.colour));
   const ff = materialFamily(from.material), tf = materialFamily(to.material);
-  const materialChange = ff && tf ? ff !== tf : null;
+  // Two texts this file does not recognise («TPR», «سان», «مخرز شفاف») both
+  // fall in "other" — that is not the same material unless it is the same
+  // text. Different texts are "not known", which is priced slow, never green.
+  const materialChange = !ff || !tf ? null
+    : ff === "other" && tf === "other" ? (fold(from.material) === fold(to.material) ? false : null)
+    : ff !== tf;
 
   let ease: Ease =
     colour === "same" ? "same"
@@ -277,7 +293,9 @@ export function estimateChange(
   if (ease === "same" && materialChange === null) ease = "easy";
 
   const base = (f: MaterialFamily) => (isFast(f) ? N.colourFastMin : N.colourSlowMin);
-  const b = materialChange ? Math.max(base(ff), base(tf)) : base(tf);
+  // The same family is priced on that family; a different one — or one that
+  // is NOT KNOWN on either side — on the slower of the two (unknown is slow).
+  const b = materialChange === false ? base(tf) : Math.max(base(ff), base(tf));
   const purgeMin =
     ease === "same" ? 0
     : ease === "easy" ? Math.round(b * N.easyFactor)
@@ -286,10 +304,13 @@ export function estimateChange(
 
   const sameMould = !!fold(from.product) && fold(from.product) === fold(to.product);
   const swapMin = sameMould ? 0 : opts.bigMachine ? N.swapBigMin : opts.oilCores ? N.swapOilCoresMin : N.swapMin;
+  // A hot runner is heated and purged through whenever its mould goes up or
+  // the colour in it changes — not when the same mould carries on unchanged.
+  const hotRunnerMin = opts.hotRunner && !(sameMould && ease === "same") ? N.hotRunnerMin : 0;
 
   return {
-    ease, colour, materialChange, sameMould, purgeMin, swapMin,
-    totalMin: purgeMin + swapMin,
+    ease, colour, materialChange, sameMould, purgeMin, swapMin, hotRunnerMin,
+    totalMin: purgeMin + swapMin + hotRunnerMin,
     drying: dryingFor(to.material),
   };
 }
@@ -322,6 +343,7 @@ export const ANSWER_COLUMNS = {
   fits: "mold",
   workers: "mold",
   oilCores: "mold",
+  hotRunner: "mold",
   keyClient: "client",
   transparentOnly: "machine",
   bigMachine: "machine",
@@ -368,7 +390,11 @@ export function missingToSheet(keys: readonly string[]): string {
   const ar = MISSING_ITEMS.filter((m) => keys.includes(m.key)).map((m) => m.ar);
   return ar.length ? listToSheet(ar) : NOTHING_MISSING;
 }
-/** null = never asked; [] = asked, nothing missing. */
+/**
+ * null = never asked; [] = asked, nothing missing. A cell that holds words
+ * this list does not know (somebody typed in the tab) is NOT "nothing
+ * missing" — it is read as never asked, so the order is not waved through.
+ */
 export function missingFromSheet(v: string | undefined | null): MissingKey[] | null {
   const raw = String(v ?? "").trim();
   if (!raw) return null;
@@ -378,8 +404,13 @@ export function missingFromSheet(v: string | undefined | null): MissingKey[] | n
     const hit = MISSING_ITEMS.find((m) => fold(m.ar) === fold(part) || m.key === fold(part));
     if (hit && !out.includes(hit.key)) out.push(hit.key);
   }
-  return out;
+  return out.length > 0 ? out : null;
 }
+
+/** «تركب على أنهي ماكينات؟» taken back: every machine un-tapped. Written so
+ *  the LATEST answer says "not known" again (a blank cell cannot — the latest
+ *  NON-blank cell wins). It names no machine, so it reads as no answer. */
+export const FITS_UNKNOWN = "غير محدد";
 
 export type AnswerRow = { kind: AnswerKind | ""; key: string } & Partial<Record<AnswerColumn, string>>;
 export type AnswerSet = Partial<Record<AnswerColumn, string>>;
@@ -433,8 +464,10 @@ export const ANSWERS_HEADERS: string[] = [
   "ماكينة كبيرة\nBig machine",
   "بواسطة\nRecorded by",
   // Added 2026-10-05 and LAST on purpose: the live tab already existed, and
-  // ensureHeaders adds a missing header at the right-hand end.
+  // ensureHeaders adds a missing header at the right-hand end. Keep new
+  // columns in the order they were added.
   "ترتيب الخريطة\nMap layout",
+  "هوت رانر\nHot runner",
 ];
 
 /** One row per confirmed change — and per «الراكب الآن» declaration, which is
@@ -453,13 +486,31 @@ export const LOG_HEADERS: string[] = [
   "الوقت المتوقع (دقيقة)\nEst. minutes",
   "الأسباب\nReasons",
   "بواسطة\nRecorded by",
+  // Added 2026-10-05, last for the same reason as «ترتيب الخريطة» above: the
+  // ONE colour in the barrel, apart from the colours the job is made in.
+  "اللون الشغال الآن\nColour now",
 ];
 
 export type LogRow = {
   machine: string; order: string; toProduct: string; toColour: string; material: string;
   /** The row's own stamp, as the sheet holds it — the caller normalises it. */
   date?: string;
+  fromProduct?: string;
+  /** «اللون الشغال الآن» ("" on rows written before the column existed). */
+  nowColour?: string;
+  reasons?: string;
 };
+
+/** The «الأسباب» text of a «الراكب الآن» row — what tells it from a confirmed change. */
+export const BASELINE_REASON = "تسجيل الراكب الحالي";
+export const isBaselineRow = (r: Pick<LogRow, "reasons">): boolean => fold(r.reasons).startsWith(fold(BASELINE_REASON));
+
+/**
+ * «أمر الشغل» on a «الراكب الآن» row when somebody answered «لا» to "is this
+ * work order …?" — the machine's job has NO order, and the page stops asking.
+ * A blank cell says nothing either way, so it cannot carry that answer.
+ */
+export const NO_ORDER = "بدون أمر شغل";
 
 /** Rows in SHEET ORDER → what is standing on each machine (by machineKey). */
 export function standingFromLog<T extends LogRow>(rows: readonly T[]): Map<string, T> {
@@ -467,6 +518,45 @@ export function standingFromLog<T extends LogRow>(rows: readonly T[]): Map<strin
   for (const r of rows) {
     const k = machineKey(r.machine);
     if (k && (r.toProduct || "").trim()) out.set(k, r);
+  }
+  return out;
+}
+
+/**
+ * The same, plus the newest CONFIRMED change still behind each machine's last
+ * row. Only the last row is "what stands" — but a note written after a confirm
+ * («تعديل», a tap on which colour is running) must not erase the fact that the
+ * machine was STARTED: it used to send a press that had just been mounted back
+ * to «واقفة» and offer its running order to every other machine. The confirm
+ * stays behind the notes for as long as they name the same mould.
+ */
+export type Standing<T extends LogRow> = {
+  row: T;
+  started: T | null;
+  /**
+   * What the page was told came OFF this machine while the same mould has
+   * stood on it — each with the stamp of the row that said so, because it is
+   * only true of shifts up to that day: the same mould going back up LATER is
+   * news. Carried across notes (a later «لا» or colour tap must not bring back
+   * what «اتغيّرت» took off), minus anything a later row names as standing.
+   */
+  cameOff: { product: string; date: string }[];
+};
+export function standingWithStart<T extends LogRow>(rows: readonly T[]): Map<string, Standing<T>> {
+  const out = new Map<string, Standing<T>>();
+  const shares = (a: string | undefined, b: string | undefined) =>
+    listFromSheet(a).some((x) => listFromSheet(b).some((y) => fold(x) === fold(y)));
+  for (const r of rows) {
+    const k = machineKey(r.machine);
+    if (!k || !(r.toProduct || "").trim()) continue;
+    const own = listFromSheet(r.fromProduct).map((product) => ({ product, date: r.date ?? "" }));
+    const names = (product: string) => listFromSheet(r.toProduct).some((x) => fold(x) === fold(product));
+    if (!isBaselineRow(r)) { out.set(k, { row: r, started: r, cameOff: own.filter((c) => !names(c.product)) }); continue; }
+    const prev = out.get(k);
+    const sameMould = !!prev && shares(prev.row.toProduct, r.toProduct);
+    const started = prev?.started && shares(prev.started.toProduct, r.toProduct) ? prev.started : null;
+    const cameOff = [...(sameMould ? prev!.cameOff : []), ...own].filter((c) => !names(c.product));
+    out.set(k, { row: r, started, cameOff });
   }
   return out;
 }
@@ -484,16 +574,31 @@ export function standingFromLog<T extends LogRow>(rows: readonly T[]): Map<strin
  *
  * A machine's standing job is the product(s) of its LATEST shift row. Two
  * products in one shift is real (PQ 7 runs a left pair and a right pair), so
- * it is a list.
+ * it is a list — but it is just as often a mould change inside the shift
+ * (13 times in the live log: a change 5 times, a pair starting about as
+ * often), and the shift alone cannot tell. So when the latest shift mixes a
+ * product carried over from the shift before with a NEW one, the new one is
+ * listed first (the from-side and the material are read off it) and the run
+ * is marked `mixed`, which the page turns into one question.
  */
-export type ShiftRow = { date: string; shift: string; machine: string; product: string };
-export type LastRun = { date: string; shift: string; products: string[] };
+export type ShiftRow = { date: string; shift: string; machine: string; product: string; material?: string };
+export type LastRun = {
+  date: string;
+  shift: string;
+  products: string[];
+  /** «نوع الخام» as each shift row typed it, parallel to `products` ("" = blank). */
+  materials: string[];
+  /** A carried-over product and a new one in the same shift — see above. */
+  mixed: boolean;
+};
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 /** «المسائية» comes after «الصباحية» on the same date. Matched on the FOLDED
  *  word — `fold` turns «ئ» into «ي», so the pattern is «مساي», not «مسائ». */
-const shiftRank = (shift: string): number => (/مساي|ليل|night|evening/.test(fold(shift)) ? 2 : 1);
+export const shiftRank = (shift: string): number => (/مساي|ليل|night|evening/.test(fold(shift)) ? 2 : 1);
+
+type Slot = { date: string; rank: number; shift: string; items: { product: string; material: string }[] };
 
 /**
  * The last shift of every machine, and the newest date in the whole log.
@@ -501,27 +606,72 @@ const shiftRank = (shift: string): number => (/مساي|ليل|night|evening/.te
  * "the latest shift" and make every real machine look idle.
  */
 export function latestRuns(rows: readonly ShiftRow[], today: string): { byMachine: Map<string, LastRun>; latestDate: string } {
-  const seen = new Map<string, LastRun & { rank: number }>();
+  const seen = new Map<string, { cur: Slot | null; prev: Slot | null }>();
   let latestDate = "";
+  const newer = (d: string, r: number, s: Slot) => d > s.date || (d === s.date && r > s.rank);
+  const same = (d: string, r: number, s: Slot) => d === s.date && r === s.rank;
+  const add = (s: Slot, product: string, material: string) => {
+    const hit = s.items.find((i) => fold(i.product) === fold(product));
+    if (!hit) s.items.push({ product, material });
+    else if (!hit.material && material) hit.material = material;
+  };
   for (const r of rows) {
     const mk = machineKey(r.machine);
     const product = String(r.product ?? "").replace(/\s+/g, " ").trim();
     if (!mk || !product || !ISO.test(r.date) || (ISO.test(today) && r.date > today)) continue;
     if (r.date > latestDate) latestDate = r.date;
     const rank = shiftRank(r.shift);
-    const cur = seen.get(mk);
-    if (!cur || r.date > cur.date || (r.date === cur.date && rank > cur.rank)) {
-      seen.set(mk, { date: r.date, shift: r.shift, products: [product], rank });
-    } else if (r.date === cur.date && rank === cur.rank && !cur.products.some((p) => fold(p) === fold(product))) {
-      cur.products.push(product);
-    }
+    const material = String(r.material ?? "").replace(/\s+/g, " ").trim();
+    const st = seen.get(mk) ?? { cur: null, prev: null };
+    seen.set(mk, st);
+    const fresh = (): Slot => ({ date: r.date, rank, shift: r.shift, items: [{ product, material }] });
+    if (!st.cur || newer(r.date, rank, st.cur)) { st.prev = st.cur; st.cur = fresh(); }
+    else if (same(r.date, rank, st.cur)) add(st.cur, product, material);
+    else if (!st.prev || newer(r.date, rank, st.prev)) st.prev = fresh();
+    else if (same(r.date, rank, st.prev)) add(st.prev, product, material);
   }
   const byMachine = new Map<string, LastRun>();
-  for (const [k, v] of seen) byMachine.set(k, { date: v.date, shift: v.shift, products: v.products });
+  for (const [k, st] of seen) {
+    const cur = st.cur!;
+    let items = cur.items;
+    let mixed = false;
+    if (items.length > 1 && st.prev) {
+      const was = (p: string) => st.prev!.items.some((i) => fold(i.product) === fold(p));
+      const carried = items.filter((i) => was(i.product));
+      const fresh = items.filter((i) => !was(i.product));
+      if (carried.length > 0 && fresh.length > 0) { mixed = true; items = [...fresh, ...carried]; }
+    }
+    byMachine.set(k, {
+      date: cur.date, shift: cur.shift, mixed,
+      products: items.map((i) => i.product), materials: items.map((i) => i.material),
+    });
+  }
   return { byMachine, latestDate };
 }
 
-const daysBefore = (iso: string, days: number): string => {
+/**
+ * For every product, the machine whose shift naming it is the NEWEST in the
+ * log. A mould is in one place: when the same product is the last thing two
+ * machines logged, the newer shift has it — seen live on 2026-10-05, when
+ * «روزته سودة العداد الثلاثي» ran one shift on PQ 10 and then moved to PQ 13,
+ * and both stood green with the same order. (The log's own history is 6 moved
+ * to 5 came back, so the older machine is ASKED, never declared empty.)
+ * Keys are `fold(product)`; the value's machine is a `machineKey`.
+ */
+export function newestHolders(rows: readonly ShiftRow[], today: string): Map<string, { machine: string; date: string; rank: number }> {
+  const out = new Map<string, { machine: string; date: string; rank: number }>();
+  for (const r of rows) {
+    const mk = machineKey(r.machine);
+    const pk = fold(r.product);
+    if (!mk || !pk || !ISO.test(r.date) || (ISO.test(today) && r.date > today)) continue;
+    const rank = shiftRank(r.shift);
+    const cur = out.get(pk);
+    if (!cur || r.date > cur.date || (r.date === cur.date && rank > cur.rank)) out.set(pk, { machine: mk, date: r.date, rank });
+  }
+  return out;
+}
+
+export const daysBefore = (iso: string, days: number): string => {
   const t = Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - days * 86_400_000;
   return new Date(t).toISOString().slice(0, 10);
 };
@@ -545,6 +695,25 @@ export const RECENT_DAYS = 3;
 export const isRecent = (date: string, latestDate: string, days: number = RECENT_DAYS): boolean =>
   ISO.test(date) && ISO.test(latestDate) && date >= daysBefore(latestDate, days);
 
+/**
+ * A product name with «جديد»/«قديم» taken out and a trailing mould number
+ * taken off. Two names that agree on this are probably one product — the order
+ * says «كفر شفاف فوكس» and the crew logs «كفر شفاف فوكس 2»; the order says
+ * «وش سمارت جديد مباشر» and Master (so the log's dropdown) only has
+ * «وش سمارت مباشر». Only ever used to ASK the engineer and to borrow a
+ * default; a number in the MIDDLE («ضهر عداد 1 فوكس» / «ضهر عداد 2 فوكس») is
+ * a different part and is left alone. (Measured on every Master and log name,
+ * 2026-10-05: letting «جديد» go wherever it stands adds no new collision.)
+ */
+const AGE_WORDS = ["جديد", "قديم", "new", "old"];
+export function looseNameKey(name: string | undefined | null): string {
+  const all = fold(name).split(" ").filter(Boolean);
+  let words = all.filter((w) => !AGE_WORDS.includes(w));
+  if (words.length === 0) words = all;
+  while (words.length > 1 && /^\d+$/.test(words[words.length - 1])) words.pop();
+  return words.join(" ");
+}
+
 /* ----------------------------- machines and orders ------------------------- */
 
 export type MachineNow = {
@@ -552,21 +721,34 @@ export type MachineNow = {
   products: string[];
   /** Colour keys; a product may run in several («رمادي» then «أسود»). */
   colours: string[];
-  /** The ONE colour in the barrel right now, when that is known — the colour
-   *  a confirmed change started with, or the only colour there is. "" when
-   *  the job runs in several and nobody said which; the ranking then cleans
-   *  the machine of the darkest, which is the careful answer. */
+  /** The ONE colour in the barrel right now, when somebody said so (or it is
+   *  the only colour there is). "" when the job runs in several and nobody
+   *  said which; the estimate then assumes the WORST of them. */
   colourNow: string;
   /** The colours are a guess or a memory, not anybody's tap on this job. */
   coloursGuessed: boolean;
   material: string;
   /** The work order standing on the machine, "" when it runs without one. */
   order: string;
-  /** "production" = the shift log says so; "plan" = confirmed on this page
-   *  after the last logged shift; "registry" = only «الماكينات» says so;
+  /** That order is an important client's — its mould is not taken off for another. */
+  keyClient: boolean;
+  /** An open order that is PROBABLY this job under another spelling of the
+   *  name ("" = none). The page asks; nothing is tied until somebody says yes. */
+  orderMaybe: string;
+  /** Somebody answered «لا» to that question: this job has NO work order.
+   *  Carried so a later note about the same mould does not lose the answer. */
+  noOrder: boolean;
+  /** The same product has a NEWER shift on this other machine — the mould has
+   *  probably moved there ("" = no). The page asks. */
+  alsoOn: string;
+  /** The latest shift logged a carried-over product and a new one — a change
+   *  inside the shift, or a pair starting. The page asks. */
+  mixedShift: boolean;
+  /** "production" = the shift log says so; "plan" = told on this page and the
+   *  log has not said otherwise; "registry" = only «الماكينات» says so;
    *  "none" = nothing is known. */
   source: "plan" | "production" | "registry" | "none";
-  /** ISO day of the shift (or confirm) behind `products`; "" when unknown. */
+  /** ISO day of the newest evidence behind `products`; "" when unknown. */
   since: string;
   shift: string;
 };
@@ -600,7 +782,7 @@ export type PlanMachine = {
 /**
  * The one place a machine's state is decided.
  *
- * `since` is the day of the newest evidence for what stands on it — a logged
+ * `since` is the day of the newest evidence that the machine RAN — a logged
  * shift, or a change confirmed on this page — and it is recent when it is
  * within RECENT_DAYS of the newest date the log holds, OR of today (a mould
  * that went up after the log was last typed).
@@ -613,46 +795,134 @@ export function machineState(o: {
   return isRecent(o.since, o.latestDate) || isRecent(o.since, o.today) ? "running" : "idle";
 }
 
-/** What was confirmed on this page for a machine, from «تغييرات الاسطمبات». */
-export type PlanStanding = { date: string; products: string[]; colours: string[]; order: string; material: string };
+/**
+ * "The log when the page was told" for resolveNow — or null when the log has
+ * MOVED ON since, which makes the log win.
+ *
+ * `at` is the machine's last shift as of the plan's day (a confirmed change)
+ * or the day before it (a note); `later` is every shift logged after that,
+ * oldest first; `latest` is the newest shift there is. Comparing only `at`
+ * with `latest` read A → B → A as "nothing changed": the mould that had come
+ * off went back up and the page kept showing the confirmed one as running,
+ * with the really-running order offered as waiting (11 such returns in 141
+ * mould changes in the live log). So EVERY shift since is looked at:
+ *
+ *  - after a CONFIRMED change the machine runs that mould: a later shift that
+ *    does not name it (in the log's own spelling of it) means it came off, or
+ *    never went up;
+ *  - after a NOTE the machine runs what it ran when the note was written: a
+ *    later shift naming nothing of `at` (and not the note's mould) is a change.
+ *
+ * A log that names the plan's mould its own way («كفر شفاف فوكس 2» for the
+ * order's «كفر شفاف فوكس») is that mould — it stands, whatever `at` was.
+ * `known` = the log has named this mould on this machine at some time (the
+ * caller looks); see `fits` below for what that changes.
+ */
+export function logSinceTold(
+  plan: PlanStanding, at: LastRun | null, later: readonly (readonly string[])[], latest: LastRun,
+  known = false,
+): LastRun | null {
+  const loose = plan.products.map(looseNameKey);
+  const exactly = (products: readonly string[]) => products.some((x) => plan.products.some((p) => fold(p) === fold(x)));
+  // A loosely-equal name is the page's mould only as the spelling the log was
+  // USING when the page was told — or, when the log has not named the mould
+  // either way since, as the only way it names it. «رشاش 010» moving on to
+  // «رشاش 030» is another product, not another spelling.
+  const spelling = (at?.products ?? []).filter((a) => loose.includes(looseNameKey(a))).map(fold);
+  const seen = spelling.length > 0 || later.some(exactly);
+  const respells = (products: readonly string[]) => exactly(products) || products.some((x) => spelling.includes(fold(x)))
+    || (!seen && products.some((x) => loose.includes(looseNameKey(x))));
+  const carries = (products: readonly string[]) => !!at && products.some((x) => at.products.some((a) => fold(a) === fold(x)));
+  // "Runs what it ran when the note was written" is for a tie to a name the
+  // log NEVER uses on this machine. A mould the log itself knows here
+  // (`known`), or one started by «ركّب دي» (the note sits on a confirm), has
+  // come off once a shift since stops naming it — the confirm's own rule.
+  const fits = plan.baseline && !plan.startedOn && !known ? (ps: readonly string[]) => carries(ps) || respells(ps) : respells;
+  if (later.some((ps) => !fits(ps))) return null;
+  return respells(latest.products) ? latest : at;
+}
+
+/** What was told on this page about a machine, from its last «تغييرات الاسطمبات» row. */
+export type PlanStanding = {
+  date: string;
+  products: string[];
+  /** The colours recorded with it (the job's, or just the one it started on). */
+  colours: string[];
+  /** The colour in the barrel as last told ("" = not told). */
+  colourNow: string;
+  order: string;
+  material: string;
+  /** true = «الراكب الآن»: somebody recorded what is STANDING. false = a
+   *  confirmed change. Only a confirmed change says the machine was started —
+   *  recording what stands on an idle machine must not turn it green. */
+  baseline: boolean;
+  /** The day of the newest CONFIRMED change still behind this row ("" = none):
+   *  the row's own day for a confirmed change; for a note about what stands,
+   *  the confirm it was written after, while both name the same mould. */
+  startedOn: string;
+  /** What the page was told came OFF — never shown as still standing. */
+  from: string[];
+};
 
 const sameProduct = (a: readonly string[], b: readonly string[]): boolean =>
   a.some((x) => b.some((y) => fold(x) === fold(y)));
 
 /**
- * Who is right about a machine: this page's last confirm, or the shift log?
+ * Who is right about a machine: what was told on this page, or the shift log?
  *
- *  - They name the same product: both. The log's shift dates it; the confirm
- *    supplies what the log does not hold (the colours, the work order).
- *  - They differ, and the log has NOT changed mould since the confirm
- *    (`runAtPlan` — the machine's last shift as of the confirm's day — is the
- *    same product as its last shift now): the confirm stands. Two cases, one
- *    rule: a mould that went up after the last logged shift, and an order the
- *    engineer tied to a machine whose log spells the product another way
+ *  - They name the same product: both. The log dates it; the page supplies
+ *    what the log does not hold (the colours, the work order).
+ *  - They differ, and the log has NOT changed mould since the page was told
+ *    (`runAtPlan` — the machine's last shift as of that day — is the same
+ *    product as its last shift now): the page stands. Two cases, one rule: a
+ *    mould that went up after the last logged shift, and an order the engineer
+ *    tied to a machine whose log spells the product another way
  *    («كفر شفاف فوكس 2» for the order's «كفر شفاف فوكس»). Without this the
  *    tie was dropped by the very next shift row.
  *  - They differ and the log HAS moved on: the log. The machine was changed
  *    without telling this page.
+ *
+ * `since` is the newer of the log's last shift and a CONFIRMED change — never
+ * a «الراكب الآن» note, which says what stands, not that it ran.
+ *
+ * `runAtPlan` is the caller's, from `logSinceTold`: the machine's last shift
+ * as of the plan's day for a confirmed change, and as of the day BEFORE for a
+ * note — a change later on the note's own day must not be read as "unchanged
+ * since" — and null once any shift since has moved on.
  */
 export function resolveNow(
   plan: PlanStanding | null, run: LastRun | null, registryProduct: string, runAtPlan: LastRun | null = null,
-): Pick<MachineNow, "products" | "colours" | "order" | "source" | "since" | "shift"> & { material: string } {
+): Pick<MachineNow, "products" | "colours" | "colourNow" | "order" | "source" | "since" | "shift"> & { material: string } {
   if (plan && plan.products.length > 0) {
-    const fromPlan = (since: string, shift: string) =>
-      ({ products: plan.products, colours: plan.colours, order: plan.order, material: plan.material, source: "plan" as const, since, shift });
-    if (!run) return fromPlan(plan.date, "");
+    const told = { colours: plan.colours, colourNow: plan.colourNow, order: plan.order, material: plan.material };
+    // The day the machine was STARTED from this page — never a note's own day.
+    const startDay = plan.baseline ? plan.startedOn : plan.date;
+    if (!run) return { ...told, products: plan.products, source: "plan", since: startDay, shift: "" };
+    const started = !!startDay && startDay > run.date;
+    const dated = { since: started ? startDay : run.date, shift: started ? "" : run.shift };
     if (sameProduct(plan.products, run.products)) {
-      return { products: run.products, colours: plan.colours, order: plan.order, material: plan.material, source: "production", since: run.date, shift: run.shift };
+      // A change inside a shift leaves the mould that came off in the same
+      // shift's rows; what the page was told came off is not standing. Only
+      // for shifts up to the day it was told: the same mould going back up
+      // LATER is news, and filtering it out would show the wrong mould.
+      const kept = run.date <= plan.date
+        ? run.products.filter((p) => !plan.from.some((f) => fold(f) === fold(p)))
+        : run.products;
+      return { ...told, products: kept.length > 0 ? kept : run.products, source: "production", ...dated };
     }
-    // Nothing logged on or before the confirm's day counts as "unchanged"
-    // only while nothing has been logged after it either.
-    const unchanged = runAtPlan ? sameProduct(runAtPlan.products, run.products) : run.date <= plan.date;
-    if (unchanged) return run.date > plan.date ? fromPlan(run.date, run.shift) : fromPlan(plan.date, "");
+    // With no shift to compare against: a confirmed change stands while nothing
+    // is logged after its day; a note about what stands gives way to any shift
+    // logged on its own day or later (it described what was already there).
+    // …and when the log ALREADY named the page's mould by then and the latest
+    // shift no longer does, it has come off: that is a change, not a tie.
+    const unchanged = runAtPlan ? sameProduct(runAtPlan.products, run.products) && !sameProduct(runAtPlan.products, plan.products)
+      : plan.baseline ? run.date < plan.date : run.date <= plan.date;
+    if (unchanged) return { ...told, products: plan.products, source: "plan", ...dated };
   }
-  if (run) return { products: run.products, colours: [], order: "", material: "", source: "production", since: run.date, shift: run.shift };
+  if (run) return { products: run.products, colours: [], colourNow: "", order: "", material: "", source: "production", since: run.date, shift: run.shift };
   const reg = registryProduct.replace(/\s+/g, " ").trim();
-  if (reg) return { products: [reg], colours: [], order: "", material: "", source: "registry", since: "", shift: "" };
-  return { products: [], colours: [], order: "", material: "", source: "none", since: "", shift: "" };
+  if (reg) return { products: [reg], colours: [], colourNow: "", order: "", material: "", source: "registry", since: "", shift: "" };
+  return { products: [], colours: [], colourNow: "", order: "", material: "", source: "none", since: "", shift: "" };
 }
 
 export type PlanOrder = {
@@ -662,11 +932,12 @@ export type PlanOrder = {
   client: string;
   material: string;
   dueDate: string;
+  /** The app's status token (lib/prod-meta.ts): "In Production", "Not Started", "On Hold"… */
   status: string;
   qtyKg: number;
   /** Pieces still to make; null when Master has no piece weight for it. */
   remaining: number | null;
-  /** Hours of running left at Master's cycle; null when it cannot be stated. */
+  /** Hours of running left (Master's cycle, else the order's own logged rate); null when unknown. */
   runHours: number | null;
   /** Colour keys — one order is often made in several. */
   colours: string[];
@@ -679,12 +950,21 @@ export type PlanOrder = {
   fitsHintText: string;
   workers: number | null;
   oilCores: boolean | null;
+  /** The mould has a hot runner (owner, 2026-10-05: "some moulds may have it"). null = not asked. */
+  hotRunner: boolean | null;
   missing: MissingKey[] | null;
   keyClient: boolean;
-  /** The machine whose standing product is this order's product, "" if none. */
+  /** The machine this order is tied to, or where its mould stands; "" if nowhere. */
   mountedOn: string;
-  /** …and that machine is RUNNING it now (not merely holding the mould). */
+  /** THIS order is the one running there now (not merely a mould standing). */
   mountedRunning: boolean;
+  /**
+   * Another order is running on this order's mould — the same product ordered
+   * in another colour (the owner's own case). The code of that order. Such an
+   * order is not "running": it is the NEXT job on that machine, with no mould
+   * change at all, and it is not offered anywhere else while the mould runs.
+   */
+  queuedBehind: string;
 };
 
 /* --------------------------------- colours, plural -------------------------- */
@@ -702,42 +982,77 @@ export const coloursToSheet = (keys: readonly string[]): string =>
   listToSheet(keys.map((k) => colourToSheet(k)).filter(Boolean));
 
 /**
- * The colour the barrel has to be cleaned OF when a machine runs several —
- * the darkest. A colour outside the list has no rank; it is returned as it is
- * and compares as "unknown", which is the honest answer.
+ * A colour read off a MATERIAL cell («ABS اسود مخرز» → black). «مخرز شفاف» is
+ * natural regrind, not a transparent part — seven products with that material
+ * have had orders and none was transparent — so transparent is believed only
+ * from a virgin grade («PC شفاف»).
  */
-export function darkestColour(colours: readonly string[]): string {
-  let best = "", bestRank = -1;
-  for (const c of colours) {
-    const k = colourKey(c);
-    if (!k || k === ANY_COLOUR) continue;
-    const d = colourDef(k);
-    if (!d) return k;
-    if (d.rank > bestRank) { best = k; bestRank = d.rank; }
+export function colourFromMaterial(material: string | undefined | null): string {
+  const found = coloursIn(material);
+  if (found.length !== 1) return "";
+  if (found[0] === "transparent" && /مخرز/.test(fold(material))) return "";
+  return found[0];
+}
+
+/**
+ * What may be in the barrel: the one colour when it is known, else EVERY
+ * colour the standing job runs in. «أي لون» says nothing about the barrel.
+ */
+export function barrelColours(now: Pick<MachineNow, "colourNow" | "colours">): string[] {
+  const one = colourKey(now.colourNow);
+  if (one && one !== ANY_COLOUR) return [one];
+  return now.colours.map(colourKey).filter((k) => k && k !== ANY_COLOUR);
+}
+
+/**
+ * …and for a machine KEPT for transparent whose colour nobody recorded:
+ * transparent. Pricing a transparent job there as "anything → transparent"
+ * (the worst change) put coloured orders ahead of it — the reverse of the
+ * owner's rule. The page still says the colour is not recorded.
+ */
+export function barrelOf(m: { now: Pick<MachineNow, "colourNow" | "colours">; transparentOnly: boolean }): string[] {
+  const told = barrelColours(m.now);
+  return told.length === 0 && m.transparentOnly ? ["transparent"] : told;
+}
+
+const worse = (a: Estimate, b: Estimate): boolean =>
+  EASE_ORDER[a.ease] > EASE_ORDER[b.ease] || (a.ease === b.ease && a.totalMin > b.totalMin);
+
+/**
+ * The change to ONE colour from a machine whose barrel may hold any of
+ * `from.colours` — the WORST of them. A machine running white and black is not
+ * "the same colour" as a white order just because white is on its list.
+ */
+export function estimateFrom(
+  from: { product: string; colours: readonly string[]; material: string }, to: Side, opts: EstimateOptions = {},
+): Estimate {
+  const candidates = from.colours.length > 0 ? from.colours : [""];
+  let worst: Estimate | null = null;
+  for (const colour of candidates) {
+    const e = estimateChange({ product: from.product, colour, material: from.material }, to, opts);
+    if (!worst || worse(e, worst)) worst = e;
   }
-  return best;
+  return worst!;
 }
 
 /**
  * An order made in several colours can START with any of them — pick the one
  * that is easiest after what is on the machine (white first after white, not
- * black). No colours at all is one estimate with the colour unknown.
+ * black). No colours at all is one estimate with the colour unknown. «أي لون»
+ * is never a start colour: something real goes into the barrel.
  */
 export function bestStart(
-  from: Side, to: { product: string; colours: readonly string[]; material: string },
-  opts: { bigMachine?: boolean; oilCores?: boolean | null } = {},
+  from: { product: string; colours: readonly string[]; material: string },
+  to: { product: string; colours: readonly string[]; material: string },
+  opts: EstimateOptions = {},
 ): { estimate: Estimate; startColour: string } {
   if (to.colours.length === 0) {
-    return { estimate: estimateChange(from, { product: to.product, colour: "", material: to.material }, opts), startColour: "" };
+    return { estimate: estimateFrom(from, { product: to.product, colour: "", material: to.material }, opts), startColour: "" };
   }
   let best: { estimate: Estimate; startColour: string } | null = null;
   for (const colour of to.colours) {
-    const estimate = estimateChange(from, { product: to.product, colour, material: to.material }, opts);
-    if (!best
-      || EASE_ORDER[estimate.ease] < EASE_ORDER[best.estimate.ease]
-      || (estimate.ease === best.estimate.ease && estimate.totalMin < best.estimate.totalMin)) {
-      best = { estimate, startColour: colourKey(colour) };
-    }
+    const estimate = estimateFrom(from, { product: to.product, colour, material: to.material }, opts);
+    if (!best || worse(best.estimate, estimate)) best = { estimate, startColour: colourKey(colour) === ANY_COLOUR ? "" : colourKey(colour) };
   }
   return best!;
 }
@@ -758,12 +1073,12 @@ export type Suggestion = {
   mountedHere: boolean;
   /**
    * Does the mould belong on this machine? "here" = the engineer said so, or
-   * Master's tonnage names it; "unknown" = nobody said; "elsewhere" = nobody
-   * answered and Master names OTHER machines. Never a gate — Master's
-   * tonnage column is half empty and partly stale — but it is the first
-   * thing the list is sorted on, and the page folds "elsewhere" away: with
-   * twenty-odd orders waiting, a machine's list is otherwise mostly moulds
-   * that were never going to go on it.
+   * Master's tonnage names it; "unknown" = nobody said, or Master's tonnage
+   * names no machine the factory has; "elsewhere" = nobody answered and
+   * Master names OTHER machines. Never a gate — Master's tonnage is half
+   * empty and partly stale. Only "elsewhere" is sorted after the rest (and
+   * folded away on the page): "here" and "unknown" share a tier, so the
+   * owner's own order — important client, then late — decides the top.
    */
   fit: "here" | "unknown" | "elsewhere";
   /** Something the ranking wanted to know is not answered yet (colour, which
@@ -774,7 +1089,7 @@ export type Suggestion = {
   chips: Chip[];
 };
 
-export type BlockReason = "finished" | "notFit" | "transparentElsewhere" | "missing";
+export type BlockReason = "finished" | "onHold" | "notFit" | "transparentElsewhere" | "missing";
 export type Blocked = { order: PlanOrder; reason: BlockReason; vars?: Record<string, string | number> };
 
 /** Whole days from `dueIso` to `todayIso` (positive = late). */
@@ -791,16 +1106,18 @@ const SHIFT_HOURS = 12;
  * Rank the WAITING orders for one machine.
  *
  * Not a candidate at all: the job this machine is running now, and any order
- * that is running on another machine — it is not waiting for anything.
+ * that is running on another machine or queued behind a mould running there —
+ * none of them is waiting for a machine.
  * An order whose mould is merely STANDING on an idle machine still is one:
  * here it is the cheapest thing to start («الاسطمبة راكبة هنا»), elsewhere it
- * says where the mould is.
+ * says where the mould is. So is the same product's NEXT order on the machine
+ * running its mould («نفس الاسطمبة الشغالة»): no mould change at all.
  *
- * Four things take an order out of the ranking and into `blocked`, each with
+ * Five things take an order out of the ranking and into `blocked`, each with
  * its reason: its quantity is already made (still «جاري التشغيل» only because
- * nobody closed it); the engineer said the mould does not fit here; every
- * colour of it is transparent and this is not a machine kept for transparent;
- * something it needs is not ready.
+ * nobody closed it); the order is on hold; the engineer said the mould does
+ * not fit here; the engineer said it is transparent and this is not a machine
+ * kept for transparent; something it needs is not ready.
  *
  * The rest are sorted by the owner's order — and one tie-break of this file
  * (ASSUMPTION, between «متأخر» and «سهولة التغيير»): a mould that fits ONLY
@@ -816,15 +1133,22 @@ export function rankFor(
   const keptForTransparent = ctx.transparentMachines.map(machineKey);
   const ranked: Suggestion[] = [];
   const blocked: Blocked[] = [];
-  const fromColour = machine.now.colourNow || darkestColour(machine.now.colours);
+  const barrel = barrelOf(machine);
+  // Assumed, not told: priced as transparent, but never called "the same colour".
+  const barrelAssumed = barrel.length > 0 && barrelColours(machine.now).length === 0;
+  const sameCode = (a: string, b: string) => !!fold(a) && fold(a) === fold(b);
 
   for (const o of orders) {
     const here = !!o.mountedOn && machineKey(o.mountedOn) === mk;
-    if (here && machine.state === "running") continue;
-    if (o.mountedOn && !here && o.mountedRunning) continue;
+    if (here && machine.state === "running" && !o.queuedBehind) continue;
+    if (!here && o.mountedOn && (o.mountedRunning || !!o.queuedBehind)) continue;
 
     if (o.remaining === 0) {
       blocked.push({ order: o, reason: "finished" });
+      continue;
+    }
+    if (o.status === "On Hold") {
+      blocked.push({ order: o, reason: "onHold" });
       continue;
     }
     if (o.fits && o.fits.length > 0 && !o.fits.some((l) => machineKey(l) === mk)) {
@@ -833,7 +1157,14 @@ export function rankFor(
     }
     const keys = o.colours.map(colourKey).filter(Boolean);
     const allTransparent = keys.length > 0 && keys.every((k) => k === "transparent");
-    if (allTransparent && keptForTransparent.length > 0 && !keptForTransparent.includes(mk)) {
+    const offTransparentMachine = allTransparent && keptForTransparent.length > 0 && !keptForTransparent.includes(mk);
+    // …and only a mould that CAN go on a kept machine is sent there: one the
+    // engineer said fits only ordinary machines was blocked here for being
+    // transparent and there for not fitting — no machine offered it at all.
+    const fitsKept = !o.fits || o.fits.length === 0 || o.fits.some((l) => keptForTransparent.includes(machineKey(l)));
+    // A GUESSED transparent (read off a name or a material cell) never blocks:
+    // «مخرز شفاف» made seven ordinary products look transparent.
+    if (offTransparentMachine && fitsKept && o.colourSource === "answer") {
       blocked.push({ order: o, reason: "transparentElsewhere", vars: { machines: ctx.transparentMachines.join(" · ") } });
       continue;
     }
@@ -844,59 +1175,79 @@ export function rankFor(
 
     const standing = machine.now.products.find((p) => fold(p) === fold(o.product)) ?? machine.now.products[0] ?? "";
     const { estimate, startColour } = bestStart(
-      { product: standing, colour: fromColour, material: machine.now.material },
+      { product: standing, colours: barrel, material: machine.now.material },
       { product: o.product, colours: keys, material: o.material },
-      { bigMachine: machine.bigMachine, oilCores: o.oilCores },
+      { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner },
     );
     const late = o.dueDate ? daysLate(o.dueDate, ctx.today) : 0;
     const onlyHere = !!o.fits && o.fits.length === 1;
+    const maybeRunningHere = sameCode(machine.now.orderMaybe, o.code);
     const chips: Chip[] = [];
+
+    const fitAnswered = !!o.fits && o.fits.length > 0;
+    const fit: Suggestion["fit"] =
+      here || fitAnswered || o.fitsHint.some((l) => machineKey(l) === mk) ? "here"
+      : o.fitsHint.length > 0 ? "elsewhere"
+      : "unknown";
 
     if (o.keyClient) chips.push({ key: "keyClient", tone: "good" });
     if (late > 0) chips.push({ key: "late", tone: "warn", vars: { n: late } });
-    if (here) chips.push({ key: "mountedHere", tone: "good" });
+    if (maybeRunningHere) chips.push({ key: "maybeRunningHere", tone: "warn" });
+    if (here && o.queuedBehind) chips.push({ key: "sameMouldNext", tone: "good", vars: { order: o.queuedBehind } });
+    else if (here) chips.push({ key: "mountedHere", tone: "good" });
     else if (o.mountedOn) chips.push({ key: "mountedElsewhere", tone: "warn", vars: { machine: o.mountedOn } });
     if (onlyHere) chips.push({ key: "onlyHere", tone: "good" });
 
-    // On a running machine only a key client is worth taking the mould off.
-    // Said on that order; "the machine is running" is said ONCE, above the
-    // list, not on every card.
-    if (machine.state === "running" && o.keyClient) chips.push({ key: "worthInterrupt", tone: "good" });
+    // On a running machine only an important client is worth taking the mould
+    // off — and not when the running job is an important client's too, when
+    // the mould does not belong here, or when this order simply follows on the
+    // same mould. "The machine is running" is said ONCE above the list.
+    if (machine.state === "running" && o.keyClient && !machine.now.keyClient
+      && fit !== "elsewhere" && !o.queuedBehind && !maybeRunningHere) {
+      chips.push({ key: "worthInterrupt", tone: "good" });
+    }
 
+    const someTransparent = keys.includes("transparent");
+    const colouredOnTransparentMachine = machine.transparentOnly && !someTransparent;
     switch (estimate.colour) {
-      case "same": chips.push({ key: "sameColour", tone: "good" }); break;
+      case "same": if (!barrelAssumed) chips.push({ key: "sameColour", tone: "good" }); break;
       case "any": chips.push({ key: "anyColour", tone: "good" }); break;
       case "darker": chips.push({ key: "darker", tone: "good" }); break;
-      case "fromTransparent": chips.push({ key: "fromTransparent", tone: "good" }); break;
+      // Not a good sign on a machine KEPT for transparent: it has to be
+      // cleaned back to transparent afterwards.
+      case "fromTransparent": if (!colouredOnTransparentMachine) chips.push({ key: "fromTransparent", tone: "good" }); break;
       case "lighter": chips.push({ key: "lighter", tone: "warn" }); break;
-      case "toTransparent": chips.push({ key: "toTransparent", tone: "bad" }); break;
+      case "toTransparent":
+        chips.push({ key: "toTransparent", tone: "bad" });
+        if (barrel.length === 0) chips.push({ key: "nowColourUnknown", tone: "warn" });
+        break;
       case "unknown":
-        chips.push({ key: keys.length === 0 ? "colourUnknown" : "nowColourUnknown", tone: "warn" });
+        chips.push({ key: keys.length === 0 ? "colourUnknown" : barrel.length === 0 ? "nowColourUnknown" : "colourUnranked", tone: "warn" });
         break;
     }
+    if (barrelAssumed) chips.push({ key: "nowColourUnknown", tone: "warn" });
     if (keys.length > 1 && startColour) chips.push({ key: "startWith", tone: "info", vars: { colour: startColour } });
 
     if (estimate.materialChange === false) chips.push({ key: "sameMaterial", tone: "good" });
     else if (estimate.materialChange === true) chips.push({ key: "materialChange", tone: "warn" });
+    // No material on record is NOT "no drying needed": four polycarbonate
+    // orders read as ready with nothing on the card saying so.
+    else if (!materialFamily(o.material)) chips.push({ key: "materialUnknown", tone: "warn" });
 
     if (estimate.drying) {
       const d = estimate.drying;
       chips.push({ key: "drying", tone: "warn", vars: { h: d.minH === d.maxH ? `${d.minH}` : `${d.minH}–${d.maxH}` } });
     }
-    const someTransparent = keys.includes("transparent");
-    if (machine.transparentOnly && !someTransparent) chips.push({ key: "transparentMachine", tone: "warn" });
+    if (o.hotRunner) chips.push({ key: "hotRunner", tone: "info" });
+    if (colouredOnTransparentMachine) chips.push({ key: "transparentMachine", tone: "bad" });
+    if (offTransparentMachine && fitsKept) chips.push({ key: "transparentElsewhereMaybe", tone: "warn", vars: { machines: ctx.transparentMachines.join(" · ") } });
 
-    const fitAnswered = !!o.fits && o.fits.length > 0;
-    const fit: Suggestion["fit"] =
-      fitAnswered || o.fitsHint.some((l) => machineKey(l) === mk) ? "here"
-      : o.fitsHint.length > 0 || !!o.fitsHintText ? "elsewhere"
-      : "unknown";
     if (fit === "elsewhere") chips.push({ key: "fitHintElsewhere", tone: "warn", vars: { t: o.fitsHintText } });
     if (o.workers !== null && o.workers > 1) chips.push({ key: "workers", tone: "warn", vars: { n: o.workers } });
     if (o.runHours !== null && o.runHours > 0 && o.runHours < SHIFT_HOURS) chips.push({ key: "shortRun", tone: "warn" });
 
     ranked.push({
-      order: o, estimate, startColour, late, onlyHere, mountedHere: here, fit: here ? "here" : fit, chips,
+      order: o, estimate, startColour, late, onlyHere, mountedHere: here, fit, chips,
       needsAnswers: keys.length === 0 || o.colourSource !== "answer" || !fitAnswered || o.missing === null,
     });
   }
@@ -908,7 +1259,7 @@ export function rankFor(
     // A coloured job on a machine kept for transparent sorts with the worst.
     return machine.transparentOnly && !someTransparent ? EASE_ORDER.veryHard : EASE_ORDER[s.estimate.ease];
   };
-  const FIT = { here: 0, unknown: 1, elsewhere: 2 } as const;
+  const FIT = { here: 0, unknown: 0, elsewhere: 1 } as const;
   ranked.sort((a, b) =>
     FIT[a.fit] - FIT[b.fit]
     || Number(b.order.keyClient) - Number(a.order.keyClient)
@@ -932,31 +1283,76 @@ export function rankFor(
  * times and a floor plan keyed on «PQ 7» in code would silently put the wrong
  * press in the wrong place the fifth time.
  *
- * A grid of MAP_COLS columns; a tile is `label@c,r,w,h` (1-based top-left
- * cell, width and height in cells); tiles are joined with « ; ».
+ * The floor is a LANDSCAPE sheet of MAP_COLS × MAP_MAX_ROWS square units
+ * (owner, 2026-10-06: "more landscape, and more pixels to move the machines").
+ * The first map was 7 columns of tall cells: a machine could stand in seven
+ * places across, and the map was taller than a screen. A tile is
+ * `label@c,r,w,h` (1-based top-left unit, width and height in units); tiles
+ * are joined with « ; » behind one `grid 56x32` word that says which sheet the
+ * numbers are on. A cell WITHOUT that word is the 7-column map and is scaled
+ * onto the sheet when read — nobody arranges the floor twice.
  */
-export const MAP_COLS = 7;
-export const MAP_MAX_ROWS = 16;
+export const MAP_COLS = 56;
+export const MAP_MAX_ROWS = 32;
+/** A machine dropped onto the map, and the smallest it can be made. */
+export const MAP_TILE = { w: 10, h: 6, minW: 4, minH: 3 } as const;
 export const MAP_NAME = "الأرضية";
 export type MapTile = { label: string; c: number; r: number; w: number; h: number };
 
+const LEGACY_MAP_COLS = 7;
+const GRID_WORD = /^grid (\d+) ?x ?(\d+)$/;
+
+/** Tiles from one sheet onto another. EDGES are scaled and rounded, not sizes,
+ *  so two tiles that touched still touch and never overlap. */
+function scaleTiles(tiles: readonly MapTile[], sx: number, sy: number): MapTile[] {
+  return tiles.map((t) => {
+    const left = Math.round((t.c - 1) * sx), top = Math.round((t.r - 1) * sy);
+    return {
+      label: t.label, c: left + 1, r: top + 1,
+      w: Math.max(1, Math.round((t.c - 1 + t.w) * sx) - left),
+      h: Math.max(1, Math.round((t.r - 1 + t.h) * sy) - top),
+    };
+  });
+}
+
 export function parseLayout(text: string | undefined | null): MapTile[] {
-  const out: MapTile[] = [];
+  const raw: MapTile[] = [];
+  let grid: { cols: number; rows: number } | null = null;
   for (const part of String(text ?? "").split(";")) {
     const at = part.lastIndexOf("@");
-    if (at <= 0) continue;
+    if (at <= 0) {
+      const m = latinDigits(part).replace(/\s+/g, " ").trim().toLowerCase().match(GRID_WORD);
+      if (m && !grid && +m[1] > 0 && +m[2] > 0) grid = { cols: +m[1], rows: +m[2] };
+      continue;
+    }
     const label = part.slice(0, at).replace(/\s+/g, " ").trim();
     const n = latinDigits(part.slice(at + 1)).split(",").map((x) => Number(x.trim()));
-    if (!label || n.length !== 4 || n.some((x) => !Number.isInteger(x))) continue;
-    const tile = { label, c: n[0], r: n[1], w: n[2], h: n[3] };
-    if (!tileInBounds(tile) || out.some((t) => machineKey(t.label) === machineKey(label))) continue;
-    out.push(tile);
+    if (!label || n.length !== 4 || n.some((x) => !Number.isInteger(x) || x < 1)) continue;
+    raw.push({ label, c: n[0], r: n[1], w: n[2], h: n[3] });
+  }
+
+  let tiles = raw;
+  if (!grid) {
+    // The 7-column map: each column is 8 units; its rows were about half as
+    // tall as a column was wide, and are packed to fit the sheet's height.
+    const old = raw.filter((t) => t.c + t.w - 1 <= LEGACY_MAP_COLS);
+    const used = old.reduce((m, t) => Math.max(m, t.r + t.h - 1), 0);
+    const sy = Math.min(5, Math.max(1, Math.floor(MAP_MAX_ROWS / Math.max(1, used))));
+    tiles = scaleTiles(old, MAP_COLS / LEGACY_MAP_COLS, sy);
+  } else if (grid.cols !== MAP_COLS || grid.rows !== MAP_MAX_ROWS) {
+    tiles = scaleTiles(raw, MAP_COLS / grid.cols, MAP_MAX_ROWS / grid.rows);
+  }
+
+  const out: MapTile[] = [];
+  for (const t of tiles) {
+    if (!tileInBounds(t) || out.some((x) => machineKey(x.label) === machineKey(t.label))) continue;
+    out.push(t);
   }
   return out;
 }
 
 export const formatLayout = (tiles: readonly MapTile[]): string =>
-  tiles.map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`).join(" ; ");
+  [`grid ${MAP_COLS}x${MAP_MAX_ROWS}`, ...tiles.map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`)].join(" ; ");
 
 export const tileInBounds = (t: MapTile): boolean =>
   t.w >= 1 && t.h >= 1 && t.c >= 1 && t.r >= 1 && t.c + t.w - 1 <= MAP_COLS && t.r + t.h - 1 <= MAP_MAX_ROWS;
@@ -964,7 +1360,7 @@ export const tileInBounds = (t: MapTile): boolean =>
 export const tilesOverlap = (a: MapTile, b: MapTile): boolean =>
   a.c < b.c + b.w && b.c < a.c + a.w && a.r < b.r + b.h && b.r < a.r + a.h;
 
-/** In bounds, one tile per machine, and no two tiles on the same cell. */
+/** In bounds, one tile per machine, and no two tiles on the same unit. */
 export function validLayout(tiles: readonly MapTile[]): boolean {
   for (let i = 0; i < tiles.length; i++) {
     if (!tileInBounds(tiles[i])) return false;
@@ -979,26 +1375,41 @@ export function validLayout(tiles: readonly MapTile[]): boolean {
 export const mapRows = (tiles: readonly MapTile[]): number => tiles.reduce((m, t) => Math.max(m, t.r + t.h - 1), 0);
 
 /**
- * Put a machine on a cell (or resize it in place). The tile is pulled back
- * inside the grid when it would hang over the edge; the move is REFUSED
- * (null) when it would land on another machine — the page says so rather than
- * stacking two presses on one spot.
+ * Put a machine at a unit (or resize it in place). The tile is pulled back
+ * inside the sheet when it would hang over the edge and is never smaller than
+ * MAP_TILE's minimum; the move is REFUSED (null) when it would land on another
+ * machine — the page keeps the last good spot rather than stacking two
+ * presses on one.
  */
 export function placeTile(
   tiles: readonly MapTile[], label: string, at: { c: number; r: number; w?: number; h?: number },
 ): MapTile[] | null {
   const key = machineKey(label);
   const cur = tiles.find((t) => machineKey(t.label) === key);
-  const w = Math.min(MAP_COLS, Math.max(1, at.w ?? cur?.w ?? 2));
-  const h = Math.min(4, Math.max(1, at.h ?? cur?.h ?? 1));
+  const w = Math.min(MAP_COLS, Math.max(MAP_TILE.minW, Math.round(at.w ?? cur?.w ?? MAP_TILE.w)));
+  const h = Math.min(MAP_MAX_ROWS, Math.max(MAP_TILE.minH, Math.round(at.h ?? cur?.h ?? MAP_TILE.h)));
   const next: MapTile = {
     label: cur?.label ?? label, w, h,
-    c: Math.min(Math.max(1, at.c), MAP_COLS - w + 1),
-    r: Math.min(Math.max(1, at.r), MAP_MAX_ROWS - h + 1),
+    c: Math.min(Math.max(1, Math.round(at.c)), MAP_COLS - w + 1),
+    r: Math.min(Math.max(1, Math.round(at.r)), MAP_MAX_ROWS - h + 1),
   };
   const others = tiles.filter((t) => machineKey(t.label) !== key);
   if (others.some((t) => tilesOverlap(t, next))) return null;
   return [...others, next];
+}
+
+/**
+ * The first free spot for a machine coming onto the map, reading the sheet
+ * like a page (left to right, top to bottom); null when the sheet is full.
+ */
+export function freeSpot(tiles: readonly MapTile[], w: number = MAP_TILE.w, h: number = MAP_TILE.h): { c: number; r: number } | null {
+  for (let r = 1; r + h - 1 <= MAP_MAX_ROWS; r++) {
+    for (let c = 1; c + w - 1 <= MAP_COLS; c++) {
+      const probe = { label: "", c, r, w, h };
+      if (!tiles.some((t) => tilesOverlap(t, probe))) return { c, r };
+    }
+  }
+  return null;
 }
 
 export const removeTile = (tiles: readonly MapTile[], label: string): MapTile[] =>
@@ -1022,8 +1433,61 @@ export const splitMinutes = (min: number): { h: number; m: number } => ({
   m: Math.round(Math.max(0, min) % 60),
 });
 
-/** A cell the site writes must never start a formula (setValue and appendRow
- *  both treat a leading = + - @ as one). */
+/**
+ * The day of a stamp in one of this page's own tabs. The site writes
+ * «yyyy-mm-dd HH:MM»; Sheets may hand it back that way, or re-typed in the
+ * workbook's locale («10/5/2026 15:10:00» — MONTH first). These columns are
+ * written by the site alone, so there is no hand-typed day-first form to guess
+ * at, and the padding trick lib/dates.ts uses would read 10/5 as the 10th of
+ * May. A day after `today` is a misread or a wrong clock and is clamped: a
+ * confirm dated in the future would stand for ever.
+ */
+export function stampDay(stamp: string | undefined | null, today = ""): string {
+  const s = latinDigits(String(stamp ?? "")).replace(/^'/, "").trim();
+  let y = 0, mo = 0, d = 0;
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/);
+  if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?!\d)/))) {
+    const a = +m[1], b = +m[2];
+    y = +m[3];
+    if (a > 12 && b <= 12) { d = a; mo = b; } else { mo = a; d = b; }
+  }
+  if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+  const day = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return ISO.test(today) && day > today ? today : day;
+}
+
+/**
+ * Minutes on one clock for one of the page's own stamps: the SAME reading of
+ * the day as stampDay (month first when Sheets re-typed it) plus the clock.
+ * Only ever used to ask "were these two written minutes apart?" — a reader
+ * that took «10/5/2026 15:10» for the 10th of May switched the replay check
+ * off on the first twelve days of every month from October on.
+ */
+export function stampClockMinutes(stamp: string | undefined | null): number | null {
+  const day = stampDay(stamp);
+  if (!day) return null;
+  const tail = latinDigits(String(stamp ?? "")).replace(/^'/, "").trim().replace(/^\S+/, "");
+  const t = tail.match(/(\d{1,2}):(\d{2})/);
+  if (!t) return null;
+  let h = +t[1];
+  const mi = +t[2];
+  if (/pm|م/i.test(tail) && h < 12) h += 12;
+  if (/am|ص/i.test(tail) && h === 12) h = 0;
+  if (h > 23 || mi > 59) return null;
+  return Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10), h, mi) / 60_000;
+}
+
+/**
+ * A cell the site writes must never start a formula (setValue, appendRow and a
+ * USER_ENTERED append all treat a leading = + - @ as one). Stripped until
+ * nothing is left to strip — «= =1+1» used to come out as «=1+1» — and with
+ * the invisible characters gone first, because a zero-width space in front of
+ * the «=» hides it from this check and is then removed by `fold` on the way
+ * to the sheet.
+ */
 export function safeText(v: unknown, max = 120): string {
-  return String(v ?? "").replace(/[\u0000-\u001F]+/g, " ").trim().replace(/^[=+\-@]+/, "").trim().slice(0, max);
+  let t = String(v ?? "").replace(/[\u0000-\u001F\u200B-\u200F\u061C\uFEFF]+/g, " ").trim();
+  while (/^[=+\-@\s]/.test(t)) t = t.replace(/^[=+\-@\s]+/, "");
+  return t.slice(0, max).trim();
 }

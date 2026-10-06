@@ -6,7 +6,7 @@ import { requireRole } from "@/lib/api-guard";
 // pinned by tests/open-reads.test.ts — with the full story of why deny-by-
 // default exists (2026-08-28: `sheet/jobs` served the order book past the
 // /api/jobs guard). Changing the set is a publish/unpublish decision.
-import { OPEN_READS, SALES_ONLY, WRITABLE_ENTITIES, readonlyFields } from "@/lib/open-reads";
+import { OPEN_READS, PRODUCTION_ONLY, SALES_ONLY, WRITABLE_ENTITIES, readonlyFields } from "@/lib/open-reads";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ entity: string }> }) {
   const { entity } = await params;
@@ -19,6 +19,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ enti
     // review queue to any approved role, including the roles the views matrix
     // keeps off /dashboard/requests (2026-09-23 review).
     const g = await requireRole(req, ["sales"]);
+    if ("deny" in g) return g.deny;
+  } else if (PRODUCTION_ONLY.has(entity)) {
+    // The mould plan's own tabs — no wider here than on /api/changeover.
+    const g = await requireRole(req, ["production"]);
     if ("deny" in g) return g.deny;
   } else if (!OPEN_READS.has(entity)) {
     // Covers jobs + production + master (client names, order quantities,

@@ -124,6 +124,14 @@ const sheetInflight = new Map<string, Promise<SheetRead>>();
  * neither logged as an error nor reported to the readiness panel.
  */
 const LAZY_TABS = new Set<string>([ANSWERS_TAB, LOG_TAB]);
+/**
+ * Lazy tabs this instance was TOLD do not exist (a `no_tab` answer), as
+ * opposed to tabs whose read simply failed. Both arrive as an empty table, and
+ * for a tab the site creates itself the difference matters: "not created yet"
+ * is a normal empty state, a failed read must not be shown as "no answers".
+ */
+const LAZY_MISSING = new Set<string>();
+export const lazyTabMissing = (tab: string): boolean => LAZY_MISSING.has(tab);
 const MISSING_TABS = new Set<string>();
 /** Tab names the bridge has refused as non-existent on this instance. */
 export const missingTabs = (): string[] => Array.from(MISSING_TABS);
@@ -502,7 +510,7 @@ async function fetchSheetUncached(tab: string): Promise<SheetRead> {
       await breath(1500);
       a = await readOneTab(tab);
     }
-    if (a.kind === "ok") return { title: tab, values: a.values };
+    if (a.kind === "ok") { LAZY_MISSING.delete(tab); return { title: tab, values: a.values }; }
     if (a.kind === "no_tab") {
       // The pre-rename English names, once each. Their answer is final too.
       for (const alias of TAB_ALIASES[tab] ?? []) {
@@ -510,7 +518,7 @@ async function fetchSheetUncached(tab: string): Promise<SheetRead> {
         if (b.kind === "ok") return { title: alias, values: b.values };
         if (b.kind !== "no_tab") break;
       }
-      if (LAZY_TABS.has(tab)) return { title: tab, values: [] };
+      if (LAZY_TABS.has(tab)) { LAZY_MISSING.add(tab); return { title: tab, values: [] }; }
       MISSING_TABS.add(tab);
       console.error(`[sheets] tab "${tab}" does not exist in the workbook (tried: ${[tab, ...(TAB_ALIASES[tab] ?? [])].join(", ")}). Was it renamed or deleted?`);
       return { title: tab, values: [] };
@@ -560,7 +568,11 @@ export async function getRecords(
   const read = await fetchSheet(cfg.tab, opts.fresh);
   const values = read.values;
   const readAt = read.at ?? Date.now();
-  if (values.length < 2) return empty;
+  // No rows at all = the read failed or the tab does not exist. A tab that
+  // holds ONLY its header row is a read that worked: it answers its fields
+  // with no records, so a caller can tell "exists, empty" from "not read"
+  // (the mould plan locked itself out of writing when its log tab was emptied).
+  if (values.length === 0) return empty;
 
   const h = findHeaderRow(values, cfg.fields);
   const headers = values[h] ?? [];

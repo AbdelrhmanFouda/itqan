@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
         order: String(body.order ?? ""),
         products: list(body.products),
         colours: list(body.colours),
+        colourNow: String(body.colourNow ?? ""),
+        noOrder: body.noOrder === true,
         fromProducts: list(body.fromProducts),
         fromColours: list(body.fromColours),
         minutes: Number(body.minutes),

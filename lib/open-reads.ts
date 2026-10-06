@@ -64,6 +64,20 @@ export const OPEN_READS = new Set<string>([]);
 export const SALES_ONLY = new Set(["clients", "customerRequests"]);
 
 /**
+ * Entities the generic read serves to PRODUCTION (+ owner/manager) alone — the
+ * mould plan's own two tabs (2026-10-05 review). `/api/changeover` is
+ * `requireRole(req, ["production"])` because its rows name clients and orders
+ * and one tap rewrites a work order's machine; registering the tabs in
+ * ENTITIES made `/api/sheet/changeoverAnswers` and `/api/sheet/changeoverLog`
+ * serve who-answered-what, the key clients and every confirmed change to a
+ * `worker`, `quality`, `sales` or `storage` token. The same trap
+ * customerRequests fell into, closed the same way: one list, both doors.
+ *
+ * Pinned by tests/open-reads.test.ts.
+ */
+export const PRODUCTION_ONLY = new Set(["changeoverAnswers", "changeoverLog"]);
+
+/**
  * The ONLY entities /api/sheet/[entity]'s generic PATCH may write — the two
  * tabs components/dashboard/SheetSection.tsx actually edits. Everything else
  * is DENY-BY-DEFAULT for the same reason the reads are: that PATCH accepted

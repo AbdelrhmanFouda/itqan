@@ -293,6 +293,9 @@ export const ENTITIES: Record<string, EntityConfig> = {
       // The floor map (2026-10-05) — one cell, every tile. Declared last
       // because the column was added to a tab that already existed.
       { key: "layout", keywords: ["ترتيب الخريطة", "map layout"] },
+      // «هوت رانر» (2026-10-05, owner: "some moulds may have it") — added to
+      // the live tab after the map column, so it is declared after it.
+      { key: "hotRunner", keywords: ["هوت رانر", "hot runner"] },
     ],
   },
   // «تغييرات الاسطمبات»: one row per confirmed mould change. The LAST row for
@@ -314,6 +317,10 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { key: "minutes", keywords: ["الوقت المتوقع", "est. minutes"] },
       { key: "reasons", keywords: ["الأسباب", "reasons"] },
       { key: "by", keywords: ["بواسطة", "recorded by"] },
+      // The ONE colour in the barrel (2026-10-05), apart from the colours the
+      // job is made in. «اللون الشغال» is contained in neither «اللون السابق»
+      // nor «اللون الجديد», and "colour now" in neither English header.
+      { key: "nowColour", keywords: ["اللون الشغال", "colour now"] },
     ],
   },
   // The single source of truth. Read directly when we need the per-mold standards

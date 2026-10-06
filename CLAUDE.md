@@ -57,6 +57,72 @@ change. It suggests; only «ركّب دي» → checklist → confirm writes.
 **Reworked 2026-10-05** — owner: *"the logic doesn't seem correct … show all the machines
 and what is on them now … make me able to edit here … the machines shown on a map"*.
 
+**Then reviewed the same day by three multi-agent passes and a last focused check** (owner:
+*"use many agents to review this and finish it and review it"*) — about eighty defects
+fixed, several of them introduced by the fix for an earlier one. What that left:
+
+- **Two kinds of row in «تغييرات الاسطمبات».** A CONFIRMED change («ركّب دي») and a NOTE
+  about what stands («الراكب الآن» — its «الأسباب» is `BASELINE_REASON`), which is what
+  «تعديل» and every one-tap answer write. Only a confirm says the machine was STARTED:
+  `standingWithStart()` keeps the newest confirm still behind the notes
+  (`PlanStanding.startedOn`), so a tap on "which colour is running" no longer sends a
+  just-mounted press back to «واقفة». **Whether the page's word still stands is decided by
+  `logSinceTold()` over EVERY shift since** — not the latest alone, which read A → B → A as
+  "unchanged" and kept showing the confirmed mould while the old one ran again (11 such
+  returns in 141 mould changes). After a confirm the machine runs THAT mould (in the log's
+  own spelling of it); after a note it runs what it ran the day BEFORE the note — but only
+  for a tie to a name the log NEVER uses on that machine; a mould the log knows there has
+  come off once a shift stops naming it. A loosely-equal name («… 2», «جديد») counts as the
+  page's mould only as the spelling the log was already using («رشاش 010» → «رشاش 030» is a
+  change). What a row said came off (`cameOff`) is carried across notes, each entry true
+  only up to its own day. An order's code on a row ties it only while the machine still
+  shows ITS product. Rows of one day are told apart by their place in the tab.
+- **One order per machine, one machine per order** (pass 2 of `loadPlan`): a tie by the
+  order's code on the page's row beats a tie by product name; another open order of the
+  SAME product is `queuedBehind` («نفس الاسطمبة الشغالة — بعد …», ranked on that machine
+  only — the owner's own case, one product in two colours); the other half of a PAIR runs
+  alongside; a name Master holds twice is tied by name only when the shift row's «العميل»
+  agrees (else it is asked). An order tied to a machine whose log spells the product another
+  way is credited with those shifts (`remaining`), loose-name matches only.
+- **Three things the log cannot settle are ASKED on the machine panel and answered with one
+  tap** (`noteNow` in the page — each writes a note): `orderMaybe` («هل ده أمر الشغل…؟» —
+  `looseNameKey`: «جديد»/«قديم» anywhere, a trailing number; «لا» writes `NO_ORDER` in the
+  order cell and the asking stops), `alsoOn` (the product has a newer shift, or was confirmed,
+  on another machine — «لسه هنا»), `mixedShift` (a carried-over and a new product in one
+  shift — «اتغيّرت», which records what came off, or «الاتنين راكبين»). ⚠ They used to say
+  "open «تعديل» and save", and an unchanged form saves nothing.
+- **The colour in the barrel is its own column** («اللون الشغال الآن», `colourNow`), apart
+  from the colours the job is made in. Unknown = the WORST of the job's colours
+  (`barrelColours` / `estimateFrom`); for a job in several colours a told colour is trusted
+  only until a later day is logged; a machine kept for transparent with nothing recorded is
+  taken to hold transparent (`barrelOf`). Anything → transparent is the worst change even
+  from an unknown colour. A GUESSED colour never blocks and is always labelled before a save
+  can turn it into the answer.
+- **«هوت رانر»** (owner, same day): yes/no per mould in the questions, `hotRunnerMin` on the
+  estimate (ASSUMPTION, 20), a line on the confirm checklist. Blank material = a
+  «الخامة غير مسجّلة — التجفيف مش محسوب» chip, never "no drying needed".
+- **Writes.** Every append is typed in as if by hand (USER_ENTERED): `textCell()` /
+  `unquote()` keep «1/1/26» a job code; `safeText()` strips formula starts in a loop. The
+  page's own stamps are read with `stampDay()` / `stampClockMinutes()` — MONTH first when
+  Sheets re-types them, never `normalizeDate()`. A replay is the same row within
+  `REPLAY_WINDOW_MIN` (10). `recordMount` refuses `sheet_unreadable` and a closed order.
+- **Nothing is written from a view that is not live** (`live` / `canWrite`: a device
+  snapshot, a failed refresh, a degraded answer). `plannerRead` flags a failed read of the
+  page's own tabs. ⚠ For that, **`getRecords()` in `lib/sheets.ts` now answers the FIELDS of
+  a tab that holds only its header row** (it returned `fields: []` for fewer than two rows) —
+  an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
+- **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
+  `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
+- **Tests:** 75 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
+  REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
+  `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
+  defects were — **write the sequence there first** (dated shifts, page rows, orders → what
+  the engineer should see) before touching pass 1, pass 2 or `resolveNow`.
+- **Still the owner's to decide:** night shift, "at least a shift" and readiness are
+  warnings, not blocks; a coloured late order on a transparent-only machine is still sorted
+  by his order (only the chips turn red); lists are per machine (no "best machine for this
+  order" view); a machine with any running stoppage shows «توقف».
+
 - **What is on a machine is its LATEST shift in «الإنتاج», not «الماكينات».** The
   registry's product cell and Active flag are typed once and go stale (it called PQ 6, 10
   and 13 inactive the day after each ran). v1 read them: it hid machines, showed moulds
@@ -74,19 +140,28 @@ and what is on them now … make me able to edit here … the machines shown on 
   `masterRead` flag it, and the page keeps its last good view and offers a retry
   (`degraded()` in the page) instead of blanking — seen live on localhost, 2026-10-05.
 - **An order running on another machine is not a candidate; a mould STANDING on an idle
-  machine is** (cheapest there, «الاسطمبة راكبة على…» elsewhere). Each list is sorted
-  FIRST on whether the mould belongs on that machine (the engineer's answer, else
-  Master's tonnage as a hint) and the "Master says another machine" ones are folded
-  away — 27 orders were open at once. Unanswered questions are one hint on the button
+  machine is** (cheapest there, «الاسطمبة راكبة على…» elsewhere). Only an order Master's
+  tonnage puts on ANOTHER existing machine sorts after the rest and is folded away (27
+  orders were open at once); "fits here" and "nobody said" share a tier, so the owner's
+  own order decides the top. Unanswered questions are one hint on the button
   («جاوب على الأسئلة»), not a row of grey chips.
 - **Colours are lists.** One job is made in several and nothing else in the workbook
   holds them. Saved on the ORDER when there is one, else in the machine's
   «تغييرات الاسطمبات» row; what a product was last made in is remembered as a default
   (shown with «؟» until confirmed). `colourNow` = the colour in the barrel when it is
-  known; otherwise the machine is cleaned of the darkest.
+  known; otherwise the estimate assumes the worst of the job's colours.
 - **The floor map is DATA** — one cell («ترتيب الخريطة», kind «خريطة») of
-  «إجابات خطة الاسطمبات», arranged on the page (tap a machine, tap a square; 7-column
-  grid; `parseLayout` / `placeTile`). Never keyed on PQ numbers in code. ⚠ That column was
+  «إجابات خطة الاسطمبات». **Since 2026-10-06 it is a LANDSCAPE sheet of 56 × 32 square
+  units** (owner: *"more landscape, and more pixels to move the machines"* — it was 7
+  columns of tall cells in a narrow dialog). The editor is IN PLACE of the map: a machine
+  is DRAGGED (pointer events, snapping to a unit), its corner sizes it, the arrows move
+  it one unit, a tray tap drops it on `freeSpot()`. The cell starts with `grid 56x32`; a
+  cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
+  when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
+  carried over, twice as wide as tall. On a phone the sheet keeps 42rem and pans inside
+  its own frame. ⚠ The editor renders tiles in a STABLE order: `placeTile` moves the placed
+  tile to the end, and React re-inserting that node mid-drag drops the pointer capture.
+  Never keyed on PQ numbers in code. ⚠ That column was
   added to a tab that already existed, so `saveAnswers` calls `ensureHeaders` first: an
   append silently DROPS a value whose header the tab lacks.
 - Tiles draw a side-view press (`MachineGlyph`): lamp = state, hopper = the job's
@@ -95,15 +170,16 @@ and what is on them now … make me able to edit here … the machines shown on 
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 25 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 75 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,
   and the minutes — all in `CHANGEOVER_NUMBERS`. ⚠ Three numbers and two tie-breaks there
   are marked ASSUMPTION (easy = ½, to-transparent = ×2, ordinary swap 45 min; "fits only
   this machine" sorts after late; least remaining first) — his to correct.
-- **Blocked, never ranked:** the engineer said the mould does not fit; transparent while
-  other machines are kept for transparent; something is still missing.
+- **Blocked, never ranked (five):** the quantity is already made; the order is «متوقف»;
+  the engineer said the mould does not fit; an ANSWERED transparent while other machines
+  are kept for transparent; something is still missing.
 - **The page owns two tabs, created lazily by the first save** — «إجابات خطة الاسطمبات»
   (one row per save, one column per question, the LATEST non-blank cell per kind+name
   wins — append-only, so at-least-once is harmless) and «تغييرات الاسطمبات» (one row per

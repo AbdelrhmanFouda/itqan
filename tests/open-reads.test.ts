@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OPEN_READS, SALES_ONLY, WRITABLE_ENTITIES, READONLY_FIELDS, readonlyFields } from "../lib/open-reads.ts";
+import { OPEN_READS, PRODUCTION_ONLY, SALES_ONLY, WRITABLE_ENTITIES, READONLY_FIELDS, readonlyFields } from "../lib/open-reads.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -89,4 +89,27 @@ test("SALES_ONLY is «العملاء» and «طلبات العملاء», and th
   );
   // A hand-written entity name in the route is how the two drift apart again.
   assert.equal(/entity === "clients"/.test(src), false, "the strict list lives in lib/open-reads.ts");
+});
+
+/* ----------------------- the production-only entities ---------------------- */
+
+test("PRODUCTION_ONLY is the mould plan's two tabs, and the route uses it", () => {
+  // /api/changeover is production + owner/manager: its rows name clients,
+  // orders and who answered what. Registering the two tabs in ENTITIES made
+  // /api/sheet/changeoverAnswers and /api/sheet/changeoverLog serve the same
+  // rows to any approved role. Found on the 2026-10-05 review pass.
+  assert.deepEqual([...PRODUCTION_ONLY].sort(), ["changeoverAnswers", "changeoverLog"]);
+  for (const entity of PRODUCTION_ONLY) {
+    assert.equal(OPEN_READS.has(entity), false, `"${entity}" must never also be open`);
+    assert.equal(SALES_ONLY.has(entity), false, `"${entity}" cannot be in two strict lists`);
+    assert.equal(WRITABLE_ENTITIES.has(entity), false, `"${entity}" is written by /api/changeover only`);
+  }
+  const src = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "app", "api", "sheet", "[entity]", "route.ts"), "utf8",
+  );
+  assert.ok(/PRODUCTION_ONLY\.has\(entity\)/.test(src), "the route must consult PRODUCTION_ONLY");
+  assert.ok(
+    src.indexOf("PRODUCTION_ONLY.has(entity)") < src.indexOf("OPEN_READS.has(entity)"),
+    "the strict branch must be checked before the deny-by-default one",
+  );
 });

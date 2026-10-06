@@ -28,8 +28,8 @@ import { formatClock, formatDate, todayIso } from "@/lib/dates";
 import { ageLabel, fill, fmtInt } from "@/lib/format";
 import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
-  ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MISSING_ITEMS,
-  colourDef, colourKey, darkestColour, estimateChange, machineKey, mapRows, placeTile, rankFor, removeTile,
+  ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
+  barrelOf, colourDef, colourKey, estimateFrom, fold, freeSpot, machineKey, mapRows, placeTile, rankFor, removeTile,
   splitMinutes,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
   type Suggestion,
@@ -38,9 +38,11 @@ import type { ChangeoverResponse, MountResult } from "@/lib/changeover-data";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { Btn, EmptyState, LoadError, Modal, Pill, Spinner, StatTile, iconBtnCls, inputCls } from "@/components/dashboard/ui";
-import { AlertTriangle, Check, HelpCircle, LayoutGrid, List, Moon, Pencil, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCircle, LayoutGrid, List, Moon, Pencil, RefreshCw } from "lucide-react";
 
-const LAST_KEY = "itqan.changeover.last.v2";
+// v3 (2026-10-05): the answer gained fields the page reads on every card; a
+// snapshot in the old shape is not shown under the new code.
+const LAST_KEY = "itqan.changeover.last.v3";
 const STALE_AFTER_MS = 60_000;
 const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "red", info: "blue" };
 const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
@@ -65,7 +67,8 @@ type Strings = (typeof co)["en"];
  * a second earlier. Such an answer is shown only when there is nothing better.
  */
 const degraded = (r: ChangeoverResponse): boolean =>
-  !r.ok || !r.configured || r.logRead === false || r.masterRead === false || r.machines.length === 0;
+  !r.ok || !r.configured || r.logRead === false || r.masterRead === false || r.plannerRead === false
+  || r.machines.length === 0;
 type PostResult = { ok: boolean; reason?: string } & Record<string, unknown>;
 
 async function post(body: Record<string, unknown>): Promise<PostResult> {
@@ -151,7 +154,9 @@ function GlyphDefs() {
  * and the lamp says whether it is running. Decorative: the tile's own text
  * says all of it again in words.
  */
-function MachineGlyph({ colours, now, tonnage, state }: { colours: readonly string[]; now: string; tonnage: string; state: MachineState }) {
+function MachineGlyph({ colours, now, tonnage, state, className }: {
+  colours: readonly string[]; now: string; tonnage: string; state: MachineState; className?: string;
+}) {
   const fillOf = (c: string) => colourDef(c)?.swatch ?? "url(#co-hatch)";
   const stripes = colours.length > 0 ? colours.slice(0, 4) : [""];
   const sw = 16 / stripes.length;
@@ -159,7 +164,7 @@ function MachineGlyph({ colours, now, tonnage, state }: { colours: readonly stri
   // Compact on purpose: a narrower drawing scales up larger inside a phone's
   // 88px tile, and the tonnage on the clamp stays readable there.
   return (
-    <svg viewBox="0 0 100 38" preserveAspectRatio="xMidYMid meet" className="block w-full flex-1 min-h-0 my-0.5" aria-hidden="true">
+    <svg viewBox="0 0 100 38" preserveAspectRatio="xMidYMid meet" className={className ?? "block w-full flex-1 min-h-0 my-0.5"} aria-hidden="true">
       {/* the bed, on two feet */}
       <rect x="2" y="28" width="96" height="5" rx="1.5" fill="#94a3b8" />
       <rect x="8" y="33" width="9" height="3" fill="#64748b" />
@@ -187,6 +192,38 @@ function MachineGlyph({ colours, now, tonnage, state }: { colours: readonly stri
       <path d="M64 10 H80 L75 14.5 H69 Z" fill={stripes[0] ? fillOf(stripes[0]) : "url(#co-hatch)"} />
       <path d="M64 2 H80 V10 L75 14.5 H69 L64 10 Z" fill="none" stroke="#475569" strokeWidth="1" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/**
+ * The floor: a LANDSCAPE sheet of square units (lib/changeover.ts MAP_COLS ×
+ * rows), as wide as the page. On a phone it keeps a readable width and is
+ * panned sideways inside its own frame — the page itself never scrolls
+ * sideways. Text inside scales with the sheet (container-query units).
+ */
+function Floor({ rows, fine, sheetRef, onSheetClick, children }: {
+  rows: number; fine?: boolean; sheetRef?: React.Ref<HTMLDivElement>;
+  onSheetClick?: (e: React.MouseEvent<HTMLDivElement>) => void; children: React.ReactNode;
+}) {
+  const step = fine ? 1 : 4;
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-slate-300" dir="ltr">
+      <div
+        ref={sheetRef} onClick={onSheetClick}
+        className="relative grid min-w-[42rem] [container-type:inline-size]"
+        style={{
+          gridTemplateColumns: `repeat(${MAP_COLS}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+          aspectRatio: `${MAP_COLS} / ${rows}`, minHeight: 0,
+          // The shop floor: a faint tiled ground under the machines.
+          backgroundColor: "#eef2f6",
+          backgroundImage: "linear-gradient(#dde3ea 1px, transparent 1px), linear-gradient(90deg, #dde3ea 1px, transparent 1px)",
+          backgroundSize: `calc(100% / ${MAP_COLS / step}) calc(100% / ${rows / step})`,
+        }}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -257,7 +294,7 @@ export default function ChangeoverPage() {
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
-  const { data, loading, failed, setFailed, reload } = useRemembered<ChangeoverResponse>({
+  const { data, loading, failed, setFailed, fromSnapshot, reload } = useRemembered<ChangeoverResponse>({
     key: LAST_KEY,
     read: () => timedJson<ChangeoverResponse>(authedFetch, freshNext.current ? "/api/changeover?fresh=1" : "/api/changeover"),
     valid: (snap) => Array.isArray(snap?.machines) && Array.isArray(snap?.orders) && Array.isArray(snap?.layout),
@@ -334,10 +371,12 @@ export default function ChangeoverPage() {
     const vars: Record<string, string | number> = { ...(c.vars ?? {}) };
     if (typeof vars.colour === "string") vars.colour = colourName(vars.colour, ar, strings);
     if (typeof vars.machine === "string") vars.machine = ltr(vars.machine);
+    if (typeof vars.machines === "string") vars.machines = ltr(vars.machines);
+    if (typeof vars.order === "string") vars.order = ltr(vars.order);
     return fill((strings.chips as Record<string, string>)[key] ?? c.key, vars);
   }, [s, isAr]);
   const missingText = useCallback((keys: string) =>
-    keys.split(",").map((k) => { const it = MISSING_ITEMS.find((x) => x.key === k); return it ? (isAr ? it.ar : it.en) : k; }).join("، "), [isAr]);
+    keys.split(",").map((k) => { const it = MISSING_ITEMS.find((x) => x.key === k); return it ? (isAr ? it.ar : it.en) : k; }).join(isAr ? "، " : ", "), [isAr]);
 
   /** «توقف مسجّل: لا يوجد أمر شغل — من 08:02», with the day when it is not today's. */
   const stoppageText = useCallback((m: PlanMachine) => {
@@ -351,8 +390,37 @@ export default function ChangeoverPage() {
     });
   }, [s, isAr, lang, data?.today]);
 
+  /**
+   * The one-tap answers to the page's own questions about a machine. Each is a
+   * «الراكب الآن» row — the thing «تعديل» writes — sent with what the page is
+   * showing: «نعم» ties the order, «لا» records that the job has none, «لسه
+   * هنا» / «الاتنين راكبين» name what stands, «اتغيّرت» names what came off.
+   * (They used to say "open «Edit» and save", and an unchanged form saves
+   * nothing — the question could not be answered.)
+   */
+  const [tying, setTying] = useState(false);
+  const [tieError, setTieError] = useState("");
+  const noteNow = useCallback(async (m: PlanMachine, extra: Record<string, unknown> = {}) => {
+    if (tying) return;
+    setTying(true); setTieError("");
+    const r = await post({
+      action: "mount", baseline: true, machine: m.label,
+      order: m.now.order && !m.now.order.startsWith("#") ? m.now.order : "",
+      noOrder: m.now.noOrder,
+      products: m.now.products,
+      // A guess is never written down by a tap that was about something else.
+      colours: m.now.coloursGuessed ? [] : m.now.colours, colourNow: m.now.coloursGuessed ? "" : m.now.colourNow,
+      fromProducts: [], fromColours: [],
+      ...extra,
+    });
+    setTying(false);
+    if (!r.ok) { setTieError(errorText(s, r.reason)); return; }
+    await reloadFresh();
+  }, [tying, s, reloadFresh]);
+
   const pick = useCallback((label: string) => {
     setSelected(label);
+    setTieError("");
     // The panel is under the map on a phone; bring it into view.
     requestAnimationFrame(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   }, []);
@@ -381,6 +449,12 @@ export default function ChangeoverPage() {
     );
   }
 
+  // Nothing is written from a view that is not the live one: a device
+  // snapshot of unknown age, or what was kept on screen after a refresh
+  // failed. Mounting on a machine whose state has since changed is the one
+  // mistake this page must not make easy.
+  const live = !fromSnapshot && !failed && !degraded(data);
+  const canWrite = data.writable && live;
   const count = (st: MachineState) => machines.filter((m) => m.state === st).length;
   const waiting = orders.filter((o) => !(o.mountedOn && o.mountedRunning) && o.remaining !== 0).length;
   const placed = new Set(layout.map((t) => machineKey(t.label)));
@@ -388,25 +462,42 @@ export default function ChangeoverPage() {
   const showMap = view === "map" && layout.length > 0;
 
   /** A machine as one square of the floor. */
-  const tile = (m: PlanMachine, t?: MapTile) => {
+  const tile = (m: PlanMachine, t: MapTile) => {
     const isSel = m.label === selected;
+    // A wide, short tile (the two long presses along the wall) puts the
+    // drawing beside the words instead of over them.
+    const wide = t.w >= t.h * 2.5;
+    const head = (
+      <span className="flex items-center justify-between gap-1">
+        <span className="font-bold text-[length:clamp(11px,1.25cqw,15px)] leading-none text-gray-900 whitespace-nowrap">{codeOf(m.label)}</span>
+        <span className={`text-[length:clamp(9px,0.95cqw,12px)] leading-none font-medium whitespace-nowrap ${STATE_WORD[m.state]}`}>{s.states[m.state]}</span>
+      </span>
+    );
+    const name = (
+      <span className="text-[length:clamp(10px,1.05cqw,13px)] leading-[1.15] text-gray-800 line-clamp-2 break-words" dir="auto">
+        {m.now.products.join(" / ") || <span className="text-gray-400">{s.machines.empty}</span>}
+      </span>
+    );
+    const glyph = (cls?: string) => (
+      <MachineGlyph colours={m.now.colours} now={m.now.colourNow} tonnage={tonOf(m.label) || m.tonnage} state={m.state} className={cls} />
+    );
     return (
       <button
         key={m.label} type="button" aria-pressed={isSel} onClick={() => pick(m.label)}
         aria-label={`${m.label} · ${s.states[m.state]} · ${m.now.products.join(" / ") || s.machines.empty}`}
-        style={t ? { gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` } : undefined}
-        className={`flex flex-col text-start border-2 rounded-xl px-1.5 pt-1.5 pb-1 overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
+        style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
+        className={`m-[3px] min-w-0 min-h-0 flex ${wide ? "flex-row items-center gap-1.5" : "flex-col"} text-start border-2 rounded-xl px-1.5 py-1 overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
           isSel ? "ring-2 ring-blue-500 ring-offset-1 !border-blue-500" : ""
         }`}
       >
-        <span className="flex items-center justify-between gap-1">
-          <span className="font-bold text-[13px] leading-none text-gray-900 whitespace-nowrap">{codeOf(m.label)}</span>
-          <span className={`text-[10px] leading-none font-medium whitespace-nowrap ${STATE_WORD[m.state]}`}>{s.states[m.state]}</span>
-        </span>
-        <MachineGlyph colours={m.now.colours} now={m.now.colourNow} tonnage={tonOf(m.label) || m.tonnage} state={m.state} />
-        <span className="text-[11px] leading-[1.15] text-gray-800 line-clamp-2 break-words min-h-[1.6rem]" dir="auto">
-          {m.now.products.join(" / ") || <span className="text-gray-400">{s.machines.empty}</span>}
-        </span>
+        {wide ? (
+          <>
+            {glyph("block h-full w-auto max-w-[50%] shrink-0")}
+            <span className="min-w-0 flex-1 flex flex-col justify-center gap-1">{head}{name}</span>
+          </>
+        ) : (
+          <>{head}{glyph()}{name}</>
+        )}
       </button>
     );
   };
@@ -470,8 +561,8 @@ export default function ChangeoverPage() {
           {sg.chips.map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
         </div>
         <div className="flex flex-wrap gap-2 mt-3">
-          <Btn onClick={() => setConfirm({ machine, pick: sg })} className="flex-1 sm:flex-none">{s.rank.mount}</Btn>
-          <Btn variant="outline" onClick={() => setOrderForm(o)}>
+          <Btn onClick={() => setConfirm({ machine, pick: sg })} className="flex-1 sm:flex-none" disabled={!canWrite}>{s.rank.mount}</Btn>
+          <Btn variant="outline" onClick={() => setOrderForm(o)} disabled={!canWrite}>
             <HelpCircle size={15} className={sg.needsAnswers ? "text-amber-600" : ""} />
             {sg.needsAnswers ? s.rank.questionsNeeded : s.rank.questions}
           </Btn>
@@ -499,6 +590,9 @@ export default function ChangeoverPage() {
 
       {failed && (
         <LoadError className="mb-3" text={failed.timedOut ? p.common.timedOut : s.loadError} retry={p.common.retry} onRetry={reload} loading={loading} />
+      )}
+      {!live && (
+        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">{s.notLive}</p>
       )}
       {data.dataAgeMs > STALE_AFTER_MS && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
@@ -540,38 +634,39 @@ export default function ChangeoverPage() {
               </button>
             ))}
           </div>
-          {data.writable && (
-            <Btn variant="outline" onClick={() => setArranging(true)}><Pencil size={14} />{s.map.edit}</Btn>
+          {data.writable && !arranging && (
+            <Btn variant="outline" onClick={() => setArranging(true)} disabled={!canWrite}><Pencil size={14} />{s.map.edit}</Btn>
           )}
         </div>
 
-        {view === "map" && layout.length === 0 && (
-          <p className="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-2">{s.map.empty}</p>
-        )}
-
-        {showMap ? (
+        {arranging ? (
+          <ArrangeMap
+            machines={machines} initial={layout} isAr={isAr} s={s} cancel={p.common.cancel}
+            onClose={() => setArranging(false)} onSaved={async () => { setArranging(false); setView("map"); await reloadFresh(); }}
+          />
+        ) : (
           <>
-            <div
-              dir="ltr" className="grid gap-1.5 border border-slate-300 rounded-2xl p-2"
-              style={{
-                gridTemplateColumns: `repeat(${MAP_COLS}, minmax(0, 1fr))`, gridAutoRows: "5.75rem",
-                // The shop floor: a faint tiled ground under the machines.
-                backgroundColor: "#eef2f6",
-                backgroundImage: "linear-gradient(#dde3ea 1px, transparent 1px), linear-gradient(90deg, #dde3ea 1px, transparent 1px)",
-                backgroundSize: "22px 22px",
-              }}
-            >
-              {layout.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t) : null; })}
-            </div>
-            {unplaced.length > 0 && (
-              <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-1">{s.map.unplaced}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{unplaced.map(row)}</div>
-              </div>
+            {view === "map" && layout.length === 0 && (
+              <p className="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-2">{s.map.empty}</p>
+            )}
+
+            {showMap ? (
+              <>
+                {/* Only as tall as the machines reach — the sheet stays landscape. */}
+                <Floor rows={Math.min(MAP_MAX_ROWS, Math.max(MAP_TILE.h * 2, mapRows(layout)))}>
+                  {layout.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t) : null; })}
+                </Floor>
+                {unplaced.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-gray-500 mb-1">{s.map.unplaced}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{unplaced.map(row)}</div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">{machines.map(row)}</div>
             )}
           </>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">{machines.map(row)}</div>
         )}
 
         <p className="text-xs text-gray-500 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -580,6 +675,16 @@ export default function ChangeoverPage() {
           ))}
           {data.logDate && <span>{fill(s.asOf, { date: formatDate(data.logDate, lang) })}</span>}
         </p>
+        {/* Rule 4 hangs on an answer nobody is asked for anywhere else. */}
+        {transparentMachines.length === 0 && (
+          <p className="text-xs text-gray-500 mt-1">{s.hints.noTransparentMachine}</p>
+        )}
+        {machines.every((m) => !m.bigMachine) && (
+          <p className="text-xs text-gray-500 mt-1">{s.hints.noBigMachine}</p>
+        )}
+        {data.canSetKeyClient && data.keyClients === 0 && (
+          <p className="text-xs text-gray-500 mt-1">{s.hints.noKeyClient}</p>
+        )}
       </section>
 
       {/* ---------------------------- the chosen machine ---------------------------- */}
@@ -599,7 +704,7 @@ export default function ChangeoverPage() {
                   {machine.now.products.join(" / ") || <span className="font-normal text-gray-400">{s.machines.empty}</span>}
                 </p>
               </div>
-              <Btn variant="outline" onClick={() => setMachineForm(machine)} className="shrink-0"><Pencil size={14} />{s.now.edit}</Btn>
+              <Btn variant="outline" onClick={() => setMachineForm(machine)} className="shrink-0" disabled={!canWrite}><Pencil size={14} />{s.now.edit}</Btn>
             </div>
             {machine.now.products.length > 0 && (() => {
               const o = orderOf(machine);
@@ -607,8 +712,10 @@ export default function ChangeoverPage() {
                 <div className="text-sm text-gray-700 mt-2 space-y-1">
                   <p>
                     <ColourTags colours={machine.now.colours} isAr={isAr} s={s} guessed={machine.now.coloursGuessed} />
-                    {machine.now.colours.length > 1 && machine.now.colourNow && (
-                      <span className="text-gray-500"> ({fill(s.now.runningColour, { colour: colourName(machine.now.colourNow, isAr, s) })})</span>
+                    {machine.now.colours.length > 1 && (
+                      <span className="text-gray-500"> ({machine.now.colourNow
+                        ? fill(s.now.runningColour, { colour: colourName(machine.now.colourNow, isAr, s) })
+                        : s.now.colourNowUnknown})</span>
                     )}
                     {" · "}{machine.now.material || <span className="text-amber-700">{s.now.noMaterial}</span>}
                   </p>
@@ -628,6 +735,44 @@ export default function ChangeoverPage() {
                   {machine.now.coloursGuessed && (
                     <p className="text-xs text-amber-700 flex items-start gap-1.5"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{s.now.coloursGuessed}</p>
                   )}
+                  {/* The three things the log cannot settle — asked, never decided,
+                      and each answered with one tap. */}
+                  {machine.now.orderMaybe && (
+                    <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <p>{fill(s.ask.orderMaybe, { order: ltr(machine.now.orderMaybe), product: orders.find((x) => x.code === machine.now.orderMaybe)?.product ?? "" })}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Btn variant="outline" onClick={() => void noteNow(machine, { order: machine.now.orderMaybe })} disabled={!canWrite || tying}>{tying ? s.saving : s.ask.yes}</Btn>
+                        <Btn variant="outline" onClick={() => void noteNow(machine, { order: "", noOrder: true })} disabled={!canWrite || tying}>{s.ask.no}</Btn>
+                      </div>
+                    </div>
+                  )}
+                  {machine.now.alsoOn && (
+                    <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <p>{fill(s.ask.alsoOn, { machine: ltr(machine.now.alsoOn) })}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Btn variant="outline" onClick={() => void noteNow(machine)} disabled={!canWrite || tying}>{tying ? s.saving : s.ask.stillHere}</Btn>
+                      </div>
+                    </div>
+                  )}
+                  {machine.now.mixedShift && (
+                    <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <p>{s.ask.mixedShift}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Btn variant="outline" disabled={!canWrite || tying}
+                          // The order, the colours and a «لا» on record belong to the mould
+                          // that came OFF — unless the order is the new mould's own.
+                          onClick={() => void noteNow(machine, {
+                            products: machine.now.products.slice(0, 1), fromProducts: machine.now.products.slice(1),
+                            colours: [], colourNow: "", noOrder: false,
+                            ...(o && fold(o.product) === fold(machine.now.products[0] ?? "") ? {} : { order: "" }),
+                          })}>
+                          {tying ? s.saving : fill(s.ask.changed, { product: machine.now.products[0] ?? "" })}
+                        </Btn>
+                        <Btn variant="outline" onClick={() => void noteNow(machine)} disabled={!canWrite || tying}>{s.ask.both}</Btn>
+                      </div>
+                    </div>
+                  )}
+                  {tieError && <p className="text-xs text-red-700" role="alert">{tieError}</p>}
                 </div>
               );
             })()}
@@ -647,6 +792,8 @@ export default function ChangeoverPage() {
             <details className="mt-3 group">
               <summary className="cursor-pointer select-none text-sm text-gray-600 min-h-11 inline-flex items-center gap-1.5 hover:text-gray-900">
                 {fill(s.rank.elsewhere, { n: elsewhere.length })}
+                {/* A fold must not hide the two things the owner sorts on first. */}
+                {elsewhere.some((x) => x.order.keyClient || x.late > 0) && <span className="text-amber-700">{s.rank.elsewhereImportant}</span>}
               </summary>
               <ol className="space-y-2 mt-2">{elsewhere.map((sg, i) => card(sg, main.length + i))}</ol>
             </details>
@@ -663,12 +810,12 @@ export default function ChangeoverPage() {
                       <span className={`block text-xs mt-0.5 ${b.reason === "missing" ? "text-red-600" : "text-gray-500"}`}>
                         {b.reason === "missing"
                           ? fill(s.blocked.missing, { items: missingText(String(b.vars?.items ?? "")) })
-                          : b.reason === "finished"
-                            ? s.blocked.finished
+                          : b.reason === "finished" || b.reason === "onHold"
+                            ? s.blocked[b.reason]
                             : fill(s.blocked[b.reason], { machines: ltr(String(b.vars?.machines ?? "")) })}
                       </span>
                     </span>
-                    <Btn variant="ghost" onClick={() => setOrderForm(b.order)}><HelpCircle size={15} />{s.rank.questions}</Btn>
+                    <Btn variant="ghost" onClick={() => setOrderForm(b.order)} disabled={!canWrite}><HelpCircle size={15} />{s.rank.questions}</Btn>
                   </li>
                 ))}
               </ul>
@@ -677,12 +824,6 @@ export default function ChangeoverPage() {
         </section>
       )}
 
-      {arranging && (
-        <ArrangeMap
-          machines={machines} initial={layout} isAr={isAr} s={s} cancel={p.common.cancel}
-          onClose={() => setArranging(false)} onSaved={async () => { setArranging(false); setView("map"); await reloadFresh(); }}
-        />
-      )}
       {machineForm && (
         <MachineForm
           machine={machineForm} orders={orders} isAr={isAr} s={s} cancel={p.common.cancel}
@@ -697,7 +838,7 @@ export default function ChangeoverPage() {
       )}
       {confirm && (
         <ConfirmForm
-          machine={confirm.machine} pick={confirm.pick} night={data.night} isAr={isAr} s={s} cancel={p.common.cancel}
+          machine={confirm.machine} pick={confirm.pick} night={data.night} canWrite={canWrite} isAr={isAr} s={s} cancel={p.common.cancel}
           minutes={minutes} reasons={confirm.pick.chips.map((c) => chipText(c, co.ar, true)).join(" · ")}
           onClose={() => setConfirm(null)}
           onDone={async (r) => { setConfirm(null); setDone(r); await reloadFresh(); }}
@@ -730,10 +871,13 @@ export default function ChangeoverPage() {
 /* ------------------------------ arranging the map ------------------------------ */
 
 /**
- * Tap a machine, then tap the square where it stands. The squares are the
- * map's own grid (lib/changeover.ts MAP_COLS wide); a machine can be made
- * wider or taller for the presses that are. Saved as ONE cell of the answers
- * tab, so the floor plan is the owner's data, not the code's.
+ * The floor's editor, IN PLACE of the map and as wide as the page (owner,
+ * 2026-10-06: "more landscape, and more pixels to move the machines" — it was
+ * a narrow dialog over a 7-column grid). A machine is dragged to where it
+ * stands and snaps to the sheet's units; its corner is dragged to size it; the
+ * arrows move it one unit for the last touch. Tapping a machine in the tray
+ * drops it on the first free spot. Saved as ONE cell of the answers tab, so
+ * the floor plan is the owner's data, not the code's.
  */
 function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
   machines: PlanMachine[]; initial: MapTile[]; isAr: boolean; s: Strings; cancel: string;
@@ -744,21 +888,76 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const sheet = useRef<HTMLDivElement>(null);
+  // The grab: which machine, moving or sizing, and where on the tile it was caught.
+  const drag = useRef<{ label: string; mode: "move" | "size"; dx: number; dy: number } | null>(null);
 
-  const rows = Math.min(MAP_MAX_ROWS, Math.max(8, mapRows(tiles) + 2));
   const placedKeys = new Set(tiles.map((t) => machineKey(t.label)));
   const tray = machines.filter((m) => !placedKeys.has(machineKey(m.label)));
   const current = tiles.find((t) => machineKey(t.label) === machineKey(picked));
 
-  const put = (at: { c: number; r: number; w?: number; h?: number }) => {
-    if (!picked) return;
-    const next = placeTile(tiles, picked, at);
+  /** A pointer, in the sheet's own units (fractions of a unit included). */
+  const unitsAt = (e: { clientX: number; clientY: number }) => {
+    const box = sheet.current!.getBoundingClientRect();
+    const u = box.width / MAP_COLS;
+    return { x: (e.clientX - box.left) / u, y: (e.clientY - box.top) / u };
+  };
+
+  const put = (label: string, at: { c: number; r: number; w?: number; h?: number }) => {
+    const next = placeTile(tiles, label, at);
     if (!next) { setNote(s.map.taken); return; }
     setTiles(next); setNote("");
   };
+  const add = (label: string) => {
+    const spot = freeSpot(tiles);
+    if (!spot) { setNote(s.map.noRoom); return; }
+    setPicked(label);
+    put(label, spot);
+  };
+  const nudge = (dc: number, dr: number) => { if (current) put(current.label, { c: current.c + dc, r: current.r + dr }); };
   const resize = (dw: number, dh: number) => {
-    if (!current) return;
-    put({ c: current.c, r: current.r, w: current.w + dw, h: current.h + dh });
+    if (current) put(current.label, { c: current.c, r: current.r, w: current.w + dw, h: current.h + dh });
+  };
+
+  const grab = (t: MapTile, mode: "move" | "size") => (e: React.PointerEvent<HTMLElement>) => {
+    if (busy) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const at = unitsAt(e);
+    drag.current = { label: t.label, mode, dx: at.x - (t.c - 1), dy: at.y - (t.r - 1) };
+    setPicked(t.label); setNote("");
+  };
+  const dragTo = (e: React.PointerEvent<HTMLElement>) => {
+    const d = drag.current;
+    const t = d && tiles.find((x) => machineKey(x.label) === machineKey(d.label));
+    if (!d || !t) return;
+    const at = unitsAt(e);
+    const to = d.mode === "move"
+      ? { c: Math.round(at.x - d.dx) + 1, r: Math.round(at.y - d.dy) + 1 }
+      : { c: t.c, r: t.r, w: Math.round(at.x - (t.c - 1)), h: Math.round(at.y - (t.r - 1)) };
+    const next = placeTile(tiles, d.label, to);
+    // Onto another machine: it stays on its last good spot until it is clear.
+    if (!next) { setNote(s.map.taken); return; }
+    const n = next[next.length - 1];
+    if (n.c !== t.c || n.r !== t.r || n.w !== t.w || n.h !== t.h) setTiles(next);
+    setNote("");
+  };
+  const drop = () => { drag.current = null; };
+
+  /** A tap on the bare floor moves the selected machine there (its middle on the tap). */
+  const tapFloor = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || !picked || busy) return;
+    const at = unitsAt(e);
+    const w = current?.w ?? MAP_TILE.w, h = current?.h ?? MAP_TILE.h;
+    put(picked, { c: Math.round(at.x - w / 2) + 1, r: Math.round(at.y - h / 2) + 1 });
+  };
+  const keyMove = (e: React.KeyboardEvent, t: MapTile) => {
+    const step: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const by = step[e.key];
+    if (!by) return;
+    e.preventDefault();
+    setPicked(t.label);
+    put(t.label, { c: t.c + by[0], r: t.r + by[1] });
   };
 
   async function save() {
@@ -769,18 +968,18 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
     await onSaved();
   }
 
-  const small = "min-h-11 px-3 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40";
+  const small = "min-h-11 min-w-11 px-3 inline-flex items-center justify-center rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40";
   return (
-    <Modal open title={s.map.edit} onClose={onClose} isAr={isAr}>
-      <p className="text-sm text-gray-600 mb-2">{s.map.hint}</p>
+    <div className="bg-white border border-blue-200 rounded-2xl p-2 sm:p-3" dir={isAr ? "rtl" : "ltr"}>
+      <p className="text-sm text-gray-700 mb-3">{s.map.hint}</p>
 
       {tray.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs text-gray-500 mb-1">{s.map.unplaced}</p>
+          <p className="text-xs text-gray-500 mb-1">{s.map.unplaced} — {s.map.trayHint}</p>
           <div className="flex flex-wrap gap-1.5" dir="ltr">
             {tray.map((m) => (
-              <button key={m.label} type="button" aria-pressed={picked === m.label} onClick={() => { setPicked(m.label); setNote(""); }}
-                className={`min-h-11 px-2.5 rounded-lg border text-sm font-medium ${picked === m.label ? "border-blue-500 bg-blue-50 text-blue-800" : "border-gray-300 text-gray-800 hover:bg-gray-50"}`}>
+              <button key={m.label} type="button" onClick={() => add(m.label)} disabled={busy}
+                className="min-h-11 px-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-800 hover:bg-gray-50 active:bg-gray-100">
                 {codeOf(m.label)}
               </button>
             ))}
@@ -788,44 +987,51 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
         </div>
       )}
 
-      <div
-        dir="ltr" className="grid gap-1 bg-gray-100 border border-gray-200 rounded-xl p-1.5"
-        style={{ gridTemplateColumns: `repeat(${MAP_COLS}, minmax(0, 1fr))`, gridAutoRows: "2.75rem" }}
-      >
-        {Array.from({ length: rows * MAP_COLS }, (_, i) => {
-          const c = (i % MAP_COLS) + 1, r = Math.floor(i / MAP_COLS) + 1;
-          return (
-            <button key={`cell-${c}-${r}`} type="button" aria-label={`${s.map.cell} ${c},${r}`} onClick={() => put({ c, r })}
-              style={{ gridColumn: c, gridRow: r }}
-              className="rounded border border-dashed border-gray-300 bg-white/60 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40" />
-          );
-        })}
-        {tiles.map((t) => {
+      <Floor rows={MAP_MAX_ROWS} fine sheetRef={sheet} onSheetClick={tapFloor}>
+        {/* A STABLE order: placeTile moves the tile it placed to the end of the
+            list, and React re-inserting the node mid-drag would drop the
+            pointer capture — the machine would stop following the finger. */}
+        {[...tiles].sort((a, b) => a.label.localeCompare(b.label)).map((t) => {
           const on = machineKey(t.label) === machineKey(picked);
           return (
-            <button key={t.label} type="button" aria-pressed={on} onClick={() => { setPicked(t.label); setNote(""); }}
+            <div
+              key={t.label} role="button" tabIndex={0} aria-pressed={on} aria-label={t.label}
+              onPointerDown={grab(t, "move")} onPointerMove={dragTo} onPointerUp={drop} onPointerCancel={drop}
+              onKeyDown={(e) => keyMove(e, t)}
               style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
-              className={`rounded-md border text-[13px] font-bold px-1 overflow-hidden ${on ? "border-blue-600 bg-blue-600 text-white" : "border-gray-400 bg-white text-gray-900"}`}>
+              className={`relative m-[2px] min-w-0 min-h-0 flex items-center justify-center rounded-lg border-2 font-bold overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing text-[length:clamp(11px,1.3cqw,16px)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
+                on ? "border-blue-600 bg-blue-600 text-white shadow-md z-10" : "border-slate-400 bg-white text-gray-900"
+              }`}
+            >
               {codeOf(t.label)}
-            </button>
+              {on && (
+                <span
+                  role="presentation" title={s.map.resize}
+                  onPointerDown={grab(t, "size")} onPointerMove={dragTo} onPointerUp={drop} onPointerCancel={drop}
+                  className="absolute bottom-0 right-0 w-6 h-6 sm:w-5 sm:h-5 cursor-nwse-resize touch-none rounded-tl-md bg-white/90 border-t-2 border-l-2 border-blue-600"
+                />
+              )}
+            </div>
           );
         })}
-      </div>
+      </Floor>
 
-      <div className="mt-3 min-h-[5.5rem]">
-        {picked ? (
-          <>
-            <p className="text-sm font-medium text-gray-900 mb-2">{fill(s.map.picked, { machine: ltr(picked) })}</p>
-            {current && (
-              <div className="flex flex-wrap gap-1.5">
-                <button type="button" className={small} onClick={() => resize(1, 0)}>{s.map.wider}</button>
-                <button type="button" className={small} disabled={current.w <= 1} onClick={() => resize(-1, 0)}>{s.map.narrower}</button>
-                <button type="button" className={small} onClick={() => resize(0, 1)}>{s.map.taller}</button>
-                <button type="button" className={small} disabled={current.h <= 1} onClick={() => resize(0, -1)}>{s.map.shorter}</button>
-                <button type="button" className={`${small} text-red-700 border-red-200`} onClick={() => { setTiles(removeTile(tiles, picked)); setNote(""); }}>{s.map.remove}</button>
-              </div>
-            )}
-          </>
+      <div className="mt-3 min-h-[3.25rem]">
+        {current ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm font-medium text-gray-900 me-1">{fill(s.map.picked, { machine: ltr(current.label) })}</span>
+            <span className="inline-flex gap-1" dir="ltr">
+              <button type="button" className={small} onClick={() => nudge(-1, 0)} aria-label={s.map.left} title={s.map.left}><ArrowLeft size={16} /></button>
+              <button type="button" className={small} onClick={() => nudge(0, -1)} aria-label={s.map.up} title={s.map.up}><ArrowUp size={16} /></button>
+              <button type="button" className={small} onClick={() => nudge(0, 1)} aria-label={s.map.down} title={s.map.down}><ArrowDown size={16} /></button>
+              <button type="button" className={small} onClick={() => nudge(1, 0)} aria-label={s.map.right} title={s.map.right}><ArrowRight size={16} /></button>
+            </span>
+            <button type="button" className={small} onClick={() => resize(1, 0)}>{s.map.wider}</button>
+            <button type="button" className={small} disabled={current.w <= MAP_TILE.minW} onClick={() => resize(-1, 0)}>{s.map.narrower}</button>
+            <button type="button" className={small} onClick={() => resize(0, 1)}>{s.map.taller}</button>
+            <button type="button" className={small} disabled={current.h <= MAP_TILE.minH} onClick={() => resize(0, -1)}>{s.map.shorter}</button>
+            <button type="button" className={`${small} text-red-700 border-red-200`} onClick={() => { setTiles(removeTile(tiles, current.label)); setPicked(""); setNote(""); }}>{s.map.remove}</button>
+          </div>
         ) : null}
         {note && <p className="text-sm text-amber-700 mt-2" role="status">{note}</p>}
       </div>
@@ -835,11 +1041,30 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
         <Btn variant="ghost" onClick={onClose} disabled={busy}>{cancel}</Btn>
         <Btn onClick={save} disabled={busy || tiles.length === 0}>{busy ? s.saving : s.map.save}</Btn>
       </div>
-    </Modal>
+    </div>
   );
 }
 
 /* --------------------------- «الراكب الآن» + the machine --------------------------- */
+
+/** Pick ONE colour out of a few (or out of the whole list when `from` is not given). */
+function OneColour({ from, value, onChange, isAr, s, none }: {
+  from?: readonly string[]; value: string; onChange: (key: string) => void; isAr: boolean; s: Strings; none?: string;
+}) {
+  const keys = from ?? COLOURS.map((c) => c.key);
+  return (
+    <div className="flex flex-wrap gap-2">
+      {keys.map((k) => (
+        <button key={k} type="button" aria-pressed={value === k} className={chipCls(value === k)} onClick={() => onChange(k)}>
+          <Swatch colour={k} />{colourName(k, isAr, s)}
+        </button>
+      ))}
+      {none && (
+        <button type="button" aria-pressed={value === ""} className={chipCls(value === "")} onClick={() => onChange("")}>{none}</button>
+      )}
+    </div>
+  );
+}
 
 function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
   machine: PlanMachine; orders: PlanOrder[]; isAr: boolean; s: Strings; cancel: string;
@@ -853,10 +1078,16 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
   const [orderId, setOrderId] = useState(here?.id ?? "");
   const [product, setProduct] = useState(now.products.join(" | "));
   const [colours, setColours] = useState<string[]>(now.colours);
+  const [colourNow, setColourNow] = useState(now.colourNow);
+  const [jobTouched, setJobTouched] = useState(false);
   const [transparentOnly, setTransparentOnly] = useState(machine.transparentOnly);
   const [bigMachine, setBigMachine] = useState(machine.bigMachine);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // A different job is a different set of colours: the standing job's must
+  // not ride along and be saved as the new one's.
+  const newJob = (next: string[]) => { setJobTouched(true); setColours(next); setColourNow(""); };
 
   const picked = choices.find((o) => o.id === orderId) ?? null;
   const products = mode === "order"
@@ -864,21 +1095,36 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
     : product.split("|").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const order = mode === "order" && picked && !picked.code.startsWith("#") ? picked.code : "";
   const hereCode = here && !here.code.startsWith("#") ? here.code : "";
-  const jobChanged = products.length > 0 && (!sameList(products, now.products) || order !== hereCode);
-  // Colours are saved when they were changed — or when a guess is being confirmed.
-  const coloursChanged = colours.length > 0 && (!sameList(colours, now.colours) || now.coloursGuessed);
+  // An order names ONE product; on a machine running a pair that is not a
+  // change of job, and must not append a row on every save.
+  const jobChanged = products.length > 0 && (order !== hereCode || (mode === "order"
+    ? !now.products.some((x) => fold(x) === fold(products[0]))
+    : !sameList(products, now.products)));
+  // Colours are saved when they were changed — or when a guess is being
+  // confirmed (the form says it is a guess, below).
+  const coloursChanged = colours.length > 0 && (jobTouched || !sameList(colours, now.colours) || now.coloursGuessed);
+  // The colour in the barrel: the only one there is, else the one tapped.
+  const nowKey = colours.length === 1 ? colours[0] : colours.includes(colourNow) ? colourNow : "";
+  const nowChanged = nowKey !== (jobTouched ? "" : now.colourNow);
+  // What the engineer took OUT of the product box came off the machine.
+  const removed = mode === "product" ? now.products.filter((x) => !products.some((y) => fold(y) === fold(x))) : [];
   const settings: Record<string, boolean> = {};
   if (transparentOnly !== machine.transparentOnly) settings.transparentOnly = transparentOnly;
   if (bigMachine !== machine.bigMachine) settings.bigMachine = bigMachine;
   const settingsChanged = Object.keys(settings).length > 0;
 
   async function save() {
+    if (busy) return;
     // Where the colours live: on the work order when there is one (the order
-    // decides the colour — the owner's rule), else with the mould on the machine.
+    // decides the colour — the owner's rule), else with the mould on the
+    // machine. The colour in the barrel is always the machine's own row.
     const items: { kind: string; name: string; values: Record<string, unknown> }[] = [];
     if (settingsChanged) items.push({ kind: "machine", name: machine.label, values: settings });
     if (order && coloursChanged) items.push({ kind: "order", name: order, values: { colour: colours } });
-    const needRow = products.length > 0 && (jobChanged || (!order && coloursChanged));
+    // …and a barrel colour shown as selected beside a colour list that changed
+    // is saved with it (it was derived, not stored, while there was one colour).
+    const needRow = products.length > 0
+      && (jobChanged || (!order && coloursChanged) || nowChanged || (!!nowKey && colours.length > 1 && coloursChanged));
     if (products.length === 0 && !settingsChanged) { setError(s.errors.no_product); return; }
     if (items.length === 0 && !needRow) { onClose(); return; }
 
@@ -889,8 +1135,18 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
     }
     if (needRow) {
       const r = await post({
-        action: "mount", baseline: true, machine: machine.label, order, products, colours,
-        fromProducts: [], fromColours: [], reasons: "تسجيل الراكب الحالي",
+        action: "mount", baseline: true, machine: machine.label, order,
+        // An order names ONE product; a machine recorded as a pair stays a pair.
+        // …and while the mixed-shift question is open, an untouched box (it is
+        // pre-filled with BOTH moulds) must not answer it as "both stand".
+        products: mode === "order" && !jobChanged && !now.mixedShift
+          ? [products[0], ...now.products.filter((x) => fold(x) !== fold(products[0]))]
+          : mode === "product" && now.mixedShift && sameList(products, now.products) ? products.slice(0, 1)
+          : products,
+        colours, colourNow: nowKey,
+        // A «لا» already given about this mould is kept by a note about its colours.
+        noOrder: !order && now.noOrder && !jobChanged,
+        fromProducts: removed, fromColours: [],
       });
       if (!r.ok) { setBusy(false); setError(errorText(s, r.reason)); return; }
     }
@@ -907,8 +1163,14 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
     <Modal open title={fill(s.machineForm.title, { machine: ltr(machine.label) })} onClose={onClose} isAr={isAr}>
       <p className="text-sm font-medium text-gray-900 mb-2">{s.machineForm.what}</p>
       <div className="flex gap-2 mb-3">
-        <button type="button" className={`flex-1 ${chipCls(mode === "order")}`} aria-pressed={mode === "order"} onClick={() => setMode("order")}>{s.machineForm.order}</button>
-        <button type="button" className={`flex-1 ${chipCls(mode === "product")}`} aria-pressed={mode === "product"} onClick={() => setMode("product")}>{s.machineForm.noOrder}</button>
+        <button type="button" className={`flex-1 ${chipCls(mode === "order")}`} aria-pressed={mode === "order"}
+          onClick={() => { if (mode !== "order") { setMode("order"); newJob(picked ? picked.colours.filter((c) => c !== ANY_COLOUR) : []); } }}>
+          {s.machineForm.order}
+        </button>
+        <button type="button" className={`flex-1 ${chipCls(mode === "product")}`} aria-pressed={mode === "product"}
+          onClick={() => { if (mode !== "product") { setMode("product"); newJob([]); } }}>
+          {s.machineForm.noOrder}
+        </button>
       </div>
       {mode === "order" ? (
         <select
@@ -916,7 +1178,7 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
           onChange={(e) => {
             setOrderId(e.target.value);
             const o = choices.find((x) => x.id === e.target.value);
-            if (o && o.colours.length > 0) setColours(o.colours.filter((c) => c !== ANY_COLOUR));
+            newJob(o ? o.colours.filter((c) => c !== ANY_COLOUR) : []);
           }}
         >
           <option value="">—</option>
@@ -925,20 +1187,36 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
       ) : (
         <>
           <input className={inputCls} value={product} aria-label={s.machineForm.product} placeholder={s.machineForm.product}
-            maxLength={300} onChange={(e) => setProduct(e.target.value)} />
+            maxLength={300}
+            // Correcting a name must not wipe the colours tapped a moment ago
+            // (they sit under the keyboard on a phone); an EMPTIED box is a new job.
+            onChange={(e) => { setProduct(e.target.value); if (e.target.value.trim() === "" && !jobTouched) newJob([]); }} />
           <p className="text-xs text-gray-400 mt-1">{s.machineForm.productHint}</p>
         </>
       )}
 
       <p className="text-sm font-medium text-gray-900 mt-4">{s.machineForm.colour}</p>
       <p className="text-xs text-gray-500 mb-2">{s.colours.many}</p>
-      <ColourPicker value={colours} onChange={setColours} isAr={isAr} s={s} />
+      {/* A guess left pressed and saved becomes the answer — the standing job's, or the picked order's. */}
+      {(jobTouched
+        ? mode === "order" && picked?.colourSource === "guess" && sameList(colours, picked.colours.filter((c) => c !== ANY_COLOUR))
+        : now.coloursGuessed) && colours.length > 0 && <p className="text-sm text-amber-700 mb-2">{s.confirm.colourGuess}</p>}
+      <ColourPicker value={colours} onChange={(next) => { setColours(next); if (!next.includes(colourNow)) setColourNow(""); }} isAr={isAr} s={s} />
+
+      {colours.length > 1 && (
+        <>
+          <p className="text-sm font-medium text-gray-900 mt-4">{s.machineForm.colourNow}</p>
+          <p className="text-xs text-gray-500 mb-2">{s.machineForm.colourNowHint}</p>
+          <OneColour from={colours} value={nowKey} onChange={setColourNow} isAr={isAr} s={s} none={s.confirm.barrelUnknown} />
+        </>
+      )}
 
       <p className="text-sm font-medium text-gray-900 mt-5 mb-1">{s.machineForm.settings}</p>
       {toggle(s.machineForm.transparentOnly, transparentOnly, setTransparentOnly)}
       {toggle(s.machineForm.bigMachine, bigMachine, setBigMachine)}
 
-      {error && <p className="text-sm text-red-700 mt-3" role="alert">{error}</p>}
+      <p className="text-xs text-gray-500 mt-3">{s.machineForm.onlyRecords}</p>
+      {error && <p className="text-sm text-red-700 mt-2" role="alert">{error}</p>}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Btn variant="ghost" onClick={onClose} disabled={busy}>{cancel}</Btn>
         <Btn onClick={save} disabled={busy}>{busy ? s.saving : s.machineForm.save}</Btn>
@@ -957,25 +1235,35 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
   const [fits, setFits] = useState<string[]>(order.fits ?? []);
   const [workers, setWorkers] = useState<number | null>(order.workers);
   const [oilCores, setOilCores] = useState<boolean | null>(order.oilCores);
+  const [hotRunner, setHotRunner] = useState<boolean | null>(order.hotRunner);
   const [missing, setMissing] = useState<MissingKey[] | null>(order.missing);
   const [keyClient, setKeyClient] = useState(order.keyClient);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The answers about THIS order are keyed on its code; a row with no code
+  // has nothing to key them on, and saying so beats dropping them silently.
+  const noCode = order.code.startsWith("#");
 
   async function save() {
+    if (busy) return;
     const orderValues: Record<string, unknown> = {};
     // A guess that is left selected and saved becomes the answer.
     if (colours.length > 0 && (order.colourSource !== "answer" || !sameList(colours, order.colours))) orderValues.colour = colours;
     if (missing !== null && (order.missing === null || !sameList(missing, order.missing))) orderValues.missing = missing;
     const moldValues: Record<string, unknown> = {};
-    if (fits.length > 0 && !sameList(fits, order.fits ?? [])) moldValues.fits = fits;
+    // An empty list is sent too: un-tapping every machine takes the answer back.
+    if (!sameList(fits, order.fits ?? [])) moldValues.fits = fits;
     if (workers !== null && workers !== order.workers) moldValues.workers = workers;
     if (oilCores !== null && oilCores !== order.oilCores) moldValues.oilCores = oilCores;
+    if (hotRunner !== null && hotRunner !== order.hotRunner) moldValues.hotRunner = hotRunner;
 
     const items: { kind: string; name: string; values: Record<string, unknown> }[] = [];
-    if (Object.keys(orderValues).length > 0 && !order.code.startsWith("#")) items.push({ kind: "order", name: order.code, values: orderValues });
+    if (Object.keys(orderValues).length > 0 && !noCode) items.push({ kind: "order", name: order.code, values: orderValues });
     if (Object.keys(moldValues).length > 0) items.push({ kind: "mold", name: order.product, values: moldValues });
     if (canSetKeyClient && order.client && keyClient !== order.keyClient) items.push({ kind: "client", name: order.client, values: { keyClient } });
+    // An answered colour cannot be taken back to nothing: say so rather than
+    // close as if the empty picker had been saved.
+    if (!noCode && colours.length === 0 && order.colourSource === "answer") { setError(s.confirm.colourNeeded); return; }
     if (items.length === 0) { onClose(); return; }
 
     setBusy(true); setError("");
@@ -985,11 +1273,25 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
   }
 
   const q = "text-sm font-medium text-gray-900 mt-5 mb-2 first:mt-0";
+  const yesNoRow = (value: boolean | null, set: (v: boolean) => void) => (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" aria-pressed={value === true} className={chipCls(value === true)} onClick={() => set(true)}>{s.orderForm.yes}</button>
+      <button type="button" aria-pressed={value === false} className={chipCls(value === false)} onClick={() => set(false)}>{s.orderForm.no}</button>
+    </div>
+  );
   return (
     <Modal open title={fill(s.orderForm.title, { product: order.product })} onClose={onClose} isAr={isAr}>
-      <p className={q}>{s.orderForm.colour}</p>
-      <p className="text-xs text-gray-500 -mt-1 mb-2">{s.colours.many}</p>
-      <ColourPicker value={colours} onChange={setColours} isAr={isAr} s={s} allowAny />
+      {noCode ? (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{s.orderForm.noCode}</p>
+      ) : (
+        <>
+          <p className={q}>{s.orderForm.colour}</p>
+          <p className="text-xs text-gray-500 -mt-1 mb-2">{s.colours.many}</p>
+          {/* A guess left pressed and saved becomes the answer — so it is named. */}
+          {order.colourSource === "guess" && sameList(colours, order.colours) && <p className="text-sm text-amber-700 mb-2">{s.confirm.colourGuess}</p>}
+          <ColourPicker value={colours} onChange={setColours} isAr={isAr} s={s} allowAny />
+        </>
+      )}
 
       <p className={q}>{s.orderForm.fits}</p>
       {order.fitsHintText && <p className="text-xs text-gray-500 -mt-1 mb-2">{fill(s.orderForm.fitsHint, { t: order.fitsHintText })}</p>}
@@ -1013,27 +1315,31 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
       </div>
 
       <p className={q}>{s.orderForm.oilCores}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={oilCores === true} className={chipCls(oilCores === true)} onClick={() => setOilCores(true)}>{s.orderForm.yes}</button>
-        <button type="button" aria-pressed={oilCores === false} className={chipCls(oilCores === false)} onClick={() => setOilCores(false)}>{s.orderForm.no}</button>
-      </div>
+      {yesNoRow(oilCores, setOilCores)}
 
-      <p className={q}>{s.orderForm.missing}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={missing !== null && missing.length === 0} className={chipCls(missing !== null && missing.length === 0, "green")}
-          onClick={() => setMissing([])}>
-          {s.orderForm.nothingMissing}
-        </button>
-        {MISSING_ITEMS.map((it) => {
-          const on = !!missing && missing.includes(it.key);
-          return (
-            <button key={it.key} type="button" aria-pressed={on} className={chipCls(on, "red")}
-              onClick={() => setMissing(on ? (missing ?? []).filter((k) => k !== it.key) : [...(missing ?? []), it.key])}>
-              {isAr ? it.ar : it.en}
+      <p className={q}>{s.orderForm.hotRunner}</p>
+      {yesNoRow(hotRunner, setHotRunner)}
+
+      {!noCode && (
+        <>
+          <p className={q}>{s.orderForm.missing}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" aria-pressed={missing !== null && missing.length === 0} className={chipCls(missing !== null && missing.length === 0, "green")}
+              onClick={() => setMissing([])}>
+              {s.orderForm.nothingMissing}
             </button>
-          );
-        })}
-      </div>
+            {MISSING_ITEMS.map((it) => {
+              const on = !!missing && missing.includes(it.key);
+              return (
+                <button key={it.key} type="button" aria-pressed={on} className={chipCls(on, "red")}
+                  onClick={() => setMissing(on ? (missing ?? []).filter((k) => k !== it.key) : [...(missing ?? []), it.key])}>
+                  {isAr ? it.ar : it.en}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {order.client && (
         <label className={`flex items-center gap-3 min-h-11 text-sm mt-5 ${canSetKeyClient ? "text-gray-800 cursor-pointer" : "text-gray-500"}`}>
@@ -1056,42 +1362,56 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
 
 /* --------------------------------- «ركّب دي» --------------------------------- */
 
-function ConfirmForm({ machine, pick, night, isAr, s, cancel, minutes, reasons, onClose, onDone }: {
-  machine: PlanMachine; pick: Suggestion; night: boolean; isAr: boolean; s: Strings; cancel: string;
+function ConfirmForm({ machine, pick, night, canWrite, isAr, s, cancel, minutes, reasons, onClose, onDone }: {
+  machine: PlanMachine; pick: Suggestion; night: boolean; canWrite: boolean; isAr: boolean; s: Strings; cancel: string;
   minutes: (min: number) => string; reasons: string;
   onClose: () => void; onDone: (r: MountResult) => Promise<void>;
 }) {
   const o = pick.order;
   const [colours, setColours] = useState<string[]>(o.colours);
   const [start, setStart] = useState(pick.startColour);
+  const [barrelNow, setBarrelNow] = useState("");
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const startColour = colours.includes(start) ? start : colours[0] ?? "";
+  // Something REAL goes into the barrel: «أي لون» is an order's indifference,
+  // not a colour, so with it (or with no colour at all) the engineer says
+  // which one he is starting on.
+  const real = colours.filter((c) => c !== ANY_COLOUR);
+  // (`start` is seeded with the suggestion; with the picker EMPTIED it must
+  // not survive — the mount would record a colour the engineer just removed.)
+  const startColour = real.length === 1 ? real[0] : real.includes(start) || (real.length === 0 && colours.length > 0 && start) ? start : "";
+  // What is in the machine now: known, or asked here, or every colour its job
+  // runs in — and then the estimate is the worst of them. A machine kept for
+  // transparent with nothing recorded is taken to hold transparent.
+  const barrel = barrelOf(machine);
+  const fromColours = barrelNow && barrel.includes(barrelNow) ? [barrelNow] : barrel;
   const standing = machine.now.products.find((x) => x === o.product) ?? machine.now.products[0] ?? "";
-  // The estimate follows the colour that will actually start.
-  const est = useMemo(() => estimateChange(
-    { product: standing, colour: machine.now.colourNow || darkestColour(machine.now.colours), material: machine.now.material },
+  const est = useMemo(() => estimateFrom(
+    { product: standing, colours: fromColours, material: machine.now.material },
     { product: o.product, colour: startColour, material: o.material },
-    { bigMachine: machine.bigMachine, oilCores: o.oilCores },
-  ), [machine, o, standing, startColour]);
-  const allTicked = CHECKS.every((k) => ticks[k]);
+    { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [machine, o, standing, startColour, fromColours.join("|")]);
+  const checks: readonly string[] = o.hotRunner ? [...CHECKS, "hotRunner"] : CHECKS;
+  const allTicked = checks.every((k) => ticks[k]);
   const ready = allTicked && !!startColour;
+  const interrupting = machine.state === "running" && !o.keyClient && !o.queuedBehind;
 
   async function go() {
-    if (!ready) return;
+    if (!ready || busy) return;
     setBusy(true); setError("");
-    const real = !o.code.startsWith("#");
-    // Colours picked here for an order that had none are the order's answer too.
-    if (real && (o.colourSource !== "answer" || !sameList(colours, o.colours))) {
+    const hasCode = !o.code.startsWith("#");
+    // Colours confirmed here are the order's answer: a guess stops being one.
+    if (hasCode && colours.length > 0 && (o.colourSource !== "answer" || !sameList(colours, o.colours))) {
       const a = await post({ action: "answers", items: [{ kind: "order", name: o.code, values: { colour: colours } }] });
       if (!a.ok) { setBusy(false); setError(errorText(s, a.reason)); return; }
     }
     const r = await post({
-      action: "mount", machine: machine.label, order: real ? o.code : "",
-      products: [o.product], colours: [startColour],
-      fromProducts: machine.now.products, fromColours: machine.now.colours,
+      action: "mount", machine: machine.label, order: hasCode ? o.code : "",
+      products: [o.product], colours: real.length > 0 ? real : [startColour], colourNow: startColour,
+      fromProducts: machine.now.products, fromColours,
       minutes: est.totalMin, reasons,
     });
     if (!r.ok) { setBusy(false); setError(errorText(s, r.reason)); return; }
@@ -1105,7 +1425,7 @@ function ConfirmForm({ machine, pick, night, isAr, s, cancel, minutes, reasons, 
           <dt className="text-gray-500 shrink-0 w-16">{s.confirm.from}</dt>
           <dd className="text-gray-900 min-w-0 break-words">
             {machine.now.products.length > 0
-              ? <>{machine.now.products.join(" / ")} · <ColourTags colours={machine.now.colours} isAr={isAr} s={s} /></>
+              ? <>{machine.now.products.join(" / ")} · <ColourTags colours={machine.now.colours} isAr={isAr} s={s} guessed={machine.now.coloursGuessed} /></>
               : <span className="text-gray-400">{s.confirm.nothingOn}</span>}
           </dd>
         </div>
@@ -1117,31 +1437,40 @@ function ConfirmForm({ machine, pick, night, isAr, s, cancel, minutes, reasons, 
         </div>
       </dl>
 
-      {o.colours.length === 0 && (
+      {interrupting && (
+        <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.confirm.runningWarn}
+        </p>
+      )}
+
+      {/* The order's colours: asked when there are none, and shown for
+          confirming when they are only a guess — a guess is never written
+          down as the answer without the engineer having seen it. */}
+      {o.colourSource !== "answer" ? (
         <div className="mt-3">
-          <p className="text-sm text-amber-700 mb-2">{s.confirm.colourNeeded}</p>
+          <p className="text-sm text-amber-700 mb-2">{colours.length === 0 ? s.confirm.colourNeeded : s.confirm.colourGuess}</p>
           <ColourPicker value={colours} onChange={setColours} isAr={isAr} s={s} allowAny />
         </div>
+      ) : (
+        <p className="text-sm text-gray-700 mt-2"><ColourTags colours={colours} isAr={isAr} s={s} /></p>
       )}
-      {colours.length > 1 && (
+      {real.length !== 1 && colours.length > 0 && (
         <div className="mt-3">
-          <p className="text-sm font-medium text-gray-900 mb-2">{s.confirm.startColour}</p>
-          <div className="flex flex-wrap gap-2">
-            {colours.map((c) => (
-              <button key={c} type="button" aria-pressed={startColour === c} className={chipCls(startColour === c)} onClick={() => setStart(c)}>
-                <Swatch colour={c} />{colourName(c, isAr, s)}
-              </button>
-            ))}
-          </div>
+          <p className="text-sm font-medium text-gray-900 mb-2">{real.length === 0 ? s.confirm.startAny : s.confirm.startColour}</p>
+          <OneColour from={real.length === 0 ? undefined : real} value={startColour} onChange={setStart} isAr={isAr} s={s} />
         </div>
       )}
-      {colours.length === 1 && (
-        <p className="text-sm text-gray-700 mt-2"><ColourTags colours={colours} isAr={isAr} s={s} /></p>
+      {barrel.length > 1 && (
+        <div className="mt-3">
+          <p className="text-sm font-medium text-gray-900 mb-2">{s.confirm.barrelNow}</p>
+          <OneColour from={barrel} value={barrelNow} onChange={setBarrelNow} isAr={isAr} s={s} none={s.confirm.barrelUnknown} />
+        </div>
       )}
 
       <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 tabular-nums">
         <p>{s.rank.mould}: {est.sameMould ? s.rank.sameMould : `${s.approx} ${minutes(est.swapMin)}`}</p>
         <p>{s.rank.purge}: {s.approx} {minutes(est.purgeMin)}</p>
+        {est.hotRunnerMin > 0 && <p>{s.rank.hotRunner}: {s.approx} {minutes(est.hotRunnerMin)}</p>}
         {est.drying && (
           <p className="text-amber-700">
             {fill(s.chips.drying, { h: est.drying.minH === est.drying.maxH ? `${est.drying.minH}` : `${est.drying.minH}–${est.drying.maxH}` })}
@@ -1156,19 +1485,20 @@ function ConfirmForm({ machine, pick, night, isAr, s, cancel, minutes, reasons, 
       )}
 
       <p className="text-sm font-medium text-gray-900 mt-4 mb-1">{s.confirm.checklist}</p>
-      {CHECKS.map((k) => (
+      {checks.map((k) => (
         <label key={k} className="flex items-start gap-3 min-h-11 py-1.5 text-sm text-gray-800 cursor-pointer">
           <input type="checkbox" className="w-5 h-5 mt-0.5 shrink-0" checked={!!ticks[k]} onChange={(e) => setTicks({ ...ticks, [k]: e.target.checked })} />
-          {s.confirm.checks[k]}
+          {(s.confirm.checks as Record<string, string>)[k]}
         </label>
       ))}
 
       <p className="text-xs text-gray-500 mt-3">{s.confirm.writes}</p>
       {!ready && <p className="text-xs text-amber-700 mt-1">{!startColour ? s.confirm.colourNeeded : s.confirm.tickAll}</p>}
+      {!canWrite && <p className="text-xs text-amber-700 mt-1">{s.notLive}</p>}
       {error && <p className="text-sm text-red-700 mt-2" role="alert">{error}</p>}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Btn variant="ghost" onClick={onClose} disabled={busy}>{cancel}</Btn>
-        <Btn onClick={go} disabled={busy || !ready}>{busy ? s.saving : s.confirm.go}</Btn>
+        <Btn onClick={go} disabled={busy || !ready || !canWrite}>{busy ? s.saving : s.confirm.go}</Btn>
       </div>
     </Modal>
   );
