@@ -1415,6 +1415,101 @@ export function freeSpot(tiles: readonly MapTile[], w: number = MAP_TILE.w, h: n
 export const removeTile = (tiles: readonly MapTile[], label: string): MapTile[] =>
   tiles.filter((t) => machineKey(t.label) !== machineKey(label));
 
+/* ------------------------- the map, in the width there is ------------------------- */
+
+/**
+ * The floor is arranged once, on a 56-unit sheet — and read on a phone far
+ * more often than on a desk (owner, 2026-10-06: "see it on the phone clearly,
+ * while reading the product, seeing the colour and the machine drawing").
+ * The first landscape map kept the sheet 42rem wide and let a phone pan it:
+ * he arranged every machine into the third of the sheet he could see, and
+ * they came out tiny. Scaling a sheet down gives tiles nobody can read. So
+ * the sheet is where machines are PLACED, and the drawing follows the width:
+ *
+ *  - only the part of the sheet the machines stand on is drawn, so the floor
+ *    fills the width wherever on the sheet it was arranged;
+ *  - on a narrow screen an AISLE (a column no ordinary machine stands on, a
+ *    row nothing stands on) is drawn as a sliver — an empty column costs a
+ *    phone half a line of text;
+ *  - a unit is as wide as that allows, and never so narrow that the narrowest
+ *    machine cannot hold its drawing and its name (then, and only then, the
+ *    sheet is wider than the screen and pans);
+ *  - a unit is as TALL as a tile needs to be read: a drawing over three lines
+ *    of name on a phone, a drawing beside two lines on a desk.
+ *
+ * The ARRANGEMENT is never changed — only how big each unit is drawn.
+ */
+export const MAP_NARROW_PX = 640;
+/** The px a tile needs: with the drawing OVER the words, or BESIDE them. */
+export const MAP_READABLE = { stackedW: 80, stackedH: 116, sideW: 190, sideH: 72 } as const;
+const AISLE = 0.15;
+
+export type FloorFit = {
+  tiles: MapTile[];
+  /** How wide each unit column and how tall each unit row is drawn, in units
+   *  (1 = a full unit, AISLE = a sliver, 0 = not drawn). */
+  colFr: number[]; rowFr: number[];
+  /** One full unit, in px. */
+  unitW: number; unitH: number;
+  /** The sheet's width in px, and whether that is wider than the frame. */
+  width: number; pans: boolean;
+};
+
+const spanOf = (fr: readonly number[], from: number, size: number): number => {
+  let sum = 0;
+  for (let i = from - 1; i < from - 1 + size && i < fr.length; i++) sum += fr[i] ?? 0;
+  return sum;
+};
+/** A tile's drawn size in px. */
+export const tileWidthPx = (fit: FloorFit, t: MapTile): number => spanOf(fit.colFr, t.c, t.w) * fit.unitW;
+export const tileHeightPx = (fit: FloorFit, t: MapTile): number => spanOf(fit.rowFr, t.r, t.h) * fit.unitH;
+
+/**
+ * How to draw `tiles` in a frame `framePx` wide. `whole` = the editor: the
+ * full sheet, every unit the same and rather flat, always fitted to the frame
+ * — it is for placing machines, and shows only their codes.
+ */
+export function fitFloor(tiles: readonly MapTile[], framePx: number, o: { whole?: boolean } = {}): FloorFit {
+  const frame = Math.max(0, framePx);
+  if (o.whole || tiles.length === 0) {
+    const unitW = frame / MAP_COLS;
+    const rows = o.whole ? MAP_MAX_ROWS : 1;
+    return {
+      tiles: [...tiles], colFr: new Array<number>(MAP_COLS).fill(1), rowFr: new Array<number>(rows).fill(1),
+      unitW, unitH: Math.max(12, Math.round(unitW * 0.62)), width: frame, pans: false,
+    };
+  }
+  const narrow = frame < MAP_NARROW_PX;
+  const left = Math.min(...tiles.map((t) => t.c)), right = Math.max(...tiles.map((t) => t.c + t.w - 1));
+  const top = Math.min(...tiles.map((t) => t.r)), rows = mapRows(tiles);
+  // The machines' own span, at full size; on a narrow screen everything in it
+  // starts as a sliver and only what a machine stands on is drawn in full.
+  const colFr: number[] = new Array<number>(MAP_COLS).fill(0).map((_, i) => (i + 1 < left || i + 1 > right ? 0 : narrow ? AISLE : 1));
+  const rowFr: number[] = new Array<number>(rows).fill(0).map((_, i) => (i + 1 < top ? 0 : narrow ? AISLE : 1));
+  if (narrow) {
+    // A column is the floor's own when an ORDINARY machine stands on it; one
+    // that only a long press along the wall crosses is an aisle.
+    const widths = tiles.map((t) => t.w).sort((x, y) => x - y);
+    const ordinary = widths[Math.floor(widths.length / 2)] * 1.25;
+    for (const t of tiles) {
+      if (t.w <= ordinary) for (let c = t.c; c < t.c + t.w && c <= MAP_COLS; c++) colFr[c - 1] = 1;
+      for (let r = t.r; r < t.r + t.h && r <= rows; r++) rowFr[r - 1] = 1;
+    }
+  }
+  const total = colFr.reduce((x, y) => x + y, 0) || 1;
+  const probe = { tiles: [...tiles], colFr, rowFr, unitW: 1, unitH: 1, width: 0, pans: false };
+  const mw = Math.max(1, tiles.reduce((m, t) => Math.min(m, tileWidthPx(probe, t)), Infinity));
+  const mh = Math.max(1, tiles.reduce((m, t) => Math.min(m, tileHeightPx(probe, t)), Infinity));
+  const R = MAP_READABLE;
+  const unitW = Math.max(frame / total, R.stackedW / mw);
+  // Is even the narrowest machine wide enough for the drawing to sit BESIDE
+  // the words? Then the tiles may be flat; else they are drawn tall.
+  const need = mw * unitW >= R.sideW ? R.sideH : R.stackedH;
+  const unitH = Math.max(need / mh, unitW * 0.45);
+  const width = total * unitW;
+  return { tiles: [...tiles], colFr, rowFr, unitW, unitH, width, pans: width > frame + 0.5 };
+}
+
 /* ---------------------------------- shifts --------------------------------- */
 
 /**

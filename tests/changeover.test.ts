@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANY_COLOUR, BASELINE_REASON, CHANGEOVER_NUMBERS, FITS_UNKNOWN, MAP_COLS, MAP_MAX_ROWS, MAP_TILE, MISSING_ITEMS,
-  NOTHING_MISSING, freeSpot,
+  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE,
   answersFor, barrelColours, bestStart, colourFromMaterial, colourKey, colourRelation, colourToSheet,
   coloursFromSheet, coloursIn, coloursToSheet, dryingFor, estimateChange, estimateFrom, formatLayout, guessColour,
   isBaselineRow, isNightHour, isRecent, kindFromSheet, kindToSheet, latestRuns, listFromSheet, listToSheet,
@@ -1079,6 +1079,72 @@ test("a machine coming onto the map takes the first free spot; a full sheet says
   }
   assert.equal(validLayout(tiles), true);
   assert.equal(freeSpot([{ label: "ALL", c: 1, r: 1, w: MAP_COLS, h: MAP_MAX_ROWS }]), null);
+});
+
+// The owner's own arrangement of 2026-10-06, as he saved it from his phone:
+// every machine in the left 33 units of the 56-unit sheet (all he could see of
+// a sheet that panned sideways), PQ 1 nine units wide.
+const FLOOR_PHONE = "grid 56x32 ; PQ 1 — 550@1,9,9,5 ; PQ 13 — 150@10,1,11,4 ; PQ 11 — 180@10,5,11,4 ; PQ 9 — 140@10,9,11,4 ; "
+  + "PQ 14 — 180@24,1,10,4 ; PQ 12 — 180@24,5,10,4 ; PQ 10 — 150@24,9,10,4 ; PQ 2 — 280@2,28,15,4 ; PQ 3 — 280@19,28,15,4";
+
+test("on a phone the floor fills the width, wherever on the sheet it was arranged — nothing pans, every tile is readable", () => {
+  const tiles = parseLayout(FLOOR_PHONE);
+  const fit = fitFloor(tiles, 342);
+  assert.equal(fit.pans, false, "the page never asks him to pan sideways for this floor");
+  assert.ok(Math.abs(fit.width - 342) < 0.01);
+  // The empty right part of the sheet and its empty top are not drawn at all;
+  // the three empty units between the two columns of presses are a sliver.
+  assert.equal(fit.colFr[33], 0);
+  assert.equal(fit.colFr[55], 0);
+  assert.ok(fit.colFr[20] > 0 && fit.colFr[20] < 0.5);
+  assert.equal(fit.colFr[0], 1);
+  // Rows 25–27 hold nothing: slivers too.
+  assert.ok(fit.rowFr[24] > 0 && fit.rowFr[24] < 0.5);
+  for (const t of tiles) {
+    assert.ok(tileWidthPx(fit, t) >= 96, `${t.label} is ${Math.round(tileWidthPx(fit, t))}px wide`);
+    assert.ok(tileHeightPx(fit, t) >= MAP_READABLE.stackedH - 0.01, `${t.label} is ${Math.round(tileHeightPx(fit, t))}px tall`);
+  }
+  // It was 186 × 42 px per machine on the sheet that panned.
+  const pq13 = tiles.find((t) => t.label === "PQ 13 — 150")!;
+  assert.ok(tileWidthPx(fit, pq13) > 115 && tileHeightPx(fit, pq13) > 110);
+});
+
+test("on a desk the same floor is drawn wide and flat — the drawing beside the words — and still fills the width", () => {
+  const tiles = parseLayout(FLOOR_PHONE);
+  const fit = fitFloor(tiles, 761);
+  assert.equal(fit.pans, false);
+  assert.equal(fit.colFr[20], 1, "no slivers on a wide screen: the aisles are drawn as arranged");
+  assert.equal(fit.colFr[40], 0, "…but the empty edge of the sheet still is not");
+  const pq13 = tiles.find((t) => t.label === "PQ 13 — 150")!;
+  assert.ok(tileWidthPx(fit, pq13) >= 240);
+  assert.ok(Math.abs(tileHeightPx(fit, pq13) - MAP_READABLE.sideH) < 0.01);
+  // The whole floor is wider than it is tall.
+  const height = fit.rowFr.reduce((x, y) => x + y, 0) * fit.unitH;
+  assert.ok(fit.width > height);
+});
+
+test("a machine too narrow to read makes the sheet pan — and only then", () => {
+  // Six presses side by side, each 9 units: 58px each on a phone.
+  const row = Array.from({ length: 6 }, (_, i) => ({ label: `P — ${i + 1}`, c: 1 + i * 9, r: 1, w: 9, h: 4 }));
+  const fit = fitFloor(row, 342);
+  assert.equal(fit.pans, true);
+  assert.ok(Math.abs(tileWidthPx(fit, row[0]) - MAP_READABLE.stackedW) < 0.01, "never narrower than a tile that can be read");
+  assert.equal(fitFloor(row.slice(0, 3), 342).pans, false);
+});
+
+test("the editor always shows the whole sheet, fitted, every unit the same", () => {
+  const tiles = parseLayout(FLOOR_PHONE);
+  for (const frame of [324, 735]) {
+    const fit = fitFloor(tiles, frame, { whole: true });
+    assert.equal(fit.pans, false);
+    assert.deepEqual([fit.colFr.length, fit.rowFr.length], [MAP_COLS, MAP_MAX_ROWS]);
+    assert.ok(fit.colFr.every((f) => f === 1) && fit.rowFr.every((f) => f === 1));
+    assert.ok(Math.abs(fit.unitW * MAP_COLS - frame) < 0.01);
+    assert.ok(fit.unitH >= 12);
+  }
+  // Before the frame is measured, and with nothing placed, nothing blows up.
+  assert.equal(fitFloor([], 0).width, 0);
+  assert.equal(fitFloor(tiles, 0, { whole: true }).unitW, 0);
 });
 
 test("a layout with two machines on one square, or one machine twice, is not valid", () => {

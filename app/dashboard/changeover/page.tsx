@@ -29,8 +29,8 @@ import { ageLabel, fill, fmtInt } from "@/lib/format";
 import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
-  barrelOf, colourDef, colourKey, estimateFrom, fold, freeSpot, machineKey, mapRows, placeTile, rankFor, removeTile,
-  splitMinutes,
+  barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineKey, placeTile, rankFor, removeTile,
+  splitMinutes, tileHeightPx, tileWidthPx, type FloorFit,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
   type Suggestion,
 } from "@/lib/changeover";
@@ -154,8 +154,8 @@ function GlyphDefs() {
  * and the lamp says whether it is running. Decorative: the tile's own text
  * says all of it again in words.
  */
-function MachineGlyph({ colours, now, tonnage, state, className }: {
-  colours: readonly string[]; now: string; tonnage: string; state: MachineState; className?: string;
+function MachineGlyph({ colours, now, tonnage, state, className, style }: {
+  colours: readonly string[]; now: string; tonnage: string; state: MachineState; className?: string; style?: React.CSSProperties;
 }) {
   const fillOf = (c: string) => colourDef(c)?.swatch ?? "url(#co-hatch)";
   const stripes = colours.length > 0 ? colours.slice(0, 4) : [""];
@@ -164,7 +164,7 @@ function MachineGlyph({ colours, now, tonnage, state, className }: {
   // Compact on purpose: a narrower drawing scales up larger inside a phone's
   // 88px tile, and the tonnage on the clamp stays readable there.
   return (
-    <svg viewBox="0 0 100 38" preserveAspectRatio="xMidYMid meet" className={className ?? "block w-full flex-1 min-h-0 my-0.5"} aria-hidden="true">
+    <svg viewBox="0 0 100 38" preserveAspectRatio="xMidYMid meet" className={className ?? "block w-full flex-1 min-h-0 my-0.5"} style={style} aria-hidden="true">
       {/* the bed, on two feet */}
       <rect x="2" y="28" width="96" height="5" rx="1.5" fill="#94a3b8" />
       <rect x="8" y="33" width="9" height="3" fill="#64748b" />
@@ -196,33 +196,49 @@ function MachineGlyph({ colours, now, tonnage, state, className }: {
 }
 
 /**
- * The floor: a LANDSCAPE sheet of square units (lib/changeover.ts MAP_COLS ×
- * rows), as wide as the page. On a phone it keeps a readable width and is
- * panned sideways inside its own frame — the page itself never scrolls
- * sideways. Text inside scales with the sheet (container-query units).
+ * The floor, drawn for the width it is given (lib/changeover.ts fitFloor): on
+ * a desk the sheet as arranged; on a phone the same arrangement with the
+ * empty aisles squeezed and the units drawn taller, so every machine keeps
+ * its drawing, its colours and its name — and the page never pans sideways
+ * unless a machine would otherwise be too narrow to read. `whole` is the
+ * editor: the full sheet, unsqueezed.
  */
-function Floor({ rows, fine, sheetRef, onSheetClick, children }: {
-  rows: number; fine?: boolean; sheetRef?: React.Ref<HTMLDivElement>;
-  onSheetClick?: (e: React.MouseEvent<HTMLDivElement>) => void; children: React.ReactNode;
+function Floor({ tiles, whole, sheetRef, onSheetClick, children }: {
+  tiles: readonly MapTile[]; whole?: boolean; sheetRef?: React.RefObject<HTMLDivElement | null>;
+  onSheetClick?: (e: React.MouseEvent<HTMLDivElement>) => void; children: (fit: FloorFit) => React.ReactNode;
 }) {
-  const step = fine ? 1 : 4;
+  // The frame is measured, not guessed: the same page is a phone held either
+  // way, a tablet and a desk.
+  const [frame, setFrame] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!frame) return;
+    const read = () => setWidth(frame.clientWidth);
+    read();
+    const watch = new ResizeObserver(read);
+    watch.observe(frame);
+    return () => watch.disconnect();
+  }, [frame]);
+  const fit = useMemo(() => fitFloor(tiles, width, { whole }), [tiles, width, whole]);
+  const step = whole ? 1 : 4;
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-300" dir="ltr">
-      <div
-        ref={sheetRef} onClick={onSheetClick}
-        className="relative grid min-w-[42rem] [container-type:inline-size]"
-        style={{
-          gridTemplateColumns: `repeat(${MAP_COLS}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-          aspectRatio: `${MAP_COLS} / ${rows}`, minHeight: 0,
-          // The shop floor: a faint tiled ground under the machines.
-          backgroundColor: "#eef2f6",
-          backgroundImage: "linear-gradient(#dde3ea 1px, transparent 1px), linear-gradient(90deg, #dde3ea 1px, transparent 1px)",
-          backgroundSize: `calc(100% / ${MAP_COLS / step}) calc(100% / ${rows / step})`,
-        }}
-      >
-        {children}
-      </div>
+    <div ref={setFrame} className="overflow-x-auto rounded-2xl border border-slate-300" dir="ltr">
+      {width > 0 && (
+        <div
+          ref={sheetRef} onClick={onSheetClick} className="relative grid"
+          style={{
+            width: fit.pans ? fit.width : "100%",
+            gridTemplateColumns: fit.colFr.map((f) => `minmax(0, ${f}fr)`).join(" "),
+            gridTemplateRows: fit.rowFr.map((f) => `${f * fit.unitH}px`).join(" "),
+            // The shop floor: a faint tiled ground under the machines.
+            backgroundColor: "#eef2f6",
+            backgroundImage: "linear-gradient(#dde3ea 1px, transparent 1px), linear-gradient(90deg, #dde3ea 1px, transparent 1px)",
+            backgroundSize: `${fit.unitW * step}px ${fit.unitH * step}px`,
+          }}
+        >
+          {children(fit)}
+        </div>
+      )}
     </div>
   );
 }
@@ -462,41 +478,80 @@ export default function ChangeoverPage() {
   const showMap = view === "map" && layout.length > 0;
 
   /** A machine as one square of the floor. */
-  const tile = (m: PlanMachine, t: MapTile) => {
+  const tile = (m: PlanMachine, t: MapTile, fit: FloorFit) => {
     const isSel = m.label === selected;
-    // A wide, short tile (the two long presses along the wall) puts the
-    // drawing beside the words instead of over them.
-    const wide = t.w >= t.h * 2.5;
+    // What the tile really has, in px (3px of air, 2px of border and 3px of padding a side).
+    const w = tileWidthPx(fit, t) - 16, h = tileHeightPx(fit, t) - 16;
+    // A flat tile — or one too low to stack a drawing over a name: the drawing
+    // sits BESIDE the words. Else it sits over them.
+    const side = w >= h * 2.6 || (h < 84 && w >= 150);
+    const roomy = w >= 150;
+    const nameSize = roomy ? 13 : 12, line = Math.round(nameSize * 1.17);
+    const colours = m.now.colours.slice(0, 5);
+    // Stacked, the colour dots stand in a column BESIDE the drawing — a row of
+    // their own would cost the name its second line.
+    const dotsW = colours.length > 0 ? 14 : 0;
+    const headH = roomy ? 18 : 16;
+    // Stacked: the drawing takes what the name does not need — three lines of
+    // name in a narrow tile, two in a roomy one.
+    const glyphH = side ? Math.max(24, h - 4)
+      : Math.max(22, Math.min((w - dotsW) * 0.38, h - headH - (roomy ? 2 : 3) * line - 6));
+    const textH = side ? h - headH : h - headH - glyphH - 4;
+    const lines = Math.max(1, Math.floor(textH / line));
+
+    // The job's colours as dots — the one in the barrel now is ringed. Beside
+    // the drawing when it is stacked; in the head line when it is not.
+    const dots = colours.length > 0 && (
+      <span className={side ? "flex items-center gap-1 min-w-0 flex-1 px-1" : "flex flex-col items-center justify-center gap-[3px] shrink-0"} style={side ? undefined : { width: dotsW }}>
+        {colours.map((c) => (
+          <span key={c} className={`inline-flex rounded-full ${c === m.now.colourNow && colours.length > 1 ? "ring-2 ring-offset-1 ring-gray-700" : ""}`}>
+            <Swatch colour={c} size="w-2.5 h-2.5" />
+          </span>
+        ))}
+        {m.now.coloursGuessed && <span className="text-[10px] leading-none text-amber-700">؟</span>}
+      </span>
+    );
     const head = (
-      <span className="flex items-center justify-between gap-1">
-        <span className="font-bold text-[length:clamp(11px,1.25cqw,15px)] leading-none text-gray-900 whitespace-nowrap">{codeOf(m.label)}</span>
-        <span className={`text-[length:clamp(9px,0.95cqw,12px)] leading-none font-medium whitespace-nowrap ${STATE_WORD[m.state]}`}>{s.states[m.state]}</span>
+      <span className="flex items-center justify-between gap-1" style={{ height: headH }}>
+        <span className={`font-bold leading-none text-gray-900 whitespace-nowrap ${roomy ? "text-[15px]" : "text-[13px]"}`}>{codeOf(m.label)}</span>
+        {side && dots}
+        <span className={`leading-none font-medium whitespace-nowrap ${roomy ? "text-[12px]" : "text-[10.5px]"} ${STATE_WORD[m.state]}`}>{s.states[m.state]}</span>
       </span>
     );
     const name = (
-      <span className="text-[length:clamp(10px,1.05cqw,13px)] leading-[1.15] text-gray-800 line-clamp-2 break-words" dir="auto">
+      <span
+        className="text-gray-800 break-words overflow-hidden" dir="auto"
+        style={{ fontSize: nameSize, lineHeight: `${line}px`, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: lines }}
+      >
         {m.now.products.join(" / ") || <span className="text-gray-400">{s.machines.empty}</span>}
       </span>
     );
-    const glyph = (cls?: string) => (
-      <MachineGlyph colours={m.now.colours} now={m.now.colourNow} tonnage={tonOf(m.label) || m.tonnage} state={m.state} className={cls} />
+    const glyph = (cls: string, style: React.CSSProperties) => (
+      <MachineGlyph colours={m.now.colours} now={m.now.colourNow} tonnage={tonOf(m.label) || m.tonnage} state={m.state} className={cls} style={style} />
     );
     return (
       <button
         key={m.label} type="button" aria-pressed={isSel} onClick={() => pick(m.label)}
         aria-label={`${m.label} · ${s.states[m.state]} · ${m.now.products.join(" / ") || s.machines.empty}`}
         style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
-        className={`m-[3px] min-w-0 min-h-0 flex ${wide ? "flex-row items-center gap-1.5" : "flex-col"} text-start border-2 rounded-xl px-1.5 py-1 overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
+        className={`m-[3px] min-w-0 min-h-0 flex ${side ? "flex-row items-center gap-2" : "flex-col"} text-start border-2 rounded-xl p-[3px] overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
           isSel ? "ring-2 ring-blue-500 ring-offset-1 !border-blue-500" : ""
         }`}
       >
-        {wide ? (
+        {side ? (
           <>
-            {glyph("block h-full w-auto max-w-[50%] shrink-0")}
-            <span className="min-w-0 flex-1 flex flex-col justify-center gap-1">{head}{name}</span>
+            {glyph("block shrink-0", { height: glyphH, width: Math.min(glyphH * 2.63, w * 0.46) })}
+            <span className="min-w-0 flex-1 flex flex-col justify-center">{head}{name}</span>
           </>
         ) : (
-          <>{head}{glyph()}{name}</>
+          <>
+            {head}
+            <span className="flex items-center shrink-0" style={{ height: glyphH, marginBlock: 2 }}>
+              {glyph("block min-w-0 flex-1", { height: glyphH })}
+              {dots}
+            </span>
+            {name}
+          </>
         )}
       </button>
     );
@@ -652,9 +707,8 @@ export default function ChangeoverPage() {
 
             {showMap ? (
               <>
-                {/* Only as tall as the machines reach — the sheet stays landscape. */}
-                <Floor rows={Math.min(MAP_MAX_ROWS, Math.max(MAP_TILE.h * 2, mapRows(layout)))}>
-                  {layout.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t) : null; })}
+                <Floor tiles={layout}>
+                  {(fit) => fit.tiles.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t, fit) : null; })}
                 </Floor>
                 {unplaced.length > 0 && (
                   <div className="mt-3">
@@ -899,8 +953,7 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
   /** A pointer, in the sheet's own units (fractions of a unit included). */
   const unitsAt = (e: { clientX: number; clientY: number }) => {
     const box = sheet.current!.getBoundingClientRect();
-    const u = box.width / MAP_COLS;
-    return { x: (e.clientX - box.left) / u, y: (e.clientY - box.top) / u };
+    return { x: (e.clientX - box.left) / (box.width / MAP_COLS), y: (e.clientY - box.top) / (box.height / MAP_MAX_ROWS) };
   };
 
   const put = (label: string, at: { c: number; r: number; w?: number; h?: number }) => {
@@ -919,30 +972,52 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
     if (current) put(current.label, { c: current.c, r: current.r, w: current.w + dw, h: current.h + dh });
   };
 
-  const grab = (t: MapTile, mode: "move" | "size") => (e: React.PointerEvent<HTMLElement>) => {
-    if (busy) return;
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const at = unitsAt(e);
-    drag.current = { label: t.label, mode, dx: at.x - (t.c - 1), dy: at.y - (t.r - 1) };
-    setPicked(t.label); setNote("");
-  };
-  const dragTo = (e: React.PointerEvent<HTMLElement>) => {
+  // The drag is followed on the WINDOW, not through pointer capture on the
+  // tile: capture throws for a pointer the browser no longer counts as active
+  // (and killed the whole grab), and a finger that slides off the tile must
+  // keep moving it. The latest tiles are read through a ref — the listeners
+  // outlive the render that added them.
+  const latest = useRef(tiles);
+  useEffect(() => { latest.current = tiles; }, [tiles]);
+  const stopDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopDrag.current?.(), []);
+
+  const dragTo = (e: { clientX: number; clientY: number }) => {
     const d = drag.current;
-    const t = d && tiles.find((x) => machineKey(x.label) === machineKey(d.label));
-    if (!d || !t) return;
+    const now = latest.current;
+    const t = d && now.find((x) => machineKey(x.label) === machineKey(d.label));
+    if (!d || !t || !sheet.current) return;
     const at = unitsAt(e);
     const to = d.mode === "move"
       ? { c: Math.round(at.x - d.dx) + 1, r: Math.round(at.y - d.dy) + 1 }
       : { c: t.c, r: t.r, w: Math.round(at.x - (t.c - 1)), h: Math.round(at.y - (t.r - 1)) };
-    const next = placeTile(tiles, d.label, to);
+    const next = placeTile(now, d.label, to);
     // Onto another machine: it stays on its last good spot until it is clear.
     if (!next) { setNote(s.map.taken); return; }
     const n = next[next.length - 1];
-    if (n.c !== t.c || n.r !== t.r || n.w !== t.w || n.h !== t.h) setTiles(next);
+    if (n.c !== t.c || n.r !== t.r || n.w !== t.w || n.h !== t.h) { latest.current = next; setTiles(next); }
     setNote("");
   };
-  const drop = () => { drag.current = null; };
+  const grab = (t: MapTile, mode: "move" | "size") => (e: React.PointerEvent<HTMLElement>) => {
+    if (busy) return;
+    e.stopPropagation();
+    stopDrag.current?.();
+    const at = unitsAt(e);
+    drag.current = { label: t.label, mode, dx: at.x - (t.c - 1), dy: at.y - (t.r - 1) };
+    setPicked(t.label); setNote("");
+    const move = (ev: PointerEvent) => dragTo(ev);
+    const stop = () => {
+      drag.current = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      stopDrag.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    stopDrag.current = stop;
+  };
 
   /** A tap on the bare floor moves the selected machine there (its middle on the tap). */
   const tapFloor = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -987,19 +1062,19 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
         </div>
       )}
 
-      <Floor rows={MAP_MAX_ROWS} fine sheetRef={sheet} onSheetClick={tapFloor}>
+      <Floor tiles={tiles} whole sheetRef={sheet} onSheetClick={tapFloor}>
         {/* A STABLE order: placeTile moves the tile it placed to the end of the
             list, and React re-inserting the node mid-drag would drop the
             pointer capture — the machine would stop following the finger. */}
-        {[...tiles].sort((a, b) => a.label.localeCompare(b.label)).map((t) => {
+        {() => [...tiles].sort((a, b) => a.label.localeCompare(b.label)).map((t) => {
           const on = machineKey(t.label) === machineKey(picked);
           return (
             <div
               key={t.label} role="button" tabIndex={0} aria-pressed={on} aria-label={t.label}
-              onPointerDown={grab(t, "move")} onPointerMove={dragTo} onPointerUp={drop} onPointerCancel={drop}
+              onPointerDown={grab(t, "move")}
               onKeyDown={(e) => keyMove(e, t)}
               style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
-              className={`relative m-[2px] min-w-0 min-h-0 flex items-center justify-center rounded-lg border-2 font-bold overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing text-[length:clamp(11px,1.3cqw,16px)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
+              className={`relative m-[2px] min-w-0 min-h-0 flex items-center justify-center rounded-lg border-2 font-bold overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing text-[13px] sm:text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
                 on ? "border-blue-600 bg-blue-600 text-white shadow-md z-10" : "border-slate-400 bg-white text-gray-900"
               }`}
             >
@@ -1007,7 +1082,7 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
               {on && (
                 <span
                   role="presentation" title={s.map.resize}
-                  onPointerDown={grab(t, "size")} onPointerMove={dragTo} onPointerUp={drop} onPointerCancel={drop}
+                  onPointerDown={grab(t, "size")}
                   className="absolute bottom-0 right-0 w-6 h-6 sm:w-5 sm:h-5 cursor-nwse-resize touch-none rounded-tl-md bg-white/90 border-t-2 border-l-2 border-blue-600"
                 />
               )}

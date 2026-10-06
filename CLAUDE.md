@@ -113,7 +113,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
 - **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
   `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
-- **Tests:** 75 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
+- **Tests:** 79 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
   REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
   `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
   defects were — **write the sequence there first** (dated shifts, page rows, orders → what
@@ -158,10 +158,26 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   it one unit, a tray tap drops it on `freeSpot()`. The cell starts with `grid 56x32`; a
   cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
   when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
-  carried over, twice as wide as tall. On a phone the sheet keeps 42rem and pans inside
-  its own frame. ⚠ The editor renders tiles in a STABLE order: `placeTile` moves the placed
-  tile to the end, and React re-inserting that node mid-drag drops the pointer capture.
-  Never keyed on PQ numbers in code. ⚠ That column was
+  carried over, twice as wide as tall. Never keyed on PQ numbers in code.
+- **The sheet is where machines are PLACED; the DRAWING follows the width (`fitFloor`).**
+  Owner, same evening: *"still feels weird … I meant to see it on the phone clearly, while
+  reading the product, seeing the colour and the machine icon."* The first landscape map
+  kept the sheet 42rem wide and let a phone pan it: he re-arranged every machine into the
+  third of the sheet he could see, and they came out 186 × 42 px. Three drawings were
+  tried at 375 px — the panned sheet, the sheet fitted with flat tiles (names cut to one
+  line), and the one kept: only the machines' own span of the sheet is drawn (so the
+  floor fills the width wherever it was arranged), on a narrow screen an aisle is a
+  sliver (`colFr` / `rowFr`), a unit is never so narrow that a tile cannot be read
+  (`MAP_READABLE`; only then does the sheet pan) and as tall as a tile needs — a drawing
+  over three lines of name on a phone (≈ 106 × 110 px each, his whole floor on one
+  screen, nothing cut), a drawing beside two lines on a desk. The tile is drawn for its
+  own pixels (`tileWidthPx` / `tileHeightPx`), with the job's colours as dots. The EDITOR
+  always shows the whole sheet, fitted and flat, codes only.
+  ⚠ Units are no longer square: drag maths divides x by the sheet's width / 56 and y by
+  its height / 32. ⚠ The drag is followed on `window`, not by pointer capture
+  (`setPointerCapture` throws for a pointer the browser no longer counts as active, and
+  killed the whole grab), and the editor renders tiles in a STABLE order — `placeTile`
+  moves the placed tile to the end, and React re-inserting that node mid-drag loses it. ⚠ That column was
   added to a tab that already existed, so `saveAnswers` calls `ensureHeaders` first: an
   append silently DROPS a value whose header the tab lacks.
 - Tiles draw a side-view press (`MachineGlyph`): lamp = state, hopper = the job's
@@ -170,7 +186,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 75 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 79 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,
