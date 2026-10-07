@@ -78,6 +78,18 @@ export function clientKey(name: string | null | undefined): string {
 }
 
 /**
+ * «العملاء»!A «الرقم» as the number a link stores — 0 when the cell holds none.
+ *
+ * ONE reading, because two places build a link from a sheet row: the picker on
+ * «حسابات العملاء» and the server when the owner makes a login himself
+ * (app/api/customers), which must find the SAME row the picker sent.
+ */
+export function clientNoOf(cell: string | number | null | undefined): number {
+  const n = Number(String(cell ?? "").replace(/[^\d]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
  * Every key an account answers to: each link's canonical name and each of its
  * aliases. "" is excluded — a blank or filler cell must not become a key that
  * a blank row on the sheet then matches.

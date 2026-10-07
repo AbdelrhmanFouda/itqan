@@ -52,6 +52,12 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "agent":               { GET: "token", POST: "token" },
   "ai-review":           { GET: "guard" },
   "contact":             { POST: "public" },
+  // «إنشاء حساب عميل» (2026-10-07): the owner makes a customer's login
+  // himself. It creates a Firebase account and writes the access link, so it
+  // is owner + manager ONLY — never a bare requireRole(req), which would let
+  // every approved role mint customer logins. tests/portal-access.test.ts
+  // pins what it may log, return and store.
+  "customers":           { POST: "owner" },
   "downtime":            { GET: "guard", POST: "guard", PATCH: "guard" },
   "downtime/export":     { GET: "guard" },
   "downtime/reclassify": { GET: "owner", POST: "owner" },

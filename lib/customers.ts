@@ -16,7 +16,7 @@
  */
 import { db } from "./firebase";
 import {
-  collection, doc, getDocs, onSnapshot, updateDoc,
+  collection, doc, getDoc, getDocs, onSnapshot, updateDoc,
   type DocumentData,
 } from "firebase/firestore";
 import {
@@ -47,6 +47,22 @@ export async function listCustomers(): Promise<CustomerAccount[]> {
   return snap.docs
     .map((d) => shape(d.id, d.data()))
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+}
+
+/**
+ * Does this uid hold a customer account? `null` = it could not be read.
+ *
+ * One read of the caller's OWN document (the rules allow it), asked once at
+ * the portal's door so that an existing customer signing in is never sent to
+ * the register route — which is idempotent but sits behind a per-IP limiter,
+ * and five sign-ins from one office would otherwise spend it.
+ */
+export async function hasCustomerAccount(uid: string): Promise<boolean | null> {
+  try {
+    return (await getDoc(doc(db, COL, uid))).exists();
+  } catch {
+    return null;
+  }
 }
 
 /** Live subscription to one account — null while it does not exist. */

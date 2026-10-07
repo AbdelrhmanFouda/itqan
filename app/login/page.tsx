@@ -9,31 +9,40 @@ import { useAuth } from "@/context/AuthContext";
 import { ad } from "@/lib/i18n.auth";
 import { pd } from "@/lib/i18n.prod";
 import { REQUESTABLE_ROLES, type Role } from "@/lib/roles";
+import { authErrorCode, authErrorKind, authErrorDetail, type AuthErrorKind } from "@/lib/auth-errors";
+import { clearPortalSignUp } from "@/lib/portal-signup";
 import { Field, inputCls, Btn, Spinner } from "@/components/dashboard/ui";
 
-type AuthErrStrings = {
-  errInvalid: string; errEmailInUse: string; errWeakPassword: string;
-  errPopupClosed: string; errUnauthorizedDomain: string; errGeneric: string;
+type AuthErrStrings = (typeof ad)["en"]["auth"];
+
+/**
+ * One sentence per kind of failure — the same reading the customer portal's
+ * door uses (lib/auth-errors.ts, 2026-10-07). `register` is the portal's own
+ * kind and cannot happen here; it reads as the generic sentence.
+ */
+const ERR_KEY: Record<AuthErrorKind, keyof AuthErrStrings> = {
+  invalid: "errInvalid",
+  emailInUse: "errEmailInUse",
+  weakPassword: "errWeakPassword",
+  unauthorizedDomain: "errUnauthorizedDomain",
+  popupClosed: "errPopupClosed",
+  network: "errNetwork",
+  tooMany: "errTooMany",
+  badEmail: "errBadEmail",
+  signupClosed: "errSignupClosed",
+  disabled: "errDisabled",
+  register: "errGeneric",
+  generic: "errGeneric",
 };
 
-function mapError(code: string | undefined, e: AuthErrStrings): string {
-  switch (code) {
-    case "auth/invalid-credential":
-    case "auth/wrong-password":
-    case "auth/user-not-found":
-      return e.errInvalid;
-    case "auth/email-already-in-use":
-      return e.errEmailInUse;
-    case "auth/weak-password":
-      return e.errWeakPassword;
-    case "auth/unauthorized-domain":
-      return e.errUnauthorizedDomain;
-    case "auth/popup-closed-by-user":
-    case "auth/cancelled-popup-request":
-      return e.errPopupClosed;
-    default:
-      return e.errGeneric;
-  }
+type Shown = { text: string; code: string };
+
+/** Only an unrecognised failure carries its raw code under the sentence. */
+function describe(err: unknown, e: AuthErrStrings): Shown {
+  const code = authErrorCode(err);
+  const kind = authErrorKind(code);
+  const generic = ERR_KEY[kind] === "errGeneric";
+  return { text: e[ERR_KEY[kind]], code: generic ? authErrorDetail(code) : "" };
 }
 
 export default function LoginPage() {
@@ -48,9 +57,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [role, setRole] = useState<Role | "">("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   usePageTitle(mode === "in" ? a.auth.signInTitle : a.auth.signUpTitle);
+
+  // The mirror of the portal's own login page: a customer sign-in left in
+  // flight on this browser (a Google popup still open behind the portal's
+  // page) must not speak for whoever uses THIS door. With no uid it removes
+  // only that in-flight marker, so nothing else here changes.
+  useEffect(() => { clearPortalSignUp(); }, []);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
@@ -58,9 +73,9 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setError(null);
     if (mode === "up" && !role) {
-      setError(a.auth.errNeedRole);
+      setError({ text: a.auth.errNeedRole, code: "" });
       return;
     }
     setBusy(true);
@@ -72,15 +87,15 @@ export default function LoginPage() {
       }
       router.replace("/dashboard");
     } catch (err) {
-      setError(mapError((err as { code?: string }).code, a.auth));
+      setError(describe(err, a.auth));
       setBusy(false);
     }
   }
 
   async function handleGoogle() {
-    setError("");
+    setError(null);
     if (mode === "up" && !role) {
-      setError(a.auth.errNeedRole);
+      setError({ text: a.auth.errNeedRole, code: "" });
       return;
     }
     setBusy(true);
@@ -88,7 +103,7 @@ export default function LoginPage() {
       await signInGoogle(mode === "up" ? (role as Role) : null);
       router.replace("/dashboard");
     } catch (err) {
-      setError(mapError((err as { code?: string }).code, a.auth));
+      setError(describe(err, a.auth));
       setBusy(false);
     }
   }
@@ -149,7 +164,16 @@ export default function LoginPage() {
                 </Field>
               )}
 
-              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+              {error && (
+                <div className="mb-3" role="alert">
+                  <p className="text-sm text-red-600">{error.text}</p>
+                  {error.code && (
+                    <p className="text-[11px] text-gray-400 mt-0.5 break-all">
+                      <bdi dir="ltr">{error.code}</bdi>
+                    </p>
+                  )}
+                </div>
+              )}
 
               <Btn type="submit" disabled={busy} className="w-full">
                 {mode === "in" ? a.auth.signInBtn : a.auth.signUpBtn}
@@ -168,12 +192,16 @@ export default function LoginPage() {
           </div>
 
           <button
-            onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(""); }}
+            onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(null); }}
             className="block w-full text-center text-sm text-blue-600 hover:underline mt-5 py-2.5 min-h-11 sm:min-h-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             {mode === "in" ? a.auth.needAccount : a.auth.haveAccount}
           </button>
-          <Link href="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5">
+          {/* The other door, quietly — the mirror of the portal's staff line. */}
+          <Link href="/portal/login" className="flex items-center justify-center text-center text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5 min-h-11 sm:min-h-0">
+            {a.auth.customerHint}
+          </Link>
+          <Link href="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 py-2.5">
             {a.auth.backToSite}
           </Link>
         </div>

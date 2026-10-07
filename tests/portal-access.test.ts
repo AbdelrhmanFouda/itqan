@@ -30,6 +30,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nameKey } from "../lib/master-lookup.ts";
 import { cp } from "../lib/i18n.portal.ts";
+import { ad } from "../lib/i18n.auth.ts";
 import {
   clientKey, clientKeysOf, belongsToCustomer, normalizeClients,
   customerStatusOf, isLinkedCustomer, type ClientLink,
@@ -824,5 +825,614 @@ test("the waiting card is the SHARED component, not a second copy", () => {
       `${f} must import the shared StatusScreen`,
     );
     assert.equal(/function StatusScreen\(/.test(read(f)), false, `${f} still declares its own StatusScreen`);
+  }
+});
+
+/* ---------------- 9. customer logins — three fixes (2026-10-07) ------------- */
+/**
+ * The owner tried to make a customer login on /portal/login with a made-up
+ * address, got the generic sentence and no account. Three things came of it:
+ * the sign-in pages say WHY; whoever comes in through the customer door is a
+ * customer; and the owner makes the login himself (`POST /api/customers`).
+ *
+ * That route creates a Firebase account and writes the access link, so what is
+ * pinned here is what must never move: who may call it, whose token writes
+ * what, and that a password or an ID token is never logged, returned, stored
+ * or put in a URL. NO test here sends a sign-up — these read the source.
+ */
+
+/** Every call of `name(` in a source, with its whole argument text (balanced parentheses). */
+function callsOf(src: string, name: string): string[] {
+  const out: string[] = [];
+  let from = 0;
+  for (;;) {
+    const at = src.indexOf(`${name}(`, from);
+    if (at < 0) break;
+    let depth = 0;
+    let i = at + name.length;
+    for (; i < src.length; i++) {
+      if (src[i] === "(") depth++;
+      else if (src[i] === ")" && --depth === 0) break;
+    }
+    out.push(src.slice(at, i + 1));
+    from = at + name.length;
+  }
+  return out;
+}
+
+/** The trimmed lines of a source that mention a whole word. */
+const linesWith = (src: string, word: string) =>
+  src.split("\n").map((l) => l.trim()).filter((l) => new RegExp(`\\b${word}\\b`).test(l));
+
+const NEW_ROUTE = "app/api/customers/route.ts";
+const DOC_HELPER = "lib/customer-doc.ts";
+/** Anything that could carry a credential out of the route. */
+const SECRET = /\bpassword\b|\bidToken\b|\bcallerToken\b|\basToken\b/;
+
+test("POST /api/customers is owner + manager only, and asks before it reads anything", () => {
+  assert.ok(exists(NEW_ROUTE), `${NEW_ROUTE} is missing`);
+  const src = code(NEW_ROUTE);
+  assert.deepEqual(Object.keys(handlers(src)), ["POST"], "one handler: it creates, and nothing else");
+  const body = handlers(src).POST;
+  const guard = body.indexOf("await requireRole(req, [])");
+  assert.ok(guard > 0, "the empty allow-list: owner and manager");
+  assert.ok(/if \("deny" in g\) return g\.deny/.test(body));
+  // The guard is the first thing that can fail: before the body, the sheet and Firebase.
+  for (const later of ["req.json()", "req.headers.get(", "getRecords(", "fetch(", "createCustomerDoc(", "linkCustomerDoc("]) {
+    assert.ok(body.indexOf(later) > guard, `${later} runs before the guard`);
+  }
+  // A customer is still not a role, and this route grants none.
+  assert.equal(/\brole\s*:/.test(src), false);
+  assert.equal(/requireCustomer|verifyIdToken\(|roleFor\(/.test(src), false, "the staff guard and nothing beside it");
+});
+
+test("the route validates and finds the «العملاء» row BEFORE any account exists", () => {
+  const body = handlers(code(NEW_ROUTE)).POST;
+  const signUp = body.indexOf("fetch(");
+  assert.ok(signUp > 0);
+  for (const first of [
+    "isValidUsername(username)", "password.length < MIN_PASSWORD", "sanitizeAliases(", 'getRecords("clients")',
+    'getRecords("clients", { fresh: true })', "findClient(",
+  ]) {
+    const at = body.indexOf(first);
+    assert.ok(at > 0 && at < signUp, `${first} must come before the sign-up`);
+  }
+  // The link that is stored is the SHEET's number and spelling, not the caller's.
+  assert.ok(body.includes("const link: ClientLink = { no: clientNoOf(row.no), name: String(row.name ?? \"\").trim(), aliases };"));
+  // An unread tab is not "this customer does not exist".
+  assert.ok(body.includes('read.records.length === 0 ? refuse("sheet_unreadable", 503) : refuse("unknown_client", 400)'));
+  // The account is on the reserved login domain — never an address somebody typed.
+  assert.ok(body.includes("const email = loginEmailFor(username);"));
+  assert.ok(body.indexOf("isValidUsername(username)") < body.indexOf("loginEmailFor(username)"));
+});
+
+test("the sign-up is one bounded REST call, with the password in its body and nowhere else", () => {
+  const src = code(NEW_ROUTE);
+  assert.ok(src.includes('const SIGNUP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signUp";'));
+  const fetches = callsOf(src, "fetch");
+  assert.equal(fetches.length, 1, "the route itself makes ONE outbound call — the two writes are the shared helper's");
+  const call = fetches[0];
+  assert.ok(call.includes("body: JSON.stringify({ email, password, returnSecureToken: true })"));
+  assert.ok(call.includes('method: "POST"'));
+  // Never in the URL: the address carries the public web API key and nothing else.
+  const url = call.slice(0, call.indexOf(","));
+  assert.equal(url, "fetch(`${SIGNUP_URL}?key=${encodeURIComponent(apiKey)}`");
+  assert.equal(SECRET.test(url), false);
+  // Every line that names the password: read it, measure it, send it. Nothing else.
+  assert.deepEqual(linesWith(src, "password"), [
+    'const password = typeof b.password === "string" ? b.password : "";',
+    'if (password.length < MIN_PASSWORD) return refuse("weak_password", 400);',
+    "body: JSON.stringify({ email, password, returnSecureToken: true }),",
+  ]);
+});
+
+test("the document is written with the NEW account's token and the link with the CALLER's", () => {
+  const src = code(NEW_ROUTE);
+  const body = handlers(src).POST;
+  const [made] = callsOf(body, "createCustomerDoc");
+  const [linked] = callsOf(body, "linkCustomerDoc");
+  assert.ok(made && linked, "both writes go through lib/customer-doc.ts");
+  assert.ok(/\basToken: idToken,/.test(made), "customers/{uid} is created AS the account it belongs to");
+  assert.equal(/callerToken/.test(made), false);
+  assert.ok(/\basToken: callerToken,/.test(linked), "the approval is written AS the admin who asked");
+  assert.equal(/\bidToken\b/.test(linked), false, "the new account can never link itself");
+  assert.ok(/approvedBy: g\.user\.email,/.test(linked), "…and names the VERIFIED caller, never the body");
+  // In order: account → document → link.
+  assert.ok(body.indexOf("fetch(") < body.indexOf("createCustomerDoc(") && body.indexOf("createCustomerDoc(") < body.indexOf("linkCustomerDoc("));
+  // Each token is used for exactly one thing.
+  assert.deepEqual(linesWith(src, "idToken"), [
+    'const idToken = typeof answer?.idToken === "string" ? answer.idToken : "";',
+    "if (!uid || !idToken) {",
+    "asToken: idToken,",
+  ]);
+  assert.deepEqual(linesWith(src, "callerToken"), [
+    'const callerToken = header.startsWith("Bearer ") ? header.slice(7) : "";',
+    "asToken: callerToken,",
+  ]);
+  // A login that exists but is not linked says so, and says how far it got.
+  assert.ok(body.includes('refuse("created_not_linked", 502, { stage: "doc", uid })'));
+  assert.ok(body.includes('refuse("created_not_linked", 502, { stage: "link", uid })'));
+  assert.ok(body.includes("return NextResponse.json({ ok: true, uid, username, email });"));
+});
+
+test("a password or an ID token is never logged, returned or stored", () => {
+  const route = code(NEW_ROUTE);
+  const helper = code(DOC_HELPER);
+  // Every way out of the route: a log line, a response, the refusal helper.
+  const out = [
+    ...["console.error", "console.log", "console.warn", "console.info", "console.debug"].flatMap((n) => callsOf(route, n)),
+    ...callsOf(route, "NextResponse.json"),
+    ...callsOf(route, "refuse"),
+  ];
+  assert.ok(out.length >= 12, `expected the route's logs and answers, found ${out.length}`);
+  for (const call of out) assert.equal(SECRET.test(call), false, `a credential leaves the route in: ${call}`);
+  // What IS logged is a stage and Firebase's own token, nothing from the request.
+  for (const log of callsOf(route, "console.error")) {
+    assert.ok(/^console\.error\((?:"\[customers\] [a-zA-Z]+: [A-Z_]+"|`\[customers\] (?:signUp|doc|link): (?:HTTP_)?\$\{(?:code|made\.status|linked\.code)\}`)\)$/.test(log), log);
+  }
+  // No other logger, no storage, no redirect that could carry it in a URL.
+  assert.equal(/console\.(?!error\()/.test(route), false);
+  assert.equal(/localStorage|sessionStorage|redirect\(|searchParams/.test(route), false);
+  // The helper logs nothing at all, never sees a password, and uses the token
+  // it is handed for one thing: the Authorization header of its own call.
+  assert.equal(/console\./.test(helper), false);
+  assert.equal(/password/i.test(helper), false);
+  for (const line of linesWith(helper, "asToken")) {
+    assert.ok(
+      line === "asToken: string;" || line.includes("Authorization: `Bearer ${p.asToken}`"),
+      `the helper does something else with the token: ${line}`,
+    );
+  }
+  // The document it creates has six fields, and none of them is a credential.
+  const fields = helper.slice(helper.indexOf("const fields = {"), helper.indexOf("};", helper.indexOf("const fields = {")));
+  assert.deepEqual(
+    [...fields.matchAll(/^\s*(\w+): \{/gm)].map((m) => m[1]),
+    ["email", "displayName", "kind", "status", "requestedClient", "createdAt"],
+  );
+  assert.ok(/status: \{ stringValue: "pending" \}/.test(fields), "a new account starts pending");
+  assert.equal(/clients/.test(fields), false, "…and never carries the link");
+});
+
+test("every outbound call in the route and its helper is bounded and never cached", () => {
+  for (const f of [NEW_ROUTE, DOC_HELPER]) {
+    const fetches = callsOf(code(f), "fetch");
+    assert.ok(fetches.length >= 1, `${f} makes no call`);
+    for (const call of fetches) {
+      assert.ok(/signal: AbortSignal\.timeout\(/.test(call), `${f}: an unbounded call — ${call.slice(0, 60)}`);
+      assert.ok(/cache: "no-store"/.test(call), `${f}: a cacheable call — ${call.slice(0, 60)}`);
+    }
+  }
+  assert.ok(code(NEW_ROUTE).includes("const TIMEOUT_MS = 8000;"));
+  assert.equal(callsOf(code(DOC_HELPER), "fetch").length, 3, "the look-up, the create and the link");
+});
+
+test("the register route and the owner-made login share ONE document-writing helper", () => {
+  const register = code("app/api/portal/register/route.ts");
+  const created = code(NEW_ROUTE);
+  for (const [name, src] of [["register", register], ["customers", created]] as const) {
+    assert.ok(/import \{[^}]*\bcreateCustomerDoc\b[^}]*\} from "@\/lib\/customer-doc";/.test(src), `${name} must import the helper`);
+    assert.equal(callsOf(src, "createCustomerDoc").length, 1, `${name} must call it once`);
+    // Neither builds the document or its URL itself any more.
+    for (const own of ["customerCollectionUrl", "customerDocUrl", "documentId=", "stringValue", "integerValue"]) {
+      assert.equal(src.includes(own), false, `${name} still writes Firestore itself (${own})`);
+    }
+  }
+  assert.equal(callsOf(register, "fetch").length, 0, "the register route makes no Firestore call of its own");
+  // The register route answers what it always answered.
+  assert.ok(register.includes("if (made.ok) return NextResponse.json({ ok: true, existing: made.existing });"));
+  assert.ok(register.includes('return NextResponse.json({ ok: false, reason: "store_failed" }, { status: 503 });'));
+  assert.ok(register.includes("uid: user.uid, asToken: token,"), "it writes the caller's OWN document, as the caller");
+  // …and nothing else in the app creates a customer document.
+  for (const f of [...filesUnder("app", [".ts", ".tsx"]), ...filesUnder("lib", [".ts"]), ...filesUnder("context", [".tsx"])]) {
+    if (f === DOC_HELPER || f === "lib/agent-auth.ts") continue;
+    assert.equal(code(f).includes("customerCollectionUrl"), false, `${f} creates a customer document on its own`);
+  }
+});
+
+test("the link is one PATCH: exactly four fields, and it can only update", () => {
+  const helper = code(DOC_HELPER);
+  const [patch] = callsOf(helper, "fetch").filter((c) => c.includes('method: "PATCH"'));
+  assert.ok(patch, "the link is a PATCH");
+  assert.ok(helper.includes("const mask = LINK_MASK.map((f) => `updateMask.fieldPaths=${f}`).join(\"&\");"));
+  assert.ok(patch.includes("${customerDocUrl(p.uid)}?${mask}&currentDocument.exists=true"), "a missing document is refused, never created");
+  assert.ok(patch.includes("body: JSON.stringify({ fields: approvalFields(p.link,"), "the body is the pure builder's four fields");
+  // The rules are what let an admin — and only an admin — make that write.
+  assert.ok(/allow update, delete: if isAdmin\(\)/.test(read("firestore.rules")));
+  // The pure halves are import-free, so the round trip in tests/customer-login.test.ts is the real one.
+  for (const pure of ["lib/customer-login.ts", "lib/firestore-rest.ts", "lib/auth-errors.ts", "lib/portal-signup.ts"]) {
+    assert.equal(/^import /m.test(code(pure)), false, `${pure} must stay import-free`);
+  }
+  assert.ok(/import \{ restFields \} from "@\/lib\/firestore-rest";/.test(read("lib/agent-auth.ts")), "the guard reads with the SAME decoder the test uses");
+  assert.equal(/function restValue|function restFields/.test(read("lib/agent-auth.ts")), false, "…and keeps no second copy of it");
+});
+
+test("the portal context marks the door before BOTH sign-in calls and clears it on a throw", () => {
+  const src = code("context/CustomerAuthContext.tsx");
+  const flat = (s: string) => s.replace(/\s+/g, " ");
+  const slice = (from: string, to: string) => {
+    const a = src.indexOf(from);
+    const b = src.indexOf(to, a);
+    assert.ok(a > 0 && b > a, `${from} moved — this test is reading nothing`);
+    return flat(src.slice(a, b));
+  };
+  const cases: [string, string][] = [
+    [slice("async function signInEmail(", "async function signUpEmail("), "signInWithEmailAndPassword(auth, email, password)"],
+    [slice("async function signInGoogle(", "return ("), "signInWithPopup(auth, new GoogleAuthProvider())"],
+    [slice("async function signUpEmail(", "async function signInGoogle("), "createUserWithEmailAndPassword(auth, email, password)"],
+  ];
+  for (const [body, call] of cases) {
+    // The un-pinned marker is the FIRST statement — in every mode, with no condition in front of it.
+    assert.ok(/^async function \w+\([^)]*\) \{ markPortalSignUp\(\); const stop = clearOnLeave\(\); let cred; try \{ cred = await /.test(body), body.slice(0, 80));
+    assert.ok(
+      body.includes(`try { cred = await ${call}; } catch (e) { clearPortalSignUp(); throw e; } finally { stop(); }`),
+      `${call}: the marker must go if the call throws`,
+    );
+    assert.equal(body.split("markPortalSignUp();").length - 1, 1);
+  }
+  // Both sign-in paths then settle the account that came back — in both modes.
+  assert.ok(cases[0][0].endsWith('await settle(cred.user, ""); } '));
+  assert.ok(cases[1][0].includes('await settle(cred.user, company ?? "");'));
+  assert.equal(/if \(signingUp\)|if \(!signingUp\)/.test(src), false, "the sign-in tab is no longer a different path");
+  // A tab closed with Google's popup still open clears the in-flight marker on
+  // its way out — it has no uid, so left behind it speaks for the next person.
+  const leave = flat(src.slice(src.indexOf("function clearOnLeave()"), src.indexOf("export function CustomerAuthProvider")));
+  assert.ok(leave.includes('const onLeave = () => clearPortalSignUp(); window.addEventListener("pagehide", onLeave);'));
+  assert.ok(leave.includes('return () => window.removeEventListener("pagehide", onLeave);'));
+});
+
+test("the door settles an account by the pure rule, registers once, and never converts staff", () => {
+  const src = code("context/CustomerAuthContext.tsx");
+  const settle = src.slice(src.indexOf("async function settle("), src.indexOf("async function signInEmail("));
+  assert.ok(settle.length > 200, "settle moved — this test is reading nothing");
+  // Pinned and claimed before the first await: the listener and the heal effect both stand back.
+  const firstAwait = settle.indexOf("await ");
+  assert.ok(settle.indexOf("markPortalSignUp(uid);") > 0 && settle.indexOf("markPortalSignUp(uid);") < firstAwait);
+  assert.ok(settle.indexOf("healed.current = uid;") > 0 && settle.indexOf("healed.current = uid;") < firstAwait);
+  // The decision is lib/portal-signup.ts' — every case of it is tested in tests/portal-door.test.ts.
+  assert.ok(settle.includes("portalDoorAction({ owner: isOwnerEmail(u.email), staff, customer })"));
+  assert.ok(settle.includes("bounded(hasStaffProfile(uid))") && settle.includes("bounded(hasCustomerAccount(uid))"));
+  // Staff and existing customers return BEFORE anything is registered; a guess registers nothing.
+  const leave = settle.indexOf('if (action === "staff" || action === "customer") {');
+  const defer = settle.indexOf('if (action === "defer") {');
+  const reg = settle.indexOf("await registerClaimed(");
+  assert.ok(leave > 0 && defer > leave && reg > defer, "leave → defer → register, in that order");
+  assert.ok(/if \(action === "staff" \|\| action === "customer"\) \{\s*clearPortalSignUp\(uid\);\s*return;\s*\}/.test(settle));
+  assert.ok(/if \(action === "defer"\) \{\s*release\(uid\);\s*return;\s*\}/.test(settle));
+  assert.equal(settle.split("registerClaimed(").length - 1, 1, "one registration");
+  assert.ok(settle.includes('await registerClaimed(uid, u.displayName ?? "", company);'), "its Firebase name and the typed company");
+  // The heal effect respects the same claim — one registration per account.
+  assert.ok(src.includes("if (healed.current === user.uid) return;"));
+  assert.ok(/\[loading, user, account, docLoading, profile, profileLoading, isCustomer, healTick\]/.test(src));
+  assert.ok(src.includes("if (profile || profileLoading || isCustomer !== true) return;"), "never for an account with a staff profile");
+});
+
+test("nothing in the portal context ever writes users/{uid}", () => {
+  const src = code("context/CustomerAuthContext.tsx");
+  assert.equal(/from "firebase\/firestore"/.test(src), false, "the context holds no Firestore writer of its own");
+  for (const writer of ["setDoc(", "updateDoc(", "addDoc(", "deleteDoc(", "writeBatch(", "runTransaction(", "ensureProfile"]) {
+    assert.equal(src.includes(writer), false, `the portal context uses ${writer}`);
+  }
+  // What it takes from the staff data layer is ONE read.
+  assert.deepEqual([...src.matchAll(/import \{([^}]*)\} from "@\/lib\/users";/g)].map((m) => m[1].trim()), ["hasStaffProfile"]);
+  assert.deepEqual(
+    [...src.matchAll(/import \{([^}]*)\} from "@\/lib\/customers";/g)].map((m) => m[1].trim()),
+    ["watchCustomer, hasCustomerAccount"],
+  );
+  // …and it never reaches for the staff sign-in paths, which call ensureProfile.
+  assert.ok(src.includes("const { user, loading, profile, profileLoading, isCustomer } = useAuth();"));
+  // The two reads are reads.
+  for (const [f, name] of [["lib/users.ts", "hasStaffProfile"], ["lib/customers.ts", "hasCustomerAccount"]]) {
+    const lib = code(f);
+    const at = lib.indexOf(`export async function ${name}(`);
+    assert.ok(at > 0, `${f} has no ${name}`);
+    const body = lib.slice(at, lib.indexOf("\n}", at));
+    assert.ok(/getDoc\(/.test(body) && /return null;/.test(body), `${name} reads, and says when it could not`);
+    assert.equal(/setDoc|updateDoc|addDoc|deleteDoc/.test(body), false, `${name} writes`);
+  }
+});
+
+test("the portal's sign-in box takes a username: type=text, through loginEmailFor on sign-in", () => {
+  const src = code("app/portal/login/page.tsx");
+  const input = src.slice(src.indexOf('id="portal-email"'), src.indexOf("/>", src.indexOf('id="portal-email"')));
+  for (const attr of ['type="text"', 'inputMode="email"', 'dir="ltr"', 'autoCapitalize="none"', 'autoCorrect="off"', "spellCheck={false}"]) {
+    assert.ok(input.includes(attr), `the identifier input lost ${attr}`);
+  }
+  assert.equal(/type="email"/.test(src), false, "an e-mail box refuses a username before the form submits");
+  assert.ok(src.includes("{mode === \"in\" ? c.login.identifier : c.login.email}"));
+  // Sign-in maps what was typed; sign-up hands over a real address, as typed.
+  assert.ok(src.includes('if (mode === "in") await signInEmail(loginEmailFor(typed), password);'));
+  assert.ok(src.includes("else await signUpEmail(typed, password, displayName.trim(), company.trim());"));
+  assert.ok(src.includes('const realAddress = typed.includes("@") && usernameOf(typed) === "";'), "sign-up needs an address mail can reach");
+  assert.ok(/: realAddress && displayName\.trim\(\)\.length > 0 && company\.trim\(\)\.length > 0\)/.test(src));
+  assert.ok(src.includes("{c.login.emailHint}"));
+  assert.equal(cp.ar.login.identifier, "اسم المستخدم أو البريد الإلكتروني");
+  assert.equal(cp.en.login.identifier, "Username or email");
+});
+
+test("both sign-in pages say WHY, through the same reading", () => {
+  const kinds = ["invalid", "emailInUse", "weakPassword", "unauthorizedDomain", "popupClosed", "network", "tooMany", "badEmail", "signupClosed", "disabled", "register", "generic"];
+  for (const f of ["app/portal/login/page.tsx", "app/login/page.tsx"]) {
+    const src = code(f);
+    assert.ok(/authErrorKind\(/.test(src) && /authErrorCode\(/.test(src), `${f} must map through lib/auth-errors.ts`);
+    assert.equal(/case "auth\//.test(src), false, `${f} still switches on Firebase codes itself`);
+    // Every kind has a sentence on this page.
+    const table = src.slice(src.indexOf("const ERR_KEY"), src.indexOf("};", src.indexOf("const ERR_KEY")));
+    assert.deepEqual([...table.matchAll(/^\s*(\w+): "err\w+",$/gm)].map((m) => m[1]), kinds, `${f}: ERR_KEY`);
+    // The raw code: under the sentence, left-to-right, and for a generic failure only.
+    assert.ok(src.includes('<bdi dir="ltr">{error.code}</bdi>'), `${f}: the raw code line`);
+    assert.ok(/authErrorDetail\(code\) : ""/.test(src), `${f}: only a generic failure carries its code`);
+  }
+  assert.ok(code("app/portal/login/page.tsx").includes('code: kind === "generic" ? authErrorDetail(code) : ""'));
+  // The five new sentences, word for word, on both doors.
+  const ar = {
+    errNetwork: "تعذّر الاتصال. تحقق من الإنترنت ثم حاول مرة أخرى.",
+    errTooMany: "محاولات كثيرة. انتظر بضع دقائق ثم حاول مرة أخرى.",
+    errBadEmail: "البريد الإلكتروني غير صحيح — راجع كتابته.",
+    errSignupClosed: "إنشاء الحسابات غير متاح الآن — تواصل معنا.",
+    errDisabled: "هذا الحساب موقوف — تواصل معنا.",
+  } as const;
+  for (const [k, sentence] of Object.entries(ar) as [keyof typeof ar, string][]) {
+    assert.equal(cp.ar.login[k], sentence, `cp.ar.login.${k}`);
+    assert.equal(ad.ar.auth[k], sentence, `ad.ar.auth.${k}`);
+    assert.ok(cp.en.login[k].length > 0 && ad.en.auth[k].length > 0);
+    assert.equal(/[؀-ۿ]/.test(cp.en.login[k] + ad.en.auth[k]), false, `${k}: the English half is English`);
+  }
+});
+
+test("the staff door points a customer at the portal — and behaves as it did", () => {
+  const src = code("app/login/page.tsx");
+  assert.ok(/<Link href="\/portal\/login"[^>]*>\s*\{a\.auth\.customerHint\}\s*<\/Link>/.test(src));
+  assert.equal(ad.ar.auth.customerHint, "عميل؟ ادخل من بوابة العملاء");
+  assert.equal(ad.en.auth.customerHint, "Customer? Sign in from the customer portal");
+  // The mirror of the line the portal already had.
+  assert.ok(/<Link href="\/login"[^>]*>\s*\{c\.login\.staffHint\}\s*<\/Link>/.test(code("app/portal/login/page.tsx")));
+  // No behaviour change: the same three calls, and still the staff context.
+  assert.ok(src.includes("await signInEmail(email.trim(), password);"));
+  assert.ok(src.includes("await signUpEmail(email.trim(), password, displayName.trim(), role as Role);"));
+  assert.ok(src.includes("await signInGoogle(mode === \"up\" ? (role as Role) : null);"));
+  assert.equal(/useCustomerAuth|customer-login/.test(src), false);
+  // The ONE thing it takes from the portal's marker module is the call that
+  // ends a customer sign-in left in flight (next test) — it never sets or reads it.
+  assert.deepEqual([...src.matchAll(/import \{([^}]*)\} from "@\/lib\/portal-signup";/g)].map((m) => m[1].trim()), ["clearPortalSignUp"]);
+  assert.equal(/markPortalSignUp|isPortalSignUp|portalDoorAction/.test(src), false);
+  // Both quiet links are a full 44px tap target on a phone.
+  for (const [f, href] of [["app/login/page.tsx", "/portal/login"], ["app/portal/login/page.tsx", "/login"]] as const) {
+    const tag = new RegExp(`<Link href="${href}" className="([^"]*)">`).exec(code(f));
+    assert.ok(tag, `${f}: the link to ${href} moved`);
+    for (const cls of ["min-h-11", "sm:min-h-0", "flex", "items-center", "justify-center"]) {
+      assert.ok(tag[1].split(" ").includes(cls), `${f}: the ${href} link lost ${cls}`);
+    }
+  }
+});
+
+test("the STAFF door ends a customer sign-in left in flight — a new employee is never read as a customer", () => {
+  // The hole (review, 2026-10-07): the portal marks its door before Firebase is
+  // asked, with no uid; a Google popup left open behind the page, the page's
+  // own «من فريق العمل؟» link, and a sign-up at /login inside the TTL — both
+  // `ensureProfile` calls saw the marker and wrote no staff profile.
+  const page = code("app/login/page.tsx");
+  assert.ok(page.includes("useEffect(() => { clearPortalSignUp(); }, []);"), "/login clears it when it opens");
+  const ctx = code("context/AuthContext.tsx");
+  assert.ok(/import \{ clearPortalSignUp \} from "@\/lib\/portal-signup";/.test(ctx));
+  const flat = (s: string) => s.replace(/\s+/g, " ");
+  const body = (from: string, to: string) => {
+    const a = ctx.indexOf(from);
+    const b = ctx.indexOf(to, a);
+    assert.ok(a > 0 && b > a, `${from} moved — this test is reading nothing`);
+    return flat(ctx.slice(a, b));
+  };
+  const paths: [string, string][] = [
+    [body("async function signInEmail(", "async function signUpEmail("), "await signInWithEmailAndPassword(auth, email, password);"],
+    [body("async function signUpEmail(", "async function signInGoogle("), "const cred = await createUserWithEmailAndPassword(auth, email, password);"],
+    [body("async function signInGoogle(", "async function signOut("), "const provider = new GoogleAuthProvider();"],
+  ];
+  for (const [fn, next] of paths) {
+    // The FIRST statement, with nothing in front of it — before Firebase is asked.
+    assert.ok(/^async function \w+\([^)]*\) \{ clearPortalSignUp\(\); /.test(fn), fn.slice(0, 90));
+    assert.ok(fn.includes(`{ clearPortalSignUp(); ${next}`), `${next} must come straight after`);
+    assert.equal(fn.split("clearPortalSignUp(").length - 1, 1);
+  }
+  // With NO uid, everywhere at this door: it can only end the in-flight marker,
+  // never an account pinned for an unfinished registration (tests/portal-door.test.ts).
+  for (const src of [page, ctx]) {
+    const calls = [...src.matchAll(/clearPortalSignUp\(([^)]*)\)/g)].map((m) => m[1]);
+    assert.ok(calls.length >= 1);
+    assert.deepEqual(calls.filter((arg) => arg !== ""), [], "the staff door never names a uid");
+    assert.equal(/markPortalSignUp|isPortalSignUp/.test(src), false, "…and never sets or reads the marker");
+  }
+  // Nothing else about the three staff calls changed.
+  assert.equal(ctx.split("ensureProfile({").length - 1, 3, "the listener, sign-up and Google still ensure the profile");
+  // The portal's own login page ends it on the way OUT as well — its staff link
+  // is a client-side navigation, so neither `pagehide` nor a throw would.
+  const portal = flat(code("app/portal/login/page.tsx"));
+  assert.ok(portal.includes("useEffect(() => { clearPortalSignUp(); return () => clearPortalSignUp(); }, []);"));
+  // And the profile is still decided by the marker PER UID plus the document.
+  assert.ok(code("lib/users.ts").includes("isPortalSignUp(params.uid) || (await isCustomerAccount(params.uid))"));
+});
+
+test("a pin left on a STAFF account by an unreadable door is dropped once its profile is on hand", () => {
+  const src = code("context/CustomerAuthContext.tsx").replace(/\s+/g, " ");
+  assert.ok(src.includes("useEffect(() => { if (user && profile) clearPortalSignUp(user.uid); }, [user, profile]);"));
+});
+
+test("a mistyped USERNAME is answered about the username — and Firebase is not asked", () => {
+  const src = code("app/portal/login/page.tsx");
+  const flat = src.replace(/\s+/g, " ");
+  assert.ok(/import \{[^}]*\bnormalizeUsername\b[^}]*\bisValidUsername\b[^}]*\} from "@\/lib\/customer-login";/.test(src));
+  assert.ok(flat.includes(
+    'const badUsername = mode === "in" && typed.length > 0 && !typed.includes("@") && !isValidUsername(normalizeUsername(typed));',
+  ), "sign-in tab only, no `@`, not a possible username");
+  // Refused BEFORE the busy flag and before the sign-in call.
+  const submit = src.slice(src.indexOf("async function handleSubmit("), src.indexOf("async function handleGoogle("));
+  const refused = submit.indexOf('if (badUsername) { setError({ text: c.login.errBadUsername, code: "" }); return; }');
+  assert.ok(refused > 0, "the refusal moved");
+  assert.ok(refused < submit.indexOf("setBusy(true);") && refused < submit.indexOf("await signInEmail("));
+  // …and if Firebase itself refuses the address behind a username, the sentence is still the username's.
+  assert.ok(submit.replace(/\s+/g, " ").includes(
+    'const asUsername = mode === "in" && !typed.includes("@") && authErrorKind(authErrorCode(err)) === "badEmail";',
+  ));
+  assert.ok(submit.includes('setError(asUsername ? { text: c.login.errBadUsername, code: "" } : shown);'));
+  for (const lang of ["ar", "en"] as const) {
+    assert.ok(cp[lang].login.errBadUsername.length > 0, `${lang}: errBadUsername`);
+    assert.notEqual(cp[lang].login.errBadUsername, cp[lang].login.errBadEmail);
+  }
+  assert.ok(cp.ar.login.errBadUsername.startsWith("اسم المستخدم غير صحيح"));
+  assert.equal(/البريد/.test(cp.ar.login.errBadUsername), false, "it does not talk about an e-mail");
+  assert.equal(/[؀-ۿ]/.test(cp.en.login.errBadUsername), false);
+});
+
+test("the portal names a username customer by the username, not by the made-up address", () => {
+  const src = code("app/portal/layout.tsx");
+  assert.ok(/import \{ usernameOf \} from "@\/lib\/customer-login";/.test(src));
+  assert.ok(src.includes('const shownId = usernameOf(user?.email) || (user?.email ?? "");'));
+  // The header and both cards (waiting, closed).
+  assert.equal(src.split("email={shownId}").length - 1, 2);
+  assert.ok(src.includes('<bdi dir="ltr" className="text-xs text-gray-400 hidden md:inline">{shownId}</bdi>'));
+  assert.equal(/\{user\.email\}|email=\{user\.email/.test(src), false, "the raw address is printed nowhere in the shell");
+  assert.ok(code("components/dashboard/status-screen.tsx").includes('{props.signedInAs}: <bdi dir="ltr">{props.email}</bdi>'));
+});
+
+test("the create dialog: the button, the grey code, the copy guard and the stale refusal", () => {
+  const src = code("components/dashboard/customer-accounts.tsx");
+  // The submit button is the one `canCreate` gates.
+  assert.ok(src.includes('<Btn type="submit" disabled={!canCreate}>'));
+  // `auth_failed` carries Firebase's token, small, grey and left-to-right.
+  assert.ok(src.includes('<bdi dir="ltr">{refusal.code}</bdi>'));
+  assert.ok(src.includes('code: reason === "auth_failed"'));
+  // A stray tap on the backdrop does not throw away a password nobody has copied.
+  assert.ok(src.includes('if (created && copyState !== "copied") { setCloseAsked(true); return; }'));
+  // ONE dialog instance in both returns: the list landing under an open dialog
+  // must not remount it and drop the keyboard.
+  assert.ok(src.includes('<Modal key="create-customer" open={creating}'));
+  assert.equal(src.split("{createDialog}").length - 1, 2);
+  // A refusal goes the moment the field it was about is changed.
+  assert.ok(src.includes("onChange={(e) => { setRefusal(null); setNewName(e.target.value); }}"));
+  assert.ok(src.includes("onChange={(e) => { setRefusal(null); setNewUser(normalizeUsername(e.target.value)); }}"));
+  const change = src.slice(src.indexOf("function changePass("), src.indexOf("function dismissCreate("));
+  assert.ok(change.includes("setRefusal(null);") && change.includes('setUnanswered("");') && change.includes("setNewPass(next);"));
+  assert.equal(src.split("changePass(").length - 1, 3, "typing and «توليد» both go through it");
+  assert.equal(src.split("setNewPass(").length - 1, 2, "…and nothing else sets the password but the reset");
+  assert.equal(src.split("if (id === NEW) setRefusal(null);").length - 1, 1, "the picker");
+  assert.equal(src.split("if (uid === NEW) setRefusal(null);").length - 1, 2, "adding and removing a spelling");
+  // An empty «العملاء» list says why inside the dialog, with a retry.
+  const empty = src.slice(src.indexOf("{clientRows.length === 0 ? ("), src.indexOf("{c.create.missing}"));
+  assert.ok(empty.length > 100, "the empty-list branch moved");
+  assert.ok(empty.includes("clientsLoading && !clientsFailed") && empty.includes("{p.common.loading}"));
+  assert.ok(/<LoadError variant="banner" text=\{c\.clientsFailed\} retry=\{p\.common\.retry\} onRetry=\{reloadClients\}/.test(empty));
+  // …and that retry (a plain <button>) cannot submit the form it now sits in.
+  const ui = code("components/dashboard/ui.tsx");
+  const loadError = ui.slice(ui.indexOf("export function LoadError("));
+  const buttons = [...loadError.slice(0, loadError.indexOf("\n}\n")).matchAll(/<button\s+([a-zA-Z]+)=/g)].map((m) => m[1]);
+  assert.deepEqual(buttons, ["type", "type"], "both raw retry buttons start with type=\"button\"");
+  // Correct Arabic under the password box.
+  assert.equal(/أأ/.test(JSON.stringify(cp.ar)), false, "two hamzas in a row is a typo");
+  assert.equal(cp.ar.staff.create.adviceShort, "قصيرة — يُفضَّل 10 أحرف أو أكثر.");
+});
+
+test("a sign-up that got NO ANSWER is not reported as «not created»", () => {
+  const route = code(NEW_ROUTE);
+  // The route: a call that threw (a timeout, a dropped connection) may have created the account.
+  const caught = route.slice(route.indexOf("} catch {", route.indexOf("res = await fetch(")), route.indexOf("const answer ="));
+  assert.ok(caught.includes('console.error("[customers] signUp: NO_ANSWER");'));
+  assert.ok(caught.includes('return refuse("maybe_created", 504, { code: "NO_ANSWER" });'));
+  assert.equal(/auth_failed/.test(caught), false);
+  // The screen: the form (and the password in it) stays, the list is read again…
+  const src = code("components/dashboard/customer-accounts.tsx");
+  const submit = src.slice(src.indexOf("async function submitCreate()"), src.indexOf("const portalLink"));
+  const flat = submit.replace(/\s+/g, " ");
+  assert.ok(flat.includes(
+    'if (reason === "maybe_created" || (!json && res.status >= 500)) { setUnanswered(newUser); setRefusal({ reason: "maybe_created", code: "" }); reload(); return; }',
+  ));
+  assert.ok(flat.includes('} catch { setSending(false); setUnanswered(newUser); setRefusal({ reason: "network", code: "" }); return; }'));
+  // …and «taken» on the very next try with the same username says whose login it most likely is.
+  const taken = flat.indexOf('if (reason === "username_taken" && unanswered !== "" && unanswered === newUser) { setRefusal({ reason: "taken_after_no_answer", code: "" }); return; }');
+  assert.ok(taken > 0 && taken < flat.indexOf("const known ="), "decided before the plain «taken» sentence");
+  // Nothing is CLAIMED: no result panel is opened on a guess.
+  assert.equal(submit.split("setCreated(").length - 1, 2, "only a real answer opens the panel");
+  // It remembers a USERNAME, never the password.
+  assert.equal(/setUnanswered\((?!newUser\)|""\))/.test(src), false);
+  for (const lang of ["ar", "en"] as const) {
+    const e = cp[lang].staff.create.errors;
+    assert.ok(e.maybe_created.length > 0 && e.taken_after_no_answer.length > 0, lang);
+    // A refresh would wipe the password of a login that may exist.
+    for (const k of ["generic", "maybe_created", "taken_after_no_answer"] as const) {
+      assert.equal(/حدّث الصفحة|refresh the page/i.test(e[k]), false, `${lang}.${k} sends the owner to refresh`);
+    }
+  }
+  assert.ok(cp.ar.staff.create.errors.maybe_created.includes(`«${cp.ar.staff.create.submit}»`), "it names the button by its label");
+  assert.ok(cp.ar.staff.create.errors.taken_after_no_answer.includes(cp.ar.staff.pendingQueue));
+});
+
+test("«إنشاء حساب عميل»: the form sends through authedFetch and keeps the password in state only", () => {
+  const src = code("components/dashboard/customer-accounts.tsx");
+  assert.ok(src.includes('res = await authedFetch("/api/customers", {'));
+  assert.ok(/username: newUser, password: newPass, displayName: newName\.trim\(\), client: newLink,/.test(src));
+  // The SAME picker and alias chips an approval uses.
+  assert.ok(src.includes("{picker(NEW)}") && src.split("{picker(a.uid)}").length - 1 === 2);
+  assert.ok(src.includes("const newLink = linkFor(NEW);"));
+  // A visible text box, on purpose, with a generator fed by the browser's own source.
+  const pw = src.slice(src.indexOf('id="new-customer-password"'), src.indexOf("/>", src.indexOf('id="new-customer-password"')));
+  assert.ok(pw.includes('type="text"') && pw.includes('dir="ltr"') && pw.includes('autoComplete="off"'));
+  assert.equal(/type="password"/.test(src), false);
+  assert.ok(src.includes("changePass(generatePassword(secureInt))"));
+  assert.ok(/crypto\.getRandomValues\(/.test(src));
+  for (const f of ["components/dashboard/customer-accounts.tsx", "lib/customer-login.ts"]) {
+    assert.equal(/Math\.random/.test(code(f)), false, `${f}: a password is never made from Math.random`);
+  }
+  // Advice never blocks: the button depends on the minimum, not on the advice.
+  const can = src.slice(src.indexOf("const canCreate ="), src.indexOf(";", src.indexOf("const canCreate =")));
+  assert.ok(can.includes('userIssue === "ok"') && can.includes("newPass.length >= MIN_PASSWORD") && can.includes("!!newLink"));
+  assert.equal(/advice/.test(can), false);
+  // The username is lower-cased as it is typed.
+  assert.ok(src.includes("setNewUser(normalizeUsername(e.target.value));"));
+  assert.equal(src.split("setNewUser(").length - 1, 2, "typing (normalised) and the reset — nothing else sets it");
+  // The password is in no storage, no log and no URL: state, the request body, the clipboard on a tap.
+  assert.equal(/localStorage|sessionStorage|console\.|writeLastSeen/.test(src), false);
+  assert.equal(/searchParams|\?password|href=\{[^}]*newPass/.test(src), false);
+  // The panel shows it from the form's own state — the server never sends it back…
+  assert.ok(src.includes("setCreated({ username: json.username || newUser, password: newPass, warn: \"\" });"));
+  assert.equal(/json\??\.password/.test(src), false);
+  // …and closing throws it away and reloads the list.
+  const reset = src.slice(src.indexOf("function resetCreate()"), src.indexOf("function openCreate()"));
+  assert.ok(reset.includes('setNewPass("")') && reset.includes("setCreated(null)"));
+  const finish = src.slice(src.indexOf("function finishCreate()"), src.indexOf("async function submitCreate()"));
+  assert.ok(finish.includes("resetCreate();") && finish.includes("if (made) reload();"));
+  // A login that exists but is not linked still hands its details over.
+  assert.ok(src.includes('if (reason === "created_not_linked") {'));
+  // An owner-made account is listed by its username, not by the made-up address.
+  assert.ok(src.includes("const u = usernameOf(a.email);"));
+  assert.equal(/<p[^>]*>\{a\.email\}<\/p>/.test(src), false, "the raw address is no longer printed on its own");
+  assert.equal(src.split("{identity(a)}").length - 1, 2, "both lists");
+  // The absolute link, and the message that is copied — three lines, Arabic.
+  assert.ok(src.includes("`${window.location.origin}/portal/login`"));
+  assert.equal(cp.ar.staff.create.copyText, "الرابط: {link}\nاسم المستخدم: {username}\nكلمة المرور: {password}");
+  assert.ok(src.includes("cp.ar.staff.create.copyText"), "the customer's message is Arabic whatever the screen's language");
+});
+
+test("every refusal of the create form is one sentence, in both languages", () => {
+  const ar = cp.ar.staff.create;
+  assert.equal(ar.open, "إنشاء حساب عميل");
+  assert.equal(ar.doneTitle, "تم إنشاء الحساب");
+  assert.equal(ar.copy, "نسخ بيانات الدخول");
+  assert.equal(ar.generate, "توليد");
+  assert.equal(ar.separate, "أرسل اسم المستخدم وكلمة المرور في رسالتين منفصلتين");
+  assert.equal(ar.errors.username_taken, "اسم المستخدم مستخدم بالفعل — اختر غيره");
+  assert.equal(ar.errors.unknown_client, "هذا العميل غير موجود في «العملاء» — أعد اختياره");
+  assert.equal(
+    ar.errors.created_not_linked,
+    "تم إنشاء الدخول لكن لم يكتمل الربط — سيظهر الحساب في «في انتظار الموافقة»؛ اعتمده من هناك",
+  );
+  assert.ok(ar.errors.created_not_linked.includes(cp.ar.staff.pendingQueue), "it names the queue by the name on the screen");
+  // Every reason the route can answer has a sentence — errText must never fall to "undefined".
+  const route = code(NEW_ROUTE);
+  const reasons = new Set([...route.matchAll(/refuse\("([a-z_]+)"/g)].map((m) => m[1]));
+  for (const r of ["username_taken", "weak_password", "bad_username", "too_many", "auth_failed"]) reasons.add(r); // signUpRefusal's
+  assert.ok(reasons.size >= 9, `expected the route's reasons, found ${[...reasons].join(", ")}`);
+  for (const lang of ["en", "ar"] as const) {
+    const errors = cp[lang].staff.create.errors as Record<string, string>;
+    for (const r of reasons) assert.ok(errors[r]?.length > 0, `${lang}: no sentence for ${r}`);
+    for (const extra of ["created_not_linked_doc", "forbidden", "network", "generic"]) assert.ok(errors[extra]?.length > 0, `${lang}: ${extra}`);
+    for (const k of ["link", "username", "password"]) assert.ok(cp[lang].staff.create.copyText.includes(`{${k}}`), `${lang}: copyText {${k}}`);
+    assert.equal(cp[lang].staff.create.copyText.split("\n").length, 3, `${lang}: three lines`);
   }
 });

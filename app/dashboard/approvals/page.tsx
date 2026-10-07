@@ -95,8 +95,10 @@ export default function ApprovalsPage() {
         )}
         {/* The customer section reads a different collection, so a slow or
             failed STAFF list must not hide it — approving a buyer is not
-            blocked by the staff queue being unavailable. */}
-        <CustomerAccounts />
+            blocked by the staff queue being unavailable. The SAME key as the
+            one below: when the staff list lands, this section must not be
+            remounted under an open «إنشاء حساب عميل» dialog. */}
+        <CustomerAccounts key="customer-accounts" />
       </div>
     );
   }
@@ -248,7 +250,7 @@ export default function ApprovalsPage() {
         </div>
       </div>
 
-      <CustomerAccounts />
+      <CustomerAccounts key="customer-accounts" />
     </div>
   );
 }

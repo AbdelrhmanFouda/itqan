@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { ensureProfile, watchProfile, type UserProfile } from "@/lib/users";
+import { clearPortalSignUp } from "@/lib/portal-signup";
 import { clearLastSeen } from "@/components/dashboard/last-seen";
 import type { Role } from "@/lib/roles";
 
@@ -109,11 +110,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // ── The staff door ends a portal sign-in left in flight (2026-10-07) ──────
+  // The customer portal marks its door BEFORE it asks Firebase, and that
+  // marker has no uid: while it is set, `ensureProfile` reads whoever signs in
+  // next on this browser as a customer. A Google popup left open behind the
+  // portal's page and a sign-up HERE inside its fifteen minutes made a new
+  // employee a customer applicant, with no way back short of the console. So
+  // each staff path drops it first. With no uid the call removes ONLY that
+  // in-flight marker — never an account pinned for an unfinished registration
+  // (lib/portal-signup.ts) — so nothing else about these three calls changes.
   async function signInEmail(email: string, password: string) {
+    clearPortalSignUp();
     await signInWithEmailAndPassword(auth, email, password);
   }
 
   async function signUpEmail(email: string, password: string, displayName: string, requestedRole: Role) {
+    clearPortalSignUp();
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     if (displayName) await updateProfile(cred.user, { displayName });
     await ensureProfile({
@@ -125,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signInGoogle(requestedRole?: Role | null) {
+    clearPortalSignUp();
     const provider = new GoogleAuthProvider();
     const cred = await signInWithPopup(auth, provider);
     await ensureProfile({

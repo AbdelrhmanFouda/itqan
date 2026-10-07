@@ -279,6 +279,11 @@ const PORTAL = [
   ["PATCH", "/api/portal/requests/REQ-2026-0001"],
   ["POST", "/api/requests/REQ-2026-0001/approve"],
   ["POST", "/api/requests/REQ-2026-0001/reject"],
+  // «إنشاء حساب عميل» (2026-10-07): the owner makes a customer's login. Owner
+  // and manager only, and the guard runs before the body is read — so an
+  // empty body with no token, or with a bogus one, is a 401 and creates
+  // nothing. (A real token is never tried from here: it would make an account.)
+  ["POST", "/api/customers"],
 ];
 for (const [m, p] of PORTAL) {
   await check(`${m} ${p} without a token → 401`, async () => {

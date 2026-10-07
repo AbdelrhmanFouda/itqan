@@ -47,12 +47,13 @@ function shape(uid: string, d: DocumentData): UserProfile {
  * including a buyer signing in to /portal — and a staff profile written for a
  * buyer would put them in the owner's staff approvals queue and, if anyone ever
  * approved it by reflex, hand them a role. So before creating anything we check
- * whether this uid is a customer: `isPortalSignUp(uid)` for the window during
- * sign-up when `customers/{uid}` does not exist yet, and the document itself
- * for every sign-in after that (a user may read their own customer document —
- * firestore.rules). The marker is PINNED to the uid it was set for, so an
- * abandoned sign-up in this browser can never suppress a colleague's staff
- * profile (lib/portal-signup.ts).
+ * whether this uid is a customer: `isPortalSignUp(uid)` for the window at the
+ * portal's door when `customers/{uid}` does not exist yet — every sign-in
+ * there since 2026-10-07, not only a sign-up — and the document itself for
+ * every sign-in after that (a user may read their own customer document —
+ * firestore.rules). The marker is PINNED to the uid it was set for, and the
+ * un-pinned one expires, so an abandoned sign-in in this browser cannot
+ * suppress a colleague's staff profile for long (lib/portal-signup.ts).
  *
  * Returning null means "this is not a staff account"; the caller uses it to
  * send the person to /portal instead of /dashboard.
@@ -108,6 +109,24 @@ async function isCustomerAccount(uid: string): Promise<boolean> {
     return (await getDoc(doc(db, "customers", uid))).exists();
   } catch {
     return false;
+  }
+}
+
+/**
+ * Does this uid hold a STAFF profile? `null` = it could not be read.
+ *
+ * A READ, and the only thing the customer portal's door asks of this
+ * collection (context/CustomerAuthContext.tsx, 2026-10-07): an account that
+ * already has a profile is staff and is left exactly as it is — never handed a
+ * customer document. Three answers on purpose: "could not tell" must not be
+ * taken for "no profile", or a hiccup would register a member of staff as a
+ * customer applicant.
+ */
+export async function hasStaffProfile(uid: string): Promise<boolean | null> {
+  try {
+    return (await getDoc(doc(db, COL, uid))).exists();
+  } catch {
+    return null;
   }
 }
 

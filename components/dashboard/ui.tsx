@@ -223,6 +223,7 @@ export function LoadError({
         <span>{text}</span>
         {note && <span className="text-xs text-red-600/80">{note}</span>}
         <button
+          type="button"
           onClick={onRetry}
           disabled={loading}
           className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-0 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 active:bg-red-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
@@ -238,6 +239,7 @@ export function LoadError({
       <span>{text}</span>
       {note && <span className="text-xs text-red-600/80">{note}</span>}
       <button
+        type="button"
         onClick={onRetry}
         disabled={loading}
         className="inline-flex items-center gap-1.5 min-h-8 px-2 -mx-2 rounded font-medium underline hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"

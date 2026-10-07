@@ -8,6 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import { CustomerAuthProvider, useCustomerAuth } from "@/context/CustomerAuthContext";
 import { cp } from "@/lib/i18n.portal";
 import { isLinkedCustomer } from "@/lib/customer-link";
+import { usernameOf } from "@/lib/customer-login";
 import { WHATSAPP_URL } from "@/lib/company";
 import { Spinner } from "@/components/dashboard/ui";
 import { StatusScreen } from "@/components/dashboard/status-screen";
@@ -70,6 +71,10 @@ function PortalShell({ children }: { children: React.ReactNode }) {
 
   const toggleLang = () => setLang(isAr ? "en" : "ar");
 
+  // A login the owner made is a USERNAME; the address behind it is made up,
+  // was never shown to the customer and receives no mail. Show what they know.
+  const shownId = usernameOf(user?.email) || (user?.email ?? "");
+
   if (isLogin) return <>{children}</>;
 
   if (loading || !user || (user && profile)) {
@@ -90,7 +95,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
         tone="red"
         title={c.gate.closedTitle}
         body={c.gate.closedBody}
-        email={user.email ?? ""}
+        email={shownId}
         signedInAs={c.common.signedInAs}
         signOutLabel={c.common.signOut}
         backLabel={c.common.backToSite}
@@ -110,7 +115,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
         isAr={isAr}
         title={c.gate.pendingTitle}
         body={c.gate.pendingBody}
-        email={user.email ?? ""}
+        email={shownId}
         requestedLabel={
           account?.requestedClient ? `${c.gate.requestedCompany}: ${account.requestedClient}` : undefined
         }
@@ -140,7 +145,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
         <span className="text-gray-300 text-xs hidden sm:inline">|</span>
         <span className="text-sm text-gray-500 hidden sm:inline">{c.common.portal}</span>
         <div className="flex items-center gap-2 sm:gap-3 ms-auto">
-          <span className="text-xs text-gray-400 hidden md:inline">{user.email}</span>
+          <bdi dir="ltr" className="text-xs text-gray-400 hidden md:inline">{shownId}</bdi>
           <button
             onClick={toggleLang}
             className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-900 border border-gray-200 rounded px-2.5 py-1.5 min-h-11 sm:min-h-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1"

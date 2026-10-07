@@ -35,7 +35,15 @@ export const ad = {
       errPopupClosed: "Google sign-in was cancelled.",
       errUnauthorizedDomain: "Google sign-in is not allowed on this address. Add it to Firebase → Authentication → Settings → Authorized domains, or sign in with an email and password.",
       errNeedRole: "Please choose the role you need.",
+      errNetwork: "Could not connect. Check your internet connection and try again.",
+      errTooMany: "Too many attempts. Wait a few minutes and try again.",
+      errBadEmail: "That email address is not valid — check how it is written.",
+      errSignupClosed: "Creating accounts is not available right now — contact us.",
+      errDisabled: "This account has been stopped — contact us.",
       errGeneric: "Something went wrong. Please try again.",
+      // The mirror of the portal's «من فريق العمل؟» line (2026-10-07): a
+      // customer who lands on the staff door is shown the other one.
+      customerHint: "Customer? Sign in from the customer portal",
     },
     roles: {
       owner: "Owner",
@@ -149,7 +157,13 @@ export const ad = {
       errPopupClosed: "تم إلغاء تسجيل الدخول عبر Google.",
       errUnauthorizedDomain: "تسجيل الدخول عبر Google غير مسموح على هذا العنوان. أضفه في Firebase ← Authentication ← Settings ← Authorized domains، أو سجّل الدخول ببريد وكلمة مرور.",
       errNeedRole: "من فضلك اختر الدور المطلوب.",
+      errNetwork: "تعذّر الاتصال. تحقق من الإنترنت ثم حاول مرة أخرى.",
+      errTooMany: "محاولات كثيرة. انتظر بضع دقائق ثم حاول مرة أخرى.",
+      errBadEmail: "البريد الإلكتروني غير صحيح — راجع كتابته.",
+      errSignupClosed: "إنشاء الحسابات غير متاح الآن — تواصل معنا.",
+      errDisabled: "هذا الحساب موقوف — تواصل معنا.",
       errGeneric: "حدث خطأ ما. حاول مرة أخرى.",
+      customerHint: "عميل؟ ادخل من بوابة العملاء",
     },
     roles: {
       owner: "المالك",

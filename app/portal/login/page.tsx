@@ -9,6 +9,8 @@ import { useCustomerAuth } from "@/context/CustomerAuthContext";
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { cp } from "@/lib/i18n.portal";
 import { clearPortalSignUp } from "@/lib/portal-signup";
+import { authErrorCode, authErrorKind, authErrorDetail, type AuthErrorKind } from "@/lib/auth-errors";
+import { loginEmailFor, usernameOf, normalizeUsername, isValidUsername } from "@/lib/customer-login";
 import { Field, inputCls, Btn, Spinner } from "@/components/dashboard/ui";
 
 /**
@@ -24,27 +26,43 @@ import { Field, inputCls, Btn, Spinner } from "@/components/dashboard/ui";
  * «العملاء» row; nothing the person types here is ever used for access. The
  * hint under the field says so, because a buyer who thinks the box unlocks
  * something will type until it does.
+ *
+ * ── A username or an address (2026-10-07) ───────────────────────────────────
+ * The owner can make a customer's login himself («حسابات العملاء» → «إنشاء
+ * حساب عميل»): a USERNAME and a password. So the sign-in box takes either, and
+ * what was typed goes through `loginEmailFor` (lib/customer-login.ts). Signing
+ * UP here still needs a real address — a person registering themselves should
+ * use one they can receive mail at — so that tab stays an e-mail box.
  */
 type ErrStrings = (typeof cp)["en"]["login"];
 
-function mapError(code: string | undefined, e: ErrStrings): string {
-  switch (code) {
-    case "auth/invalid-credential":
-    case "auth/wrong-password":
-    case "auth/user-not-found":
-      return e.errInvalid;
-    case "auth/email-already-in-use":
-      return e.errEmailInUse;
-    case "auth/weak-password":
-      return e.errWeakPassword;
-    case "auth/unauthorized-domain":
-      return e.errUnauthorizedDomain;
-    case "auth/popup-closed-by-user":
-    case "auth/cancelled-popup-request":
-      return e.errPopupClosed;
-    default:
-      return code === "register_failed" ? e.errRegister : e.errGeneric;
-  }
+/** One sentence per kind of failure (lib/auth-errors.ts) — never a dead end. */
+const ERR_KEY: Record<AuthErrorKind, keyof ErrStrings> = {
+  invalid: "errInvalid",
+  emailInUse: "errEmailInUse",
+  weakPassword: "errWeakPassword",
+  unauthorizedDomain: "errUnauthorizedDomain",
+  popupClosed: "errPopupClosed",
+  network: "errNetwork",
+  tooMany: "errTooMany",
+  badEmail: "errBadEmail",
+  signupClosed: "errSignupClosed",
+  disabled: "errDisabled",
+  register: "errRegister",
+  generic: "errGeneric",
+};
+
+type Shown = { text: string; code: string };
+
+/**
+ * What to print for a thrown sign-in error. Only a `generic` failure carries
+ * its raw code — the word under the sentence that lets the next unknown
+ * failure be reported.
+ */
+function describe(err: unknown, e: ErrStrings): Shown {
+  const code = authErrorCode(err);
+  const kind = authErrorKind(code);
+  return { text: e[ERR_KEY[kind]], code: kind === "generic" ? authErrorDetail(code) : "" };
 }
 
 export default function PortalLoginPage() {
@@ -56,11 +74,12 @@ export default function PortalLoginPage() {
   const { signInEmail, signUpEmail, signInGoogle } = useCustomerAuth();
 
   const [mode, setMode] = useState<"in" | "up">("in");
+  // On the sign-in tab: a username or an address. On the sign-up tab: an address.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [company, setCompany] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   usePageTitle(mode === "in" ? c.login.signInTitle : c.login.signUpTitle);
 
@@ -69,7 +88,16 @@ export default function PortalLoginPage() {
   // signs in on this browser next. Clearing it on mount costs nothing — and
   // it clears ONLY that un-pinned marker, never an account whose customer
   // document has still to be written (lib/portal-signup.ts).
-  useEffect(() => { clearPortalSignUp(); }, []);
+  //
+  // And again on the way OUT: a Google popup left open behind this page keeps
+  // its sign-in pending, and the «من فريق العمل؟» link below is a client-side
+  // navigation — no `pagehide`, no throw — so nothing else would end the
+  // marker before somebody used the staff door. A sign-in that does complete
+  // after the page is gone pins its own uid the instant it does.
+  useEffect(() => {
+    clearPortalSignUp();
+    return () => clearPortalSignUp();
+  }, []);
 
   // Not while a sign-up is in flight: the account exists a moment before its
   // customer document does, and navigating on that would take the person off
@@ -80,34 +108,54 @@ export default function PortalLoginPage() {
     if (!loading && user) router.replace("/portal");
   }, [busy, loading, user, router]);
 
+  // Signing up needs an address somebody can receive mail at: an `@`, and not
+  // the reserved domain the owner-made usernames live on.
+  const typed = email.trim();
+  const realAddress = typed.includes("@") && usernameOf(typed) === "";
   const canSubmit =
-    email.trim().length > 0 &&
     password.length >= 6 &&
-    (mode === "in" || (displayName.trim().length > 0 && company.trim().length > 0));
+    (mode === "in"
+      ? loginEmailFor(typed).length > 0
+      : realAddress && displayName.trim().length > 0 && company.trim().length > 0);
+  // On the sign-in tab, something with no `@` is a USERNAME. One that could
+  // never be a username (a space, Arabic letters, too short) would go to
+  // Firebase as a broken address and come back as «البريد الإلكتروني غير
+  // صحيح» — to a person who typed no e-mail at all.
+  const badUsername = mode === "in" && typed.length > 0 && !typed.includes("@") && !isValidUsername(normalizeUsername(typed));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setError(null);
+    // Enter in a field submits the form even while the button is disabled.
+    if (!canSubmit) return;
+    // Said here, in its own words, and Firebase is not asked at all.
+    if (badUsername) { setError({ text: c.login.errBadUsername, code: "" }); return; }
     setBusy(true);
     try {
-      if (mode === "in") await signInEmail(email.trim(), password);
-      else await signUpEmail(email.trim(), password, displayName.trim(), company.trim());
+      // A username becomes its address on the login domain; an address is
+      // handed over as typed.
+      if (mode === "in") await signInEmail(loginEmailFor(typed), password);
+      else await signUpEmail(typed, password, displayName.trim(), company.trim());
       router.replace("/portal");
     } catch (err) {
-      setError(mapError((err as { code?: string; message?: string }).code ?? (err as Error)?.message, c.login));
+      const shown = describe(err, c.login);
+      // Firebase refusing the ADDRESS of something typed without an `@` is a
+      // refusal of the username.
+      const asUsername = mode === "in" && !typed.includes("@") && authErrorKind(authErrorCode(err)) === "badEmail";
+      setError(asUsername ? { text: c.login.errBadUsername, code: "" } : shown);
       setBusy(false);
     }
   }
 
   async function handleGoogle() {
-    setError("");
-    if (mode === "up" && !company.trim()) { setError(c.login.errNeedCompany); return; }
+    setError(null);
+    if (mode === "up" && !company.trim()) { setError({ text: c.login.errNeedCompany, code: "" }); return; }
     setBusy(true);
     try {
       await signInGoogle(mode === "up" ? company.trim() : undefined);
       router.replace("/portal");
     } catch (err) {
-      setError(mapError((err as { code?: string; message?: string }).code ?? (err as Error)?.message, c.login));
+      setError(describe(err, c.login));
       setBusy(false);
     }
   }
@@ -164,11 +212,20 @@ export default function PortalLoginPage() {
                   </Field>
                 </>
               )}
-              <Field label={c.login.email}>
+              {/* type="text", not "email": a username has no `@`, and an e-mail
+                  box would refuse it before the form ever submitted. The
+                  e-mail KEYBOARD is still asked for, and nothing the phone
+                  might "correct" is allowed to touch what was typed. */}
+              <Field label={mode === "in" ? c.login.identifier : c.login.email}>
                 <input
-                  id="portal-email" type="email" autoComplete="email" className={inputCls}
+                  id="portal-email" type="text" inputMode="email" dir="ltr"
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                  autoComplete={mode === "in" ? "username" : "email"} className={inputCls}
                   value={email} onChange={(e) => setEmail(e.target.value)} required
                 />
+                {mode === "up" && (
+                  <p className="text-xs text-gray-400 mt-1 leading-relaxed">{c.login.emailHint}</p>
+                )}
               </Field>
               <Field label={c.login.password}>
                 <input
@@ -178,7 +235,17 @@ export default function PortalLoginPage() {
                 />
               </Field>
 
-              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+              {error && (
+                <div className="mb-3" role="alert">
+                  <p className="text-sm text-red-600">{error.text}</p>
+                  {/* Only an unrecognised failure carries its raw code. */}
+                  {error.code && (
+                    <p className="text-[11px] text-gray-400 mt-0.5 break-all">
+                      <bdi dir="ltr">{error.code}</bdi>
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Disabled until the form is valid: a customer must never meet a
                   refusal they could have been kept away from. */}
@@ -199,12 +266,12 @@ export default function PortalLoginPage() {
           </div>
 
           <button
-            onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(""); }}
+            onClick={() => { setMode(mode === "in" ? "up" : "in"); setError(null); }}
             className="block w-full text-center text-sm text-blue-600 hover:underline mt-5 py-2.5 min-h-11 sm:min-h-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             {mode === "in" ? c.login.needAccount : c.login.haveAccount}
           </button>
-          <Link href="/login" className="block text-center text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5">
+          <Link href="/login" className="flex items-center justify-center text-center text-xs text-gray-400 hover:text-gray-600 mt-3 py-2.5 min-h-11 sm:min-h-0">
             {c.login.staffHint}
           </Link>
           <Link href="/" className="block text-center text-xs text-gray-400 hover:text-gray-600 py-2.5">

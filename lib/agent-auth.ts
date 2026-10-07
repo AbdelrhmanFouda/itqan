@@ -18,6 +18,7 @@ import {
   customerStatusOf, normalizeClients,
   type ClientLink, type CustomerStatus,
 } from "@/lib/customer-link";
+import { restFields } from "@/lib/firestore-rest";
 
 const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "itqan-5f802";
 const CERTS_URL =
@@ -187,29 +188,8 @@ export type CustomerRecord = {
 
 const CUSTOMER_TIMEOUT_MS = 5000;
 
-/** One Firestore REST `Value` as a plain JS value. */
-function restValue(v: unknown): unknown {
-  if (!v || typeof v !== "object") return undefined;
-  const f = v as Record<string, unknown>;
-  if ("stringValue" in f) return String(f.stringValue ?? "");
-  if ("integerValue" in f) return Number(f.integerValue);
-  if ("doubleValue" in f) return Number(f.doubleValue);
-  if ("booleanValue" in f) return Boolean(f.booleanValue);
-  if ("nullValue" in f) return null;
-  if ("timestampValue" in f) return String(f.timestampValue ?? "");
-  if ("arrayValue" in f) {
-    const values = (f.arrayValue as { values?: unknown[] })?.values ?? [];
-    return values.map(restValue);
-  }
-  if ("mapValue" in f) return restFields((f.mapValue as { fields?: Record<string, unknown> })?.fields);
-  return undefined;
-}
-
-function restFields(fields: Record<string, unknown> | undefined): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fields ?? {})) out[k] = restValue(v);
-  return out;
-}
+// The REST decoder lives in lib/firestore-rest.ts (pure) since 2026-10-07, so
+// the test for the owner-made login can round-trip the link through it.
 
 export async function lookupCustomer(
   user: VerifiedUser,

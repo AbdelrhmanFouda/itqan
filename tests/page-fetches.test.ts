@@ -55,6 +55,9 @@ const GUARDED_PREFIXES = [
   // preview and the two decisions. Sales-only, so a token-less fetch answers
   // 401 and the page would show an empty queue as if nothing were waiting.
   "/api/requests",
+  // «إنشاء حساب عميل» (2026-10-07): owner/manager only. A token-less call
+  // answers 401 and the dialog would say the login could not be created.
+  "/api/customers",
 ];
 
 type Call = { file: string; line: number; url: string; authed: boolean; ownToken: boolean };
