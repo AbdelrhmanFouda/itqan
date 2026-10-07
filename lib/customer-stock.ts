@@ -347,7 +347,20 @@ export function buildCustomerStockDetailed(input: CustomerStockInput): CustomerS
     KIND_ORDER[a.line.kind] - KIND_ORDER[b.line.kind] || a.line.item.localeCompare(b.line.item, "ar"));
 }
 
+/**
+ * Kinds a customer is NOT shown. Materials are hidden at the owner's word
+ * (2026-10-07: "hide the materials from the customer") — the received and
+ * issued kilograms of a customer's own resin say how much the factory used,
+ * which is the factory's business. They are dropped HERE, on the server, so a
+ * material line never reaches the wire; hiding it on the page alone would leave
+ * it one network tab away. The rules above still compute a material line
+ * (`buildCustomerStockDetailed`), so emptying this set brings them back whole.
+ */
+export const HIDDEN_FROM_CUSTOMER: ReadonlySet<PortalStockKind> = new Set<PortalStockKind>(["material"]);
+
 /** What `GET /api/portal/stock` answers with. */
 export function buildCustomerStock(input: CustomerStockInput): PortalStockLine[] {
-  return buildCustomerStockDetailed(input).map((d) => d.line);
+  return buildCustomerStockDetailed(input)
+    .map((d) => d.line)
+    .filter((line) => !HIDDEN_FROM_CUSTOMER.has(line.kind));
 }

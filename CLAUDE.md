@@ -51,6 +51,9 @@ Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 Owner: "show al masreya al zakeya their stock and their jobs". `/portal/stock` («المخزون», the second
 link under the portal header) → `GET /api/portal/stock` (`requireCustomer`, reads nothing off the request).
 Also: an order with no quantity on `/portal` reads «الكمية لم تُسجَّل بعد» instead of an empty line.
+- **Materials are HIDDEN from the customer (owner, 2026-10-07)** — `HIDDEN_FROM_CUSTOMER` in the same file;
+  `buildCustomerStock` drops them on the server, so a material line is never on the wire. The rules still
+  compute it (`buildCustomerStockDetailed`); emptying the set brings materials back.
 - **Rules: `lib/customer-stock.ts`** (pure; the test loads it through `tests/_alias.ts`, which maps `@/` for the
   test process only). «مخزن اتقان» rows whose «العميل» matches the link EXACTLY, aggregated per item across
   places; `PORTAL_STOCK_KEYS` is the whole wire — no place, loss, client, number or note.

@@ -25,7 +25,7 @@ import { netMismatch } from "../lib/storage-filter.ts";
 // Loaded dynamically: the module imports its siblings through `@/`, which
 // tests/_alias.ts maps — and a static import would be linked before it could.
 const {
-  PORTAL_STOCK_KEYS, buildCustomerStock, buildCustomerStockDetailed, isScaleEntry, isWeightEntry, keptByWeightKg,
+  HIDDEN_FROM_CUSTOMER, PORTAL_STOCK_KEYS, buildCustomerStock, buildCustomerStockDetailed, isScaleEntry, isWeightEntry, keptByWeightKg,
   stockKindOf, stockUnitOf,
 } = await import("../lib/customer-stock.ts");
 
@@ -65,6 +65,8 @@ const input = (i: Input) => ({
 });
 const build = (i: Input) => buildCustomerStock(input(i));
 const detail = (i: Input) => buildCustomerStockDetailed(input(i));
+/** Every computed line, hidden kinds included — the rules, before the customer's cut. */
+const detailLines = (i: Input) => detail(i).map((d) => d.line);
 
 /* ------------------------------ the aggregation ---------------------------- */
 
@@ -104,7 +106,7 @@ test("the name is compared folded (spaces, digits, case) and printed as the shee
 });
 
 test("the same name as a product and as a material is two lines", () => {
-  const lines = build({
+  const lines = detailLines({
     balance: [
       bal({ item: "صنف", inQty: "10", avail: "10" }),
       bal({ item: "صنف", itemType: "خامة", unit: "كجم", inQty: "25", avail: "25" }),
@@ -173,7 +175,8 @@ test("an account with no link sees nothing", () => {
 });
 
 test("a line carries exactly the whitelisted keys, whatever the source rows hold", () => {
-  const lines = build({
+  // every computed line, the hidden kinds included — the whitelist holds for all of them
+  const lines = detailLines({
     balance: [
       { ...bal({ loc: "A11", inQty: "10", avail: "10" }), min: "50", price: "12.5", secret: "x" },
       bal({ itemType: "خامة", item: "خامة 1", unit: "كجم", loc: "T", inQty: "5", avail: "5" }),
@@ -192,7 +195,8 @@ test("a line carries exactly the whitelisted keys, whatever the source rows hold
 });
 
 test("no place, client name, movement number, note or beneficiary reaches a line", () => {
-  const lines = build({
+  // scanned over every computed line, so the rule also covers a kind that is hidden today
+  const lines = detailLines({
     balance: [
       bal({ loc: "A11", inQty: "600", avail: "600" }),
       bal({ loc: "رف", inQty: "400", avail: "400" }),
@@ -461,7 +465,7 @@ test("on a weight-kept line a counted movement with «وزن الحبة» = 1 is
 });
 
 test("a material is kilograms, and its kg IS its quantity", () => {
-  const [l] = build({
+  const [l] = detailLines({
     balance: [
       bal({ itemType: "خامة", item: "خامة 1", unit: "كجم", loc: "C13", inQty: "3,200", inLast: "2026-05-01", outQty: "3,200", outLast: "2026-05-20", avail: "0" }),
       bal({ itemType: "خامة", item: "خامة 1", unit: "كجم", loc: "", inQty: "1,800", inLast: "2026-06-01", outQty: "900.5", outLast: "2026-06-05", avail: "899.5" }),
@@ -570,7 +574,7 @@ test("kind and unit come from the sheet's own two cells", () => {
 });
 
 test("products come first, then materials, then anything else — by name inside each", () => {
-  const lines = build({
+  const lines = detailLines({
     balance: [
       bal({ itemType: "اسطمبة", item: "صنف آخر", unit: "كرتونة", inQty: "2", avail: "2" }),
       bal({ itemType: "خامة", item: "خامة ب", unit: "كجم", inQty: "5", avail: "5" }),
@@ -589,4 +593,35 @@ test("products come first, then materials, then anything else — by name inside
   assert.deepEqual(lines.map((l) => l.item), ["منتج أ", "منتج ب", "خامة أ", "خامة ب", "صنف آخر"]);
   const other = lines[4];
   assert.deepEqual([other.kind, other.unit, other.qty, other.kg], ["other", "كرتونة", 2, null]);
+});
+
+/* ------------------------- what the customer is not shown ------------------ */
+
+test("materials never reach the customer — dropped on the server, not on the page", () => {
+  // Owner, 2026-10-07: "hide the materials from the customer".
+  assert.deepEqual([...HIDDEN_FROM_CUSTOMER], ["material"]);
+  const i: Input = {
+    balance: [
+      bal({ item: "منتج أ", inQty: "40", avail: "40" }),
+      bal({ itemType: "خامة", item: "خامة سرية", unit: "كجم", inQty: "900", outQty: "650", avail: "250" }),
+      bal({ itemType: "اسطمبة", item: "صنف آخر", unit: "كرتونة", inQty: "2", avail: "2" }),
+    ],
+    inLog: [
+      mv("إيداع", { item: "منتج أ", qtyCount: "40", net: "40" }),
+      mv("إيداع", { itemType: "خامة", item: "خامة سرية", unit: "كجم", qtyKg: "900", net: "900" }),
+      mv("إيداع", { itemType: "اسطمبة", item: "صنف آخر", unit: "كرتونة", qtyCount: "2", net: "2" }),
+    ],
+    outLog: [mv("سحب", { itemType: "خامة", item: "خامة سرية", unit: "كجم", qtyKg: "650", net: "650" })],
+  };
+  // the rules still see it …
+  assert.deepEqual(detailLines(i).map((l) => l.kind), ["product", "material", "other"]);
+  // … the customer's answer does not: no line, no name, none of its figures
+  const lines = build(i);
+  assert.deepEqual(lines.map((l) => [l.kind, l.item]), [["product", "منتج أ"], ["other", "صنف آخر"]]);
+  const wire = JSON.stringify(lines);
+  for (const leak of ["خامة سرية", "material", "900", "650", "250"]) {
+    assert.equal(wire.includes(leak), false, `«${leak}» is on the wire`);
+  }
+  // a customer holding ONLY materials sees an empty list, not an error
+  assert.deepEqual(build({ balance: [i.balance![1]], inLog: [i.inLog![1]], outLog: i.outLog }), []);
 });
