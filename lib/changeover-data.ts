@@ -10,12 +10,13 @@ import { cairoStamp } from "@/lib/customer-requests";
 import { isDayOffRow } from "@/lib/run-join";
 import { getOpenDowntimeEvents } from "@/lib/db";
 import { hasFullAccess, type Role } from "@/lib/roles";
+import { jobStatusFromSheet, jobStatusToSheet } from "@/lib/prod-meta";
 import {
   ANSWERS_HEADERS, ANSWERS_TAB, LOG_HEADERS, LOG_TAB, ANSWER_COLUMNS, ANY_COLOUR, BASELINE_REASON, FITS_UNKNOWN,
   MAP_NAME, MISSING_ITEMS, NO_ORDER,
   answersFor, colourFromMaterial, colourKey, coloursFromSheet, coloursToSheet, colourToSheet, daysBefore, fold,
-  formatLayout, guessColour, isBaselineRow, isNightHour, kindFromSheet, kindToSheet, latestRuns, listFromSheet,
-  listToSheet, logSinceTold, looseNameKey, machineKey, machineState, mergeAnswers, missingFromSheet, missingToSheet,
+  formatLayout, guessColour, isBaselineRow, isFriday, kindFromSheet, kindToSheet, latestRuns, listFromSheet,
+  listToSheet, logSinceTold, looseNameKey, machineFinished, machineKey, machineState, mergeAnswers, missingFromSheet, missingToSheet,
   newestHolders, parseLayout, parseYesNo, resolveNow, safeText, shiftRank, stampClockMinutes, stampDay,
   standingFromLog, standingWithStart, validLayout, yesNo,
   type AnswerColumn, type AnswerKind, type AnswerRow, type LogRow, type MapTile, type PlanMachine,
@@ -37,8 +38,9 @@ import {
  *        «الرئيسي», the page's own two tabs, and the stoppages running now.
  * WRITES «إجابات خطة الاسطمبات» and «تغييرات الاسطمبات» (appends only), and on
  *        a confirmed change the order's «الماكينة» cell and the machine's
- *        «أسم المنتج» cell — the two the owner asked for. Never the order's
- *        status: «ابدأ التشغيل» on the jobs page is still the go-ahead.
+ *        «أسم المنتج» cell — the two the owner asked for — and, since
+ *        2026-10-07 (owner: "yes okay"), an order that is «لم يبدأ» becomes
+ *        «جاري التشغيل» in the same write. No other status is ever touched.
  */
 
 export type ChangeoverResponse = {
@@ -60,8 +62,9 @@ export type ChangeoverResponse = {
    *  False = a read FAILED, and every answer, every confirm and the map are
    *  missing from this response — it must not replace a good view. */
   plannerRead: boolean;
-  /** 20:00–08:00 Cairo: no mould changes and no samples on the night shift. */
-  night: boolean;
+  /** Today is a Friday — the factory's day off: no mould changes (a warning,
+   *  never a block). Night changes are allowed since 2026-10-07. */
+  friday: boolean;
   /** Only the owner and a manager mark a client as important. */
   canSetKeyClient: boolean;
   /** How many clients are marked important — 0 means the first tier of the
@@ -79,16 +82,6 @@ export type ChangeoverResponse = {
 };
 
 const none = () => ({ records: [] as SheetRecord[], readAt: Date.now(), fields: [] as string[] });
-
-function cairoHour(now = Date.now()): number {
-  try {
-    const h = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false })
-      .format(new Date(now));
-    return Number(h) % 24;
-  } catch {
-    return new Date(now).getUTCHours();
-  }
-}
 
 /** «100», «100&180» → the tonnages Master names for a mould. */
 const tonnagesIn = (text: string | undefined): string[] =>
@@ -732,6 +725,7 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
       keyClient: isKeyClient(j),
       mountedOn: seat?.label ?? holder?.label ?? "",
       mountedRunning: !!seat?.running || (!!holder?.running && !!ahead && !behind),
+      doneByFloor: !!seat && machineFinished(seat),
       queuedBehind: holder?.running && behind ? codeOf(behind) : "",
     };
   });
@@ -755,7 +749,7 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     logRead: shiftRows.length > 0,
     masterRead: masterTab.records.length > 0,
     plannerRead,
-    night: isNightHour(cairoHour()),
+    friday: isFriday(today),
     canSetKeyClient: !!opts.role && hasFullAccess(opts.role),
     keyClients: Array.from(answers.entries()).filter(([k, v]) => k.startsWith("client:") && parseYesNo(v.keyClient) === true).length,
     machines, orders,
@@ -1006,7 +1000,9 @@ export type MountInput = {
 /** What happened to each of the three writes; the page says all three. */
 export type WriteOutcome = "written" | "unchanged" | "skipped" | "failed";
 export type MountResult =
-  | { ok: true; replay: boolean; job: WriteOutcome; jobNote: string; registry: WriteOutcome; registryNote: string }
+  | { ok: true; replay: boolean; job: WriteOutcome; jobNote: string; registry: WriteOutcome; registryNote: string;
+      /** The order was «لم يبدأ» and this confirm made it «جاري التشغيل». */
+      started: boolean }
   | { ok: false; reason: string; status: number };
 
 const cleanList = (list: unknown, max = 160): string[] =>
@@ -1119,22 +1115,35 @@ export async function recordMount(input: MountInput, by: string): Promise<MountR
 
   let jobOut: WriteOutcome = "skipped", jobNote = "";
   let regOut: WriteOutcome = "skipped", regNote = "";
-  if (input.baseline) return { ok: true, replay, job: jobOut, jobNote: "baseline", registry: regOut, registryNote: "baseline" };
+  let started = false;
+  if (input.baseline) return { ok: true, replay, job: jobOut, jobNote: "baseline", registry: regOut, registryNote: "baseline", started };
 
   const canExpect = await expectSupported();
 
   // «أوامر العمل»!G — the order's machine, in the registry's own spelling.
   if (!job) jobNote = "no_order";
   else if (jobRows.length > 1) jobNote = "duplicate_code";
-  else if (machineKey(job.machine) === mk) { jobOut = "unchanged"; }
   else {
-    const copy = canExpect ? job : (await getRecords("jobs", { fresh: true })).records.find((r) => r.row === job.row);
-    if (!copy || codeKey(copy.code) !== want) { jobOut = "failed"; jobNote = "row_changed"; }
+    // The mould going up IS the order starting (owner, 2026-10-07): an order
+    // still «لم يبدأ» becomes «جاري التشغيل» in the same write as its machine.
+    // Nothing else is touched — «متوقف» stays a person's decision.
+    const moves = machineKey(job.machine) !== mk;
+    // (The row is the sheet's own: its status is the Arabic cell, or the token.)
+    const starts = jobStatusFromSheet(String(job.status ?? "")) === "Not Started";
+    if (!moves && !starts) jobOut = "unchanged";
     else {
-      const res = await updateRecord("jobs", job.row, { machine: mm.label },
-        canExpect ? { expect: { field: "code", value: job.code } } : {});
-      jobOut = res.ok ? "written" : "failed";
-      jobNote = res.ok ? "" : res.reason ?? "";
+      const copy = canExpect ? job : (await getRecords("jobs", { fresh: true })).records.find((r) => r.row === job.row);
+      if (!copy || codeKey(copy.code) !== want) { jobOut = "failed"; jobNote = "row_changed"; }
+      else {
+        const changes: Record<string, string> = {};
+        if (moves) changes.machine = mm.label;
+        if (starts) changes.status = jobStatusToSheet("In Production");
+        const res = await updateRecord("jobs", job.row, changes,
+          canExpect ? { expect: { field: "code", value: job.code } } : {});
+        jobOut = !res.ok ? "failed" : moves ? "written" : "unchanged";
+        jobNote = res.ok ? "" : res.reason ?? "";
+        started = res.ok && starts;
+      }
     }
   }
 
@@ -1157,5 +1166,5 @@ export async function recordMount(input: MountInput, by: string): Promise<MountR
     }
   }
 
-  return { ok: true, replay, job: jobOut, jobNote, registry: regOut, registryNote: regNote };
+  return { ok: true, replay, job: jobOut, jobNote, registry: regOut, registryNote: regNote, started };
 }

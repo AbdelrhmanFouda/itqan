@@ -144,7 +144,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
 - **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
   `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
-- **Tests:** 81 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
+- **Tests:** 85 for the rules, and **`tests/changeover-data.test.ts` (24) runs the
   REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
   `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
   defects were — **write the sequence there first** (dated shifts, page rows, orders → what
@@ -190,6 +190,42 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
   when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
   carried over, twice as wide as tall. Never keyed on PQ numbers in code.
+- **THE LOGIC, AS THE OWNER ANSWERED IT — 2026-10-07** (nine questions put to him; he
+  picked from options for two). This supersedes the older bullets where they disagree:
+  - **Three tabs, and a machine is its own screen.** «الأرضية» (the map) · «خطة اليوم» ·
+    «الأوامر»; a tapped machine replaces them with «الراكب الآن» / «اللي بعده» and a
+    back button. Nothing selects a machine by itself any more (it would hide the tabs).
+  - **«خطة اليوم» is `planDay()`** (pure, tested): machines in the order they need a
+    decision — finished → standing → stopped → worth interrupting → ends within
+    `SOON_HOURS` (24) → running — each with the top of its own ranking that no more
+    pressing machine was given (ONE order to ONE machine), the change time, and when the
+    material has to go in the dryer (`dryIn`). An "interrupt" with no urgent order left
+    for it is just a running machine. He had said *"I am unable to understand the plan"*:
+    a ranked list per machine answered a question nobody had asked yet.
+  - **A machine recorded «لا يوجد أمر شغل» has FINISHED** (`machineFinished`,
+    `NO_ORDER_STOPPAGE`). The stoppage is the floor's real-time word; the count is typed a
+    day or two behind. Its order is `doneByFloor`: blocked on its own machine («خلص —
+    اقفل الأمر»), offered nowhere, and the machine is first on the plan.
+  - **Priority (his pick):** a key client's order that is late or due within
+    `KEY_URGENT_DAYS` (3) → any late order → dated before undated («بدون تاريخ تسليم»
+    chip) → the supervisor SAID it goes here → fits only here → ease → least remaining →
+    due date. A key client with weeks to go is an ordinary order.
+  - **Taking a RUNNING mould off (`interrupt`, his pick):** only for such an urgent
+    key-client order or a late one — never when the running job ends within a shift, or
+    is itself late or a key client's.
+  - **Which machines a mould goes on is the SUPERVISOR's answer** (`fits`). Master's
+    tonnage no longer sorts an order after the rest or folds it away (`fit` is
+    "here" | "unknown"); it is only the hint on the question form. The «الأوامر» tab says
+    in amber which orders he has not spoken for.
+  - **Changes ARE allowed at night; not on Friday** (`isFriday`, a warning on the page and
+    the confirm — never a block). `isNightHour` is kept but unused.
+  - **«ركّب دي» starts the order:** an order still «لم يبدأ» becomes «جاري التشغيل» in the
+    same write as its machine (`MountResult.started`). No other status is touched, and
+    there is no first-sample gate — "it keeps working and if there is a problem it stops".
+  - Stopped machines are still suggested for. ⚠ NOT built: checking the store for the
+    order's material — an order names a product, and Master's material names do not match
+    the store's catalogue; it needs "which store material does this product use" asked
+    once and remembered.
 - **THE MAP ITSELF IS LANDSCAPE — 2026-10-07, owner: *"not like this, I want the map
   itself to be landscape."*** The drawing of the evening before (next bullet) stood a
   phone's floor up as a column of tall tiles, and a phone held SIDEWAYS — where the
@@ -245,7 +281,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 81 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 85 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,

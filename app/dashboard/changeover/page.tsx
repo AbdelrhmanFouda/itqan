@@ -30,8 +30,8 @@ import { ageLabel, fill, fmtInt } from "@/lib/format";
 import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
-  barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineKey, placeTile, rankFor, removeTile,
-  splitMinutes, tileHeightPx, tileWidthPx, turnLayout, type FloorFit,
+  barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineFinished, machineKey, placeTile, planDay,
+  rankFor, removeTile, sortByUrgency, splitMinutes, tileHeightPx, tileWidthPx, turnLayout, urgencyChips, type DayEntry, type FloorFit,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
   type Suggestion,
 } from "@/lib/changeover";
@@ -39,7 +39,7 @@ import type { ChangeoverResponse, MountResult } from "@/lib/changeover-data";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { Btn, EmptyState, LoadError, Modal, Pill, Spinner, StatTile, iconBtnCls, inputCls } from "@/components/dashboard/ui";
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCircle, LayoutGrid, List, Maximize2, Moon, Pencil, RefreshCw, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCircle, LayoutGrid, List, ListChecks, Maximize2, Pencil, RefreshCw, RotateCw, X } from "lucide-react";
 
 // v3 (2026-10-05): the answer gained fields the page reads on every card; a
 // snapshot in the old shape is not shown under the new code.
@@ -49,6 +49,8 @@ const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "
 const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
 const STATE_DOT: Record<MachineState, string> = { running: "bg-emerald-500", stopped: "bg-red-500", idle: "bg-amber-500", unknown: "bg-gray-300" };
 const STATES: readonly MachineState[] = ["running", "stopped", "idle", "unknown"];
+/** The chips the day's plan shows: why THIS order, and what makes the change a hard one. */
+const DAY_CHIPS = new Set(["keyClient", "late", "dueToday", "dueTomorrow", "dueTwoDays", "dueSoon", "noDueDate", "toTransparent", "lighter", "materialChange", "transparentMachine"]);
 const STATE_TILE: Record<MachineState, string> = {
   running: "border-emerald-400 bg-white",
   stopped: "border-red-400 bg-red-50",
@@ -405,6 +407,10 @@ export default function ChangeoverPage() {
 
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<"map" | "list">("map");
+  // Three tabs (owner, 2026-10-07: "make tabs and pages inside it to be more
+  // organized"); a tapped machine is its own screen with two of its own.
+  const [tab, setTab] = useState<"floor" | "day" | "orders">("floor");
+  const [mtab, setMtab] = useState<"now" | "next">("next");
   const [arranging, setArranging] = useState(false);
   // The floor on the whole screen. Turning the phone sideways opens it (and
   // turning it back closes what the turn opened); closing it by hand keeps it
@@ -456,11 +462,10 @@ export default function ChangeoverPage() {
   const orders = useMemo(() => data?.orders ?? [], [data]);
   const layout = useMemo(() => data?.layout ?? [], [data]);
 
-  // Open on a machine that needs a decision — one standing idle — else the first.
+  // A machine is opened by a TAP now — it is its own screen, and opening one
+  // by itself would hide the three tabs. One that left the registry is closed.
   useEffect(() => {
-    if (selected && machines.some((m) => m.label === selected)) return;
-    const first = machines.find((m) => m.state === "stopped") ?? machines.find((m) => m.state === "idle") ?? machines[0];
-    if (first) setSelected(first.label);
+    if (selected && machines.length > 0 && !machines.some((m) => m.label === selected)) setSelected("");
   }, [machines, selected]);
 
   const machine = machines.find((m) => m.label === selected) ?? null;
@@ -472,6 +477,11 @@ export default function ChangeoverPage() {
   const orderOf = useCallback(
     (m: PlanMachine) => (m.now.order ? orders.find((o) => o.code === m.now.order) ?? null : null),
     [orders],
+  );
+  /** The whole floor in the order things have to be done (lib/changeover.ts planDay). */
+  const day = useMemo(
+    () => planDay(machines, orders, { today: data?.today ?? "", transparentMachines }),
+    [machines, orders, data?.today, transparentMachines],
   );
 
   const minutes = useCallback((min: number) => {
@@ -508,6 +518,19 @@ export default function ChangeoverPage() {
     });
   }, [s, isAr, lang, data?.today]);
 
+  /** «5 س» / «3 يوم»: hours, to the precision an eye wants. */
+  const roughly = useCallback((hours: number) => {
+    if (hours >= 48) return fill(s.day.days, { d: fmtInt(Math.round(hours / 24), isAr) });
+    if (hours >= 1) return fill(s.day.hours, { h: fmtInt(Math.round(hours), isAr) });
+    return fill(s.rank.minutes, { m: Math.max(10, Math.round((hours * 60) / 10) * 10) });
+  }, [s, isAr]);
+  const reasonText = useCallback((m: PlanMachine) => {
+    const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === m.stoppage?.reason);
+    return r ? (isAr ? r.ar : r.en) : m.stoppage?.reason ?? "";
+  }, [isAr]);
+  /** A machine recorded «لا يوجد أمر شغل» has FINISHED — said in its own word. */
+  const stateWord = useCallback((m: PlanMachine) => (machineFinished(m) ? s.machines.finished : s.states[m.state]), [s]);
+
   /**
    * The one-tap answers to the page's own questions about a machine. Each is a
    * «الراكب الآن» row — the thing «تعديل» writes — sent with what the page is
@@ -537,11 +560,14 @@ export default function ChangeoverPage() {
   }, [tying, s, reloadFresh]);
 
   const pick = useCallback((label: string) => {
+    const m = machines.find((x) => x.label === label);
     setSelected(label);
     setTieError("");
-    // The panel is under the map on a phone; bring it into view.
-    requestAnimationFrame(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
-  }, []);
+    // The machine opens as its own screen — on the question the page has about
+    // it when there is one, else on what goes on it next.
+    setMtab(m && (m.now.orderMaybe || m.now.alsoOn || m.now.mixedShift) ? "now" : "next");
+    requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: "start" }));
+  }, [machines]);
 
   /* --------------------------------- states --------------------------------- */
 
@@ -618,7 +644,7 @@ export default function ChangeoverPage() {
       <span className="flex items-center justify-between gap-1" style={{ height: headH }}>
         <span className={`font-bold leading-none text-gray-900 whitespace-nowrap ${roomy ? "text-[15px]" : "text-[13px]"}`}>{codeOf(m.label)}</span>
         {side && dots}
-        <span className={`leading-none font-medium whitespace-nowrap ${roomy ? "text-[12px]" : "text-[10.5px]"} ${STATE_WORD[m.state]}`}>{s.states[m.state]}</span>
+        <span className={`leading-none font-medium whitespace-nowrap ${roomy ? "text-[12px]" : "text-[10.5px]"} ${STATE_WORD[m.state]}`}>{stateWord(m)}</span>
       </span>
     );
     const name = (
@@ -635,7 +661,7 @@ export default function ChangeoverPage() {
     return (
       <button
         key={m.label} type="button" aria-pressed={isSel} onClick={() => { after?.(); pick(m.label); }}
-        aria-label={`${m.label} · ${s.states[m.state]} · ${m.now.products.join(" / ") || s.machines.empty}`}
+        aria-label={`${m.label} · ${stateWord(m)} · ${m.now.products.join(" / ") || s.machines.empty}`}
         style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
         className={`m-[3px] min-w-0 min-h-0 flex ${side ? "flex-row items-center gap-2" : "flex-col"} text-start border-2 rounded-xl p-[3px] overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
           isSel ? "ring-2 ring-blue-500 ring-offset-1 !border-blue-500" : ""
@@ -728,10 +754,114 @@ export default function ChangeoverPage() {
       </li>
     );
   };
-  // Master names other machines for these and nobody has said otherwise:
-  // listed, but folded away under the ones that belong here.
-  const main = plan.ranked.filter((x) => x.fit !== "elsewhere");
-  const elsewhere = plan.ranked.filter((x) => x.fit === "elsewhere");
+
+  /** One machine on the day's plan: why it is there, what goes on, what to get ready. */
+  const dayCard = (e: DayEntry) => {
+    const m = e.machine, sg = e.pick;
+    const why =
+      e.need === "finished" ? s.day.need.finished
+      : e.need === "free" ? s.day.need.free
+      : e.need === "stopped" ? fill(s.day.need.stopped, { reason: reasonText(m) })
+      : e.need === "interrupt" ? s.day.need.interrupt
+      : fill(s.day.need.soon, { t: roughly(e.hoursLeft ?? 0) });
+    const verb = !sg ? ""
+      : sg.order.queuedBehind ? s.day.act.sameMould
+      : sg.mountedHere ? s.day.act.carryOn
+      : e.need === "interrupt" ? s.day.act.takeOff
+      : e.need === "soon" ? s.day.act.next
+      : e.need === "stopped" ? s.day.act.canMount
+      : s.day.act.mount;
+    const d = sg?.estimate.drying ?? null;
+    const dryH = d ? (d.minH === d.maxH ? `${d.minH}` : `${d.minH}–${d.maxH}`) : "";
+    return (
+      <li key={m.label}>
+        <button
+          type="button" onClick={() => pick(m.label)}
+          className="w-full text-start bg-white border border-gray-200 rounded-xl p-3 hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+        >
+          <span className="flex items-start gap-2">
+            <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[m.state]}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm text-gray-800">
+                <bdi dir="ltr" className="text-base font-bold text-gray-900">{codeOf(m.label)}</bdi> — {why}
+              </span>
+              {m.now.products.length > 0 && (
+                <span className="block text-xs text-gray-500 mt-0.5 break-words">{s.now.title}: {m.now.products.join(" / ")}</span>
+              )}
+            </span>
+          </span>
+          {sg ? (
+            <span className="block mt-2 ps-[18px]">
+              <span className="block text-xs font-semibold text-blue-700">{verb}</span>
+              <span className="block font-semibold text-gray-900 break-words">
+                {sg.order.product} <span className="text-xs font-normal text-gray-400" dir="ltr">{sg.order.code}</span>
+              </span>
+              <span className="flex flex-wrap gap-1 mt-1">
+                {sg.chips.filter((c) => DAY_CHIPS.has(c.key)).map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
+              </span>
+              {!sg.mountedHere && (
+                <span className="block text-xs text-gray-600 mt-1.5">
+                  {s.day.prep.change} {s.approx} {minutes(sg.estimate.totalMin)}
+                  {d && <> · {e.dryIn
+                    ? fill(s.day.prep.dryIn, { t: roughly(e.dryIn), h: dryH })
+                    : fill(e.need === "soon" ? s.day.prep.dryNow : s.day.prep.dryBefore, { h: dryH })}</>}
+                </span>
+              )}
+              {(sg.fit === "unknown" || sg.needsAnswers) && (
+                <span className="block text-xs text-amber-700 mt-1">{sg.fit === "unknown" ? s.day.prep.fitAsk : s.day.prep.answers}</span>
+              )}
+            </span>
+          ) : (
+            <span className="block mt-2 ps-[18px] text-sm text-gray-500">{s.day.act.nothing}</span>
+          )}
+        </button>
+      </li>
+    );
+  };
+  const needNow = day.filter((e) => e.need === "finished" || e.need === "free" || e.need === "stopped").length;
+
+  /** One open order on the «الأوامر» tab. */
+  const orderRow = (o: PlanOrder) => {
+    const done = !!o.doneByFloor || o.remaining === 0;
+    const on = ltr(codeOf(o.mountedOn));
+    const where = done ? s.ordersTab.where.done
+      : o.mountedRunning ? fill(s.ordersTab.where.running, { machine: on })
+      : o.queuedBehind ? fill(s.ordersTab.where.queued, { machine: on })
+      : o.mountedOn ? fill(s.ordersTab.where.standing, { machine: on })
+      : s.ordersTab.where.waiting;
+    return (
+      <li key={o.id} className="px-3 py-2.5 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-900 break-words">{o.product} <span className="text-xs font-normal text-gray-400" dir="ltr">{o.code}</span></p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {o.client && <>{o.client} · </>}
+            {o.dueDate ? <>{s.rank.due} <bdi dir="ltr">{formatDate(o.dueDate, lang)}</bdi></> : s.rank.noDue}
+            {" · "}{s.rank.remaining}{" "}
+            <span className="tabular-nums">
+              {o.remaining !== null ? `${fmtInt(o.remaining, isAr)} ${s.rank.pieces}` : o.qtyKg > 0 ? `${fmtInt(o.qtyKg, isAr)} ${s.rank.kg}` : s.rank.noQty}
+            </span>
+          </p>
+          <p className="text-xs text-gray-800 mt-1">{where}</p>
+          {!done && (
+            <p className={`text-xs mt-0.5 ${o.fits ? "text-gray-500" : "text-amber-700"}`}>
+              {o.fits ? fill(s.ordersTab.fits, { machines: ltr(o.fits.map(codeOf).join(" · ")) }) : s.ordersTab.fitsAsk}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {!done && urgencyChips(o, data.today).map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
+            {o.status === "On Hold" && <Pill text={s.ordersTab.onHold} tone="gray" />}
+          </div>
+        </div>
+        <Btn variant="ghost" onClick={() => setOrderForm(o)} disabled={!canWrite}><HelpCircle size={15} />{s.rank.questions}</Btn>
+      </li>
+    );
+  };
+  const sortedOrders = sortByUrgency(orders, data.today);
+  const orderGroups = {
+    waiting: sortedOrders.filter((o) => !o.doneByFloor && o.remaining !== 0 && !o.mountedRunning),
+    running: sortedOrders.filter((o) => !o.doneByFloor && o.remaining !== 0 && o.mountedRunning),
+    done: sortedOrders.filter((o) => !!o.doneByFloor || o.remaining === 0),
+  };
 
   return (
     <div dir={isAr ? "rtl" : "ltr"}>
@@ -757,9 +887,9 @@ export default function ChangeoverPage() {
           {fill(s.dataAge, { age: ageLabel(data.dataAgeMs, isAr) })}
         </p>
       )}
-      {data.night && (
+      {data.friday && (
         <p className="text-sm text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
-          <Moon size={16} className="mt-0.5 shrink-0" />{s.night}
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.friday}
         </p>
       )}
       {data.logRead === false && (
@@ -774,14 +904,33 @@ export default function ChangeoverPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        <StatTile label={s.summary.running} value={fmtInt(count("running"), isAr)} tone="green" />
-        <StatTile label={s.summary.stopped} value={fmtInt(count("stopped"), isAr)} tone="red" />
-        <StatTile label={s.summary.idle} value={fmtInt(count("idle"), isAr)} tone="amber" />
-        <StatTile label={s.summary.waiting} value={fmtInt(waiting, isAr)} />
-      </div>
+      {!machine && (
+        <>
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            <StatTile label={s.summary.running} value={fmtInt(count("running"), isAr)} tone="green" />
+            <StatTile label={s.summary.stopped} value={fmtInt(count("stopped"), isAr)} tone="red" />
+            <StatTile label={s.summary.idle} value={fmtInt(count("idle"), isAr)} tone="amber" />
+            <StatTile label={s.summary.waiting} value={fmtInt(waiting, isAr)} />
+          </div>
+          <div className="grid grid-cols-3 rounded-xl border border-gray-300 overflow-hidden mb-4" role="tablist">
+            {(["floor", "day", "orders"] as const).map((v) => (
+              <button
+                key={v} type="button" role="tab" aria-selected={tab === v} onClick={() => setTab(v)}
+                className={`min-h-12 px-1.5 text-sm font-semibold inline-flex items-center justify-center gap-1.5 ${tab === v ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100"}`}
+              >
+                {v === "floor" ? <LayoutGrid size={15} /> : v === "day" ? <ListChecks size={15} /> : <List size={15} />}
+                {s.tabs[v]}
+                {v === "day" && needNow > 0 && (
+                  <span className={`min-w-5 h-5 px-1 rounded-full text-xs leading-5 text-center tabular-nums ${tab === v ? "bg-white text-blue-700" : "bg-red-600 text-white"}`}>{fmtInt(needNow, isAr)}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* ------------------------------- the floor ------------------------------- */}
+      {!machine && tab === "floor" && (
       <section className="mb-5">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden" role="group">
@@ -862,10 +1011,80 @@ export default function ChangeoverPage() {
           <p className="text-xs text-gray-500 mt-1">{s.hints.noKeyClient}</p>
         )}
       </section>
+      )}
+
+      {/* ------------------------------ the day's plan ------------------------------ */}
+      {!machine && tab === "day" && (
+        <section className="mb-5">
+          <p className="text-xs text-gray-500 mb-3">{s.day.intro}</p>
+          {day.length === 0 && <EmptyState text={s.day.empty} />}
+          {(["now", "soon", "running"] as const).map((g) => {
+            const rows = day.filter((e) =>
+              g === "now" ? e.need === "finished" || e.need === "free" || e.need === "stopped"
+              : g === "soon" ? e.need === "interrupt" || e.need === "soon"
+              : e.need === "running");
+            if (rows.length === 0) return null;
+            return (
+              <div key={g} className="mb-5">
+                <h2 className="text-sm font-bold text-gray-900 mb-2">
+                  {s.day.groups[g]} <span className="font-normal text-gray-400 tabular-nums">({fmtInt(rows.length, isAr)})</span>
+                </h2>
+                {g !== "running" ? <ul className="space-y-2">{rows.map(dayCard)}</ul> : (
+                  <ul className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+                    {rows.map((e) => (
+                      <li key={e.machine.label}>
+                        <button type="button" onClick={() => pick(e.machine.label)}
+                          className="w-full text-start px-3 py-2.5 min-h-11 flex items-center gap-2 hover:bg-gray-50 active:bg-gray-100">
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[e.machine.state]}`} />
+                          <bdi dir="ltr" className="font-bold text-gray-900 whitespace-nowrap">{codeOf(e.machine.label)}</bdi>
+                          <span className="min-w-0 flex-1 text-sm text-gray-700 truncate">{e.machine.now.products.join(" / ") || s.machines.empty}</span>
+                          {e.hoursLeft !== null && <span className="text-xs text-gray-500 whitespace-nowrap">{fill(s.day.need.left, { t: roughly(e.hoursLeft) })}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {/* -------------------------------- the orders -------------------------------- */}
+      {!machine && tab === "orders" && (
+        <section className="mb-5">
+          <p className="text-xs text-gray-500 mb-3">{s.ordersTab.intro}</p>
+          {orders.length === 0 && <EmptyState text={s.ordersTab.none} />}
+          {(["waiting", "running", "done"] as const).map((g) => orderGroups[g].length > 0 && (
+            <div key={g} className="mb-5">
+              <h2 className="text-sm font-bold text-gray-900 mb-2">
+                {s.ordersTab.groups[g]} <span className="font-normal text-gray-400 tabular-nums">({fmtInt(orderGroups[g].length, isAr)})</span>
+              </h2>
+              <ul className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">{orderGroups[g].map(orderRow)}</ul>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* ---------------------------- the chosen machine ---------------------------- */}
       {machine && (
-        <section ref={panelRef} className="scroll-mt-4">
+        <section ref={panelRef} className="scroll-mt-20">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <Btn variant="outline" onClick={() => setSelected("")}>{isAr ? <ArrowRight size={15} /> : <ArrowLeft size={15} />}{s.screen.back}</Btn>
+            <span className="text-lg font-bold text-gray-900 whitespace-nowrap" dir="ltr">{machine.label}</span>
+            <Pill text={stateWord(machine)} tone={STATE_TONE[machine.state]} />
+          </div>
+          <div className="grid grid-cols-2 rounded-xl border border-gray-300 overflow-hidden mb-3" role="tablist">
+            {(["now", "next"] as const).map((v) => (
+              <button
+                key={v} type="button" role="tab" aria-selected={mtab === v} onClick={() => setMtab(v)}
+                className={`min-h-11 px-2 text-sm font-semibold ${mtab === v ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100"}`}
+              >
+                {s.screen[v]}{v === "next" && plan.ranked.length > 0 && <span className="tabular-nums"> ({fmtInt(plan.ranked.length, isAr)})</span>}
+              </button>
+            ))}
+          </div>
+          {mtab === "now" && (
           <div className="bg-white border border-gray-200 rounded-xl p-3 sm:p-4 mb-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -953,27 +1172,19 @@ export default function ChangeoverPage() {
               );
             })()}
           </div>
+          )}
 
+          {mtab === "next" && (
+          <>
           <h2 className="text-base font-bold text-gray-900 mb-2">{fill(s.rank.title, { machine: ltr(machine.label) })}</h2>
-          {machine.state === "running" && (main.length > 0 || elsewhere.length > 0) && (
+          {machine.state === "running" && plan.ranked.length > 0 && (
             <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2">{s.rank.busyNote}</p>
           )}
-          {main.length === 0 && elsewhere.length === 0 && plan.blocked.length === 0 && (
+          {plan.ranked.length === 0 && plan.blocked.length === 0 && (
             <EmptyState text={waiting === 0 ? s.rank.noOrders : s.rank.none} />
           )}
 
-          <ol className="space-y-2">{main.map(card)}</ol>
-
-          {elsewhere.length > 0 && (
-            <details className="mt-3 group">
-              <summary className="cursor-pointer select-none text-sm text-gray-600 min-h-11 inline-flex items-center gap-1.5 hover:text-gray-900">
-                {fill(s.rank.elsewhere, { n: elsewhere.length })}
-                {/* A fold must not hide the two things the owner sorts on first. */}
-                {elsewhere.some((x) => x.order.keyClient || x.late > 0) && <span className="text-amber-700">{s.rank.elsewhereImportant}</span>}
-              </summary>
-              <ol className="space-y-2 mt-2">{elsewhere.map((sg, i) => card(sg, main.length + i))}</ol>
-            </details>
-          )}
+          <ol className="space-y-2">{plan.ranked.map(card)}</ol>
 
           {plan.blocked.length > 0 && (
             <div className="mt-5">
@@ -986,7 +1197,7 @@ export default function ChangeoverPage() {
                       <span className={`block text-xs mt-0.5 ${b.reason === "missing" ? "text-red-600" : "text-gray-500"}`}>
                         {b.reason === "missing"
                           ? fill(s.blocked.missing, { items: missingText(String(b.vars?.items ?? "")) })
-                          : b.reason === "finished" || b.reason === "onHold"
+                          : b.reason === "finished" || b.reason === "onHold" || b.reason === "doneByFloor"
                             ? s.blocked[b.reason]
                             : fill(s.blocked[b.reason], { machines: ltr(String(b.vars?.machines ?? "")) })}
                       </span>
@@ -996,6 +1207,8 @@ export default function ChangeoverPage() {
                 ))}
               </ul>
             </div>
+          )}
+          </>
           )}
         </section>
       )}
@@ -1014,7 +1227,7 @@ export default function ChangeoverPage() {
       )}
       {confirm && (
         <ConfirmForm
-          machine={confirm.machine} pick={confirm.pick} night={data.night} canWrite={canWrite} isAr={isAr} s={s} cancel={p.common.cancel}
+          machine={confirm.machine} pick={confirm.pick} friday={data.friday} canWrite={canWrite} isAr={isAr} s={s} cancel={p.common.cancel}
           minutes={minutes} reasons={confirm.pick.chips.map((c) => chipText(c, co.ar, true)).join(" · ")}
           onClose={() => setConfirm(null)}
           onDone={async (r) => { setConfirm(null); setDone(r); await reloadFresh(); }}
@@ -1024,6 +1237,7 @@ export default function ChangeoverPage() {
         <Modal open title={s.done.title} onClose={() => setDone(null)} isAr={isAr}>
           <ul className="space-y-2 text-sm text-gray-800">
             <li className="flex items-start gap-2"><Check size={16} className="mt-0.5 text-emerald-600 shrink-0" />{done.replay ? s.done.replay : s.done.log}</li>
+            {done.started && <li className="flex items-start gap-2"><Check size={16} className="mt-0.5 text-emerald-600 shrink-0" />{s.done.started}</li>}
             {done.jobNote !== "baseline" && (["job", "registry"] as const).map((k) => {
               const outcome = done[k];
               const raw = k === "job" ? done.jobNote : done.registryNote;
@@ -1573,8 +1787,8 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
 
 /* --------------------------------- «ركّب دي» --------------------------------- */
 
-function ConfirmForm({ machine, pick, night, canWrite, isAr, s, cancel, minutes, reasons, onClose, onDone }: {
-  machine: PlanMachine; pick: Suggestion; night: boolean; canWrite: boolean; isAr: boolean; s: Strings; cancel: string;
+function ConfirmForm({ machine, pick, friday, canWrite, isAr, s, cancel, minutes, reasons, onClose, onDone }: {
+  machine: PlanMachine; pick: Suggestion; friday: boolean; canWrite: boolean; isAr: boolean; s: Strings; cancel: string;
   minutes: (min: number) => string; reasons: string;
   onClose: () => void; onDone: (r: MountResult) => Promise<void>;
 }) {
@@ -1689,9 +1903,9 @@ function ConfirmForm({ machine, pick, night, canWrite, isAr, s, cancel, minutes,
         )}
       </div>
 
-      {night && (
+      {friday && (
         <p className="mt-3 text-sm text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 flex items-start gap-2">
-          <Moon size={16} className="mt-0.5 shrink-0" />{s.confirm.nightWarn}
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.confirm.fridayWarn}
         </p>
       )}
 

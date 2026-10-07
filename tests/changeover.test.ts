@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANY_COLOUR, BASELINE_REASON, CHANGEOVER_NUMBERS, FITS_UNKNOWN, MAP_COLS, MAP_MAX_ROWS, MAP_TILE, MISSING_ITEMS,
-  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE, standsTall, turnLayout,
+  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE, standsTall, turnLayout, isFriday, machineFinished, planDay, sortByUrgency, urgencyChips, KEY_URGENT_DAYS, NO_ORDER_STOPPAGE,
   answersFor, barrelColours, bestStart, colourFromMaterial, colourKey, colourRelation, colourToSheet,
   coloursFromSheet, coloursIn, coloursToSheet, dryingFor, estimateChange, estimateFrom, formatLayout, guessColour,
   isBaselineRow, isNightHour, isRecent, kindFromSheet, kindToSheet, latestRuns, listFromSheet, listToSheet,
@@ -680,26 +680,46 @@ test("the last log row for a machine is what was confirmed on it, whatever the d
 
 /* --------------------------------- ranking -------------------------------- */
 
-test("the owner's order: key client, then late, then ease, then what is left, then due date", () => {
+test("the owner's order (2026-10-07): an URGENT key client, then late, then dated before undated, then ease, what is left, due date", () => {
   const m = machine();
   const os = [
+    order({ code: "no-date", dueDate: "" }),
     order({ code: "due-later", dueDate: "2026-10-25" }),
     order({ code: "due-sooner", dueDate: "2026-10-05" }),
     order({ code: "less-left", remaining: 1_000 }),
     order({ code: "hard-colour", colours: ["transparent"] }),
     order({ code: "late", dueDate: "2026-09-20", colours: ["transparent"] }),
+    // A key client with weeks to go is an ordinary order now…
     order({ code: "key", keyClient: true, colours: ["transparent"], dueDate: "2026-11-30" }),
+    // …and one due within three days goes first, whatever its colour costs.
+    order({ code: "key-urgent", keyClient: true, colours: ["transparent"], dueDate: "2026-10-02" }),
   ];
-  assert.deepEqual(codes(m, os), ["key", "late", "less-left", "due-sooner", "due-later", "hard-colour"]);
+  assert.deepEqual(codes(m, os), ["key-urgent", "late", "less-left", "due-sooner", "due-later", "hard-colour", "key", "no-date"]);
+  // The chips say why: due soon, late, no date.
+  const chipsOf = (code: string) => rankFor(m, os, ctx).ranked.find((x) => x.order.code === code)!.chips.map((c) => c.key);
+  assert.ok(chipsOf("key-urgent").includes("dueTwoDays") && chipsOf("key-urgent").includes("keyClient"));
+  assert.ok(chipsOf("no-date").includes("noDueDate"));
+  assert.ok(chipsOf("late").includes("late") && !chipsOf("late").includes("dueToday"));
+  assert.equal(KEY_URGENT_DAYS, 3);
 });
 
-test("a key client's hard colour goes before an ordinary client's same colour — his own example", () => {
+test("a key client's hard colour goes before an ordinary client's same colour — only when its date is close", () => {
   const m = machine({ now: { colours: ["black"] } });
+  const same = order({ code: "same-colour", colours: ["black"] });
+  assert.deepEqual(codes(m, [same, order({ code: "key-hard", colours: ["white"], keyClient: true, dueDate: "2026-10-03" })]), ["key-hard", "same-colour"]);
+  assert.deepEqual(codes(m, [same, order({ code: "key-hard", colours: ["white"], keyClient: true, dueDate: "2026-09-29" })]), ["key-hard", "same-colour"], "late is urgent too");
+  assert.deepEqual(codes(m, [same, order({ code: "key-hard", colours: ["white"], keyClient: true })]), ["same-colour", "key-hard"]);
+});
+
+test("orders by their dates alone, for the orders tab: the same order, and the same chips", () => {
   const os = [
-    order({ code: "same-colour", colours: ["black"] }),
-    order({ code: "key-hard", colours: ["white"], keyClient: true }),
+    order({ code: "c", dueDate: "" }), order({ code: "b", dueDate: "2026-10-20" }),
+    order({ code: "a", dueDate: "2026-09-25" }), order({ code: "k", keyClient: true, dueDate: "2026-09-30" }),
   ];
-  assert.deepEqual(codes(m, os), ["key-hard", "same-colour"]);
+  assert.deepEqual(sortByUrgency(os, ctx.today).map((o) => o.code), ["k", "a", "b", "c"]);
+  assert.deepEqual(urgencyChips(os[3], ctx.today).map((c) => c.key), ["keyClient", "dueToday"]);
+  assert.deepEqual(urgencyChips(os[2], ctx.today), [{ key: "late", tone: "warn", vars: { n: 5 } }]);
+  assert.deepEqual(urgencyChips(os[1], ctx.today), []);
 });
 
 test("a confirm survives new shift rows for as long as the log has not changed mould", () => {
@@ -920,19 +940,30 @@ test("transparent is free to go anywhere until a machine is kept for it, and tha
   assert.deepEqual(rankFor(machine(), [mixed], c).blocked, []);
 });
 
-test("on a running machine only a key client is worth taking the mould off", () => {
-  const interrupts = (m: PlanMachine, o: PlanOrder) => rankFor(m, [o], ctx).ranked[0].chips.some((c) => c.key === "worthInterrupt");
-  const busy = machine({ state: "running" });
-  assert.equal(interrupts(busy, order({ code: "key", keyClient: true })), true);
-  // "The machine is running" is said once above the list, not on every card.
-  const plain = rankFor(busy, [order({ code: "plain" })], ctx).ranked[0];
-  assert.equal(plain.chips.some((c) => c.key === "worthInterrupt" || c.key === "machineBusy"), false);
-  // Not when the running job is an important client's too…
-  assert.equal(interrupts(machine({ state: "running", now: { keyClient: true } }), order({ code: "key", keyClient: true })), false);
-  // …nor when the mould does not belong on this machine at all…
-  assert.equal(interrupts(busy, order({ code: "key", keyClient: true, fits: null, fitsHint: ["PQ 1 — 550"], fitsHintText: "550" })), false);
-  // …nor when it is probably the very job that is running here.
-  assert.equal(interrupts(machine({ state: "running", now: { orderMaybe: "key" } }), order({ code: "key", keyClient: true })), false);
+test("taking a RUNNING mould off: for an urgent key client or a late order — never when the job ends within a shift, or is late or a key client's itself", () => {
+  const P = "PQ 5 — 100";
+  const running = (o: Partial<PlanOrder> = {}) => order({ code: "run", mountedOn: P, mountedRunning: true, runHours: 60, ...o });
+  const interrupts = (m: PlanMachine, o: PlanOrder, on: PlanOrder | null = running()) =>
+    rankFor(m, on ? [on, o] : [o], ctx).ranked.find((x) => x.order.code === o.code)!.interrupt;
+  const busy = machine({ state: "running", now: { order: "run" } });
+  assert.equal(interrupts(busy, order({ code: "key", keyClient: true, dueDate: "2026-10-01" })), true);
+  assert.equal(interrupts(busy, order({ code: "late", dueDate: "2026-09-20" })), true);
+  // A key client with time to spare, and an ordinary on-time order: no.
+  assert.equal(interrupts(busy, order({ code: "key", keyClient: true })), false);
+  const plain = rankFor(busy, [running(), order({ code: "plain" })], ctx).ranked[0];
+  assert.equal(plain.chips.some((c) => c.key === "worthInterrupt" || c.key === "machineBusy"), false, "'the machine is running' is said once, above the list");
+  const late = order({ code: "late", dueDate: "2026-09-20" });
+  // The running job ends within a shift: let it finish.
+  assert.equal(interrupts(busy, late, running({ runHours: 5 })), false);
+  // The running job is late itself, or a key client's.
+  assert.equal(interrupts(busy, late, running({ dueDate: "2026-09-25" })), false);
+  assert.equal(interrupts(machine({ state: "running", now: { order: "run", keyClient: true } }), late), false);
+  // Nobody knows how long the running job has left: the limit cannot be applied.
+  assert.equal(interrupts(busy, late, running({ runHours: null })), true);
+  // It is probably the very job that is running here; a machine that is not running has nothing to interrupt.
+  assert.equal(interrupts(machine({ state: "running", now: { orderMaybe: "late" } }), late, null), false);
+  assert.equal(interrupts(machine({ state: "idle" }), late, null), false);
+  assert.ok(rankFor(busy, [running(), late], ctx).ranked[0].chips.some((c) => c.key === "worthInterrupt"));
 });
 
 test("an order in several colours is ranked on its easiest start, and the card says which", () => {
@@ -954,10 +985,10 @@ test("the chips say what the engineer needs — and unanswered questions are ONE
     workers: 2, runHours: 5, missing: null, fits: null, fitsHint: ["PQ 12 — 180"], fitsHintText: "180",
   })], ctx).ranked;
   const keys = s.chips.map((c) => c.key);
-  for (const k of ["late", "darker", "materialChange", "drying", "fitHintElsewhere", "workers", "shortRun"]) {
+  for (const k of ["late", "darker", "materialChange", "drying", "workers", "shortRun"]) {
     assert.ok(keys.includes(k), `missing chip ${k} in ${keys.join(",")}`);
   }
-  for (const k of ["fitUnknown", "readyNotAsked", "colourGuess", "materialUnknown"]) {
+  for (const k of ["fitUnknown", "fitHintElsewhere", "readyNotAsked", "colourGuess", "materialUnknown"]) {
     assert.equal(keys.includes(k), false, `${k} is noise the owner asked to lose`);
   }
   assert.equal(s.needsAnswers, true);
@@ -967,24 +998,87 @@ test("the chips say what the engineer needs — and unanswered questions are ONE
   assert.equal(rankFor(m, [order({ code: "y" })], ctx).ranked[0].needsAnswers, false);
 });
 
-test("only a mould Master puts on ANOTHER machine goes after the rest — the owner's order decides everything else", () => {
+test("which machines a mould goes on is the SUPERVISOR's answer — Master's tonnage neither sorts an order nor hides it", () => {
   const m = machine({ label: "PQ 1 — 550", tonnage: "550" });
   const r = rankFor(m, [
     order({ code: "elsewhere-key", fits: null, fitsHint: ["PQ 12 — 180"], fitsHintText: "180", keyClient: true }),
     order({ code: "hinted-here", fits: null, fitsHint: ["PQ 1 — 550"], fitsHintText: "550" }),
     order({ code: "answered-here", fits: ["PQ 1 — 550", "PQ 2 — 280"], colours: ["black"] }),
-    // Nobody said, and Master's tonnage is blank — the NORMAL case, not a
-    // second-class one: a key client's late order here is the top of the list.
     order({ code: "unknown-key-late", fits: null, keyClient: true, dueDate: "2026-09-10" }),
-    // Master names a tonnage no machine has («136» — a mould that ran on the
-    // 140 every day for a fortnight): "another machine" does not exist.
     order({ code: "no-such-tonnage", fits: null, fitsHint: [], fitsHintText: "136", dueDate: "2026-09-20" }),
-  ], ctx).ranked;
-  assert.deepEqual(r.map((s) => [s.order.code, s.fit]), [
-    ["unknown-key-late", "unknown"], ["no-such-tonnage", "unknown"], ["hinted-here", "here"],
-    ["answered-here", "here"], ["elsewhere-key", "elsewhere"],
+    // The supervisor said: other machines only. That, and only that, takes it off this list.
+    order({ code: "said-elsewhere", fits: ["PQ 12 — 180"] }),
+  ], ctx);
+  assert.deepEqual(r.ranked.map((s) => [s.order.code, s.fit]), [
+    ["unknown-key-late", "unknown"], ["no-such-tonnage", "unknown"], ["answered-here", "here"],
+    ["elsewhere-key", "unknown"], ["hinted-here", "unknown"],
   ]);
-  assert.equal(r[1].chips.some((c) => c.key === "fitHintElsewhere"), false);
+  assert.ok(r.ranked.every((s) => !s.chips.some((c) => c.key === "fitHintElsewhere")));
+  assert.deepEqual(r.blocked.map((b) => [b.order.code, b.reason]), [["said-elsewhere", "notFit"]]);
+  // Nobody has said → the questions button carries the hint.
+  assert.equal(r.ranked[3].needsAnswers, true);
+});
+
+test("a machine recorded «لا يوجد أمر شغل» has FINISHED: its order is done, and is offered nowhere", () => {
+  const P = "PQ 5 — 100";
+  const done = machine({ state: "stopped", stoppage: { reason: NO_ORDER_STOPPAGE, since: 0 }, now: { order: "Job 1" } });
+  assert.equal(machineFinished(done), true);
+  assert.equal(machineFinished(machine({ state: "stopped", stoppage: { reason: "Mold change", since: 0 } })), false);
+  assert.equal(machineFinished(machine()), false);
+  // The count is typed a day or two behind: the order still shows 50,000 to make.
+  const os = [order({ code: "Job 1", mountedOn: P, doneByFloor: true }), order({ code: "Job 2" })];
+  const here = rankFor(done, os, ctx);
+  assert.deepEqual(here.ranked.map((x) => x.order.code), ["Job 2"]);
+  assert.deepEqual(here.blocked.map((b) => [b.order.code, b.reason]), [["Job 1", "doneByFloor"]]);
+  const other = rankFor(machine({ label: "PQ 7 — 100" }), os, ctx);
+  assert.deepEqual([other.ranked.map((x) => x.order.code), other.blocked.length], [["Job 2"], 0], "said once, on its own machine");
+});
+
+test("the day's plan: who needs a mould first, one order to one machine, and when to start drying", () => {
+  const A = "PQ 1 — 100", B = "PQ 2 — 100", C = "PQ 3 — 100", D2 = "PQ 4 — 100", E = "PQ 5 — 100";
+  const all = [A, B, C, D2, E];
+  const ms = [
+    machine({ label: D2, state: "running", now: { order: "run-d" } }),
+    machine({ label: C, state: "running", now: { order: "run-c" } }),
+    machine({ label: E, state: "stopped", stoppage: { reason: "Mold maintenance", since: 0 }, now: { order: "" } }),
+    machine({ label: B, state: "idle", now: { order: "" } }),
+    machine({ label: A, state: "stopped", stoppage: { reason: NO_ORDER_STOPPAGE, since: 0 }, now: { order: "done-a" } }),
+  ];
+  const os = [
+    order({ code: "done-a", mountedOn: A, doneByFloor: true, fits: all }),
+    order({ code: "run-c", mountedOn: C, mountedRunning: true, runHours: 5, fits: all }),
+    order({ code: "run-d", mountedOn: D2, mountedRunning: true, runHours: 200, fits: all }),
+    order({ code: "w-late", dueDate: "2026-09-20", fits: all }),
+    order({ code: "w-abs", material: "ABS اسود", dueDate: "2026-10-10", fits: all }),
+    order({ code: "w-plain", dueDate: "2026-10-15", fits: all }),
+  ];
+  const day = planDay(ms, os, ctx);
+  // Finished first, then standing, then stopped, then the one that ends soon.
+  // The long job would be worth interrupting for the late order — but that
+  // order already went to a machine with nothing on it, so it just runs.
+  assert.deepEqual(day.map((e) => [e.machine.label, e.need]), [[A, "finished"], [B, "free"], [E, "stopped"], [C, "soon"], [D2, "running"]]);
+  const urgent = planDay([ms[0]], [os[2], os[3]], ctx);
+  assert.deepEqual([urgent[0].need, urgent[0].pick?.order.code], ["interrupt", "w-late"], "with no free machine, the late order is worth the running mould");
+  // The late order goes to the machine that needs one most — and to no other;
+  // the next machine takes the easy change (same material) before the hard one.
+  assert.deepEqual(day.map((e) => e.pick?.order.code ?? null), ["w-late", "w-plain", "w-abs", null, null]);
+  assert.equal(day[3].hoursLeft, 5);
+  assert.equal(day[0].current?.code, "done-a");
+  // ABS dries three hours: on a machine waiting now, before it can run at all.
+  assert.equal(day[2].dryIn, 0);
+  assert.equal(day[1].dryIn, null, "polypropylene needs none");
+
+  // With nothing urgent, the long job just runs — and the one ending in five
+  // hours is told what comes next and when its material has to go in the dryer.
+  const calm = planDay(ms.slice(0, 2), [os[1], os[2], os[4]], ctx);
+  assert.deepEqual(calm.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null, e.dryIn]), [[C, "soon", "w-abs", 2], [D2, "running", null, null]]);
+});
+
+test("Friday is the day off — changes are allowed at night since 2026-10-07", () => {
+  assert.equal(isFriday("2026-10-09"), true);
+  assert.equal(isFriday("2026-10-08"), false);
+  assert.equal(isFriday("2026-10-10"), false);
+  assert.equal(isFriday(""), false);
 });
 
 test("ease of change is decided BEFORE what is left — the owner's order, pinned on its own", () => {

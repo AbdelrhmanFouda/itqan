@@ -474,3 +474,46 @@ test("recording what stands: a pair beside its order, the «لا» answer, and a
   await D.recordMount({ ...base, order: "", products: ["كرسي"] }, "t@x");
   assert.equal(g.appends.length, 1);
 });
+
+test("a confirmed mount starts the order: «لم يبدأ» becomes «جاري التشغيل» in the same write as its machine — and nothing else is touched", async () => {
+  const f = floor();
+  f.tabs.jobs = [
+    { code: "Job 60", product: "طبق", status: "لم يبدأ", machine: "" },
+    { code: "Job 61", product: "كوب", status: "جاري التشغيل", machine: P3 },
+    { code: "Job 62", product: "غطا", status: "متوقف", machine: "" },
+  ];
+  const tap = { products: [], fromProducts: [], colours: [], colourNow: "", fromColours: [], minutes: 45, reasons: "متأخر", baseline: false };
+  const a = await D.recordMount({ ...tap, machine: P2, order: "Job 60" }, "t@x");
+  assert.equal(a.ok && a.started, true);
+  assert.deepEqual(f.updates.filter((u) => u.entity === "jobs").map((u) => u.changes), [{ machine: P2, status: "جاري التشغيل" }]);
+  // Already running on that machine: nothing to write, nothing "started".
+  const b = await D.recordMount({ ...tap, machine: P3, order: "Job 61" }, "t@x");
+  assert.equal(b.ok && !b.started && b.job === "unchanged", true);
+  // «متوقف» is a person's decision: the machine is set, the status is left alone.
+  const c = await D.recordMount({ ...tap, machine: P1, order: "Job 62" }, "t@x");
+  assert.equal(c.ok && !c.started, true);
+  assert.deepEqual(f.updates.filter((u) => u.entity === "jobs").map((u) => u.changes).at(-1), { machine: P1 });
+});
+
+test("a stoppage «لا يوجد أمر شغل» on a machine says its order is finished — whatever the count still shows", async () => {
+  const f = floor();
+  f.tabs.production = [shift("2026-10-04", P2, "طبق")];
+  f.tabs.jobs = [{ code: "Job 70", product: "طبق", status: "جاري التشغيل", machine: P2 }, { code: "Job 71", product: "كوب", status: "لم يبدأ", machine: "" }];
+  f.jobs = [job({ id: "7", code: "Job 70", product: "طبق", status: "In Production", machine: P2 }), job({ id: "8", code: "Job 71", product: "كوب" })];
+  let p = await D.loadPlan();
+  assert.deepEqual([M(p, P2).state, O(p, "Job 70").mountedRunning, !!O(p, "Job 70").doneByFloor], ["running", true, false]);
+
+  f.stops = [{ machine: P2, reason: "No order", startedAt: Date.now() - 3_600_000 }];
+  p = await D.loadPlan();
+  assert.equal(M(p, P2).state, "stopped");
+  assert.equal(R.machineFinished(M(p, P2)), true);
+  assert.equal(O(p, "Job 70").doneByFloor, true);
+  assert.deepEqual(ranked(p, P2).map((s) => s.order.code), ["Job 71"]);
+  const day = R.planDay(p.machines, p.orders, { today: p.today, transparentMachines: [] });
+  assert.deepEqual([day[0].machine.label, day[0].need, day[0].pick?.order.code], [P2, "finished", "Job 71"]);
+  // Another reason is a stoppage like any other: the order still stands there.
+  f.stops = [{ machine: P2, reason: "Mold maintenance", startedAt: Date.now() - 3_600_000 }];
+  p = await D.loadPlan();
+  assert.equal(!!O(p, "Job 70").doneByFloor, false);
+  assert.equal(typeof p.friday, "boolean");
+});
