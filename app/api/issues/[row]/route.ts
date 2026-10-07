@@ -59,7 +59,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ro
     for (const kind of ["issue", "solution"] as const) {
       const file = input.files[kind];
       if (!file) continue;
-      const saved = await saveIssueAudio(kind, file, target.machine, target.date);
+      // Named after the machine, else the mould: a mould issue has no machine.
+      const saved = await saveIssueAudio(kind, file, target.machine || target.product, target.date);
       if (!saved.ok) return NextResponse.json({ ok: false, reason: saved.reason }, { status: saved.status });
       changes[kind === "issue" ? "issueAudio" : "solutionAudio"] = saved.link;
     }

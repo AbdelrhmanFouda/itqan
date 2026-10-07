@@ -23,6 +23,20 @@ export const ISSUE_CATEGORIES = ["خامة", "اسطمبة", "ماكينة", "ك
 export const ISSUE_STATUSES = ["مفتوح", "قيد التنفيذ", "تم"] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 
+/**
+ * What the page OFFERS, mould first (owner, 2026-10-07: "the problem is with
+ * the mold more than machine"). Display order only — ISSUE_CATEGORIES above
+ * mirrors the sheet's dropdown and is not reordered.
+ */
+export const DEFAULT_CATEGORY = "اسطمبة";
+export const CATEGORY_ORDER = ["اسطمبة", "خامة", "ماكينة", "كهرباء", "أخرى"] as const;
+
+/** A fault of the press itself — the two categories where the machine is the subject. */
+export function isMachineCategory(c: string | undefined | null): boolean {
+  const s = (c ?? "").trim();
+  return s === "ماكينة" || s === "كهرباء";
+}
+
 /** Tapping the status pill moves an issue one step along; «تم» wraps back. */
 export const NEXT_STATUS: Record<string, IssueStatus> = {
   "مفتوح": "قيد التنفيذ",
@@ -220,12 +234,43 @@ export type IssueLike = {
   issueAudio: AudioRef | null; solutionAudio: AudioRef | null;
 };
 
-export type IssueFilter = { status?: string; machine?: string; category?: string; query?: string };
+export type IssueFilter = { status?: string; machine?: string; product?: string; category?: string; query?: string };
+
+/**
+ * The key two spellings of one product name share: Arabic-Indic and Persian
+ * digits → Latin, whitespace collapsed, trimmed, lowercased. The same folding
+ * as nameKey in lib/master-lookup.ts — COPIED, because this file stays
+ * import-free. (No filler handling here: «غير متاح» is not a mould to filter by.)
+ */
+export function productKey(name: string | undefined | null): string {
+  return String(name ?? "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * The line an issue becomes in Master's «ملاحظات» for its product:
+ * «2026-10-07: كسر في البنز — الحل: تغيير البنز». It is only the DRAFT — the
+ * person reads and edits it before anything is written. A voice-only issue
+ * has no words to offer, so it gives just «2026-10-07:» and the rest is typed.
+ */
+export function masterNoteLine(i: { date: string; description: string; action: string }): string {
+  const one = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+  const date = one(i.date), description = one(i.description), action = one(i.action);
+  const fix = action ? `الحل: ${action}` : "";
+  const body = description ? (fix ? `${description} — ${fix}` : description) : fix;
+  const head = date ? `${date}:` : "";
+  return [head, body].filter(Boolean).join(" ");
+}
 
 /** Arabic-tolerant, case-folded text match across the fields a person would search. */
 export function matchesIssue(i: IssueLike, f: IssueFilter): boolean {
   if (f.status && i.status !== f.status) return false;
   if (f.machine && i.machine !== f.machine) return false;
+  if (f.product && productKey(i.product) !== productKey(f.product)) return false;
   if (f.category && i.category !== f.category) return false;
   const q = foldArabic(norm(f.query));
   if (!q) return true;

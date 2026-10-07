@@ -12,9 +12,15 @@ import { uniqueByLabel } from "@/lib/run-row";
  *  - Every issue OPENS (tap the card / row): the recordings play there, the
  *    solution is added there, the status is changed there, and any field can
  *    be corrected. The status pill on the list still advances with one tap.
- *  - The three tiles filter, and there are machine and category filters next
- *    to the search — a room of open faults on one machine is what maintenance
+ *  - The three tiles filter, and there are mould, machine and category filters
+ *    next to the search — the open faults on one mould is what maintenance
  *    actually asks for.
+ *  - MOULD-FIRST since 2026-10-07 (owner: "the problem is with the mold more
+ *    than machine"): the product is picked from «الرئيسي», titles the cards
+ *    and rows (with its mould number), and the opened issue shows Master's
+ *    «ملاحظات» for it with ONE previewed write — components/dashboard/
+ *    issue-master-notes.tsx. The machine is optional unless the category is
+ *    a machine one.
  *
  * Every write goes through PATCH /api/issues/[row] with the row's identity
  * (`expect`) — a 409 means the row moved under us; the list reloads and the
@@ -32,14 +38,16 @@ import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError, StatTile, 
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
 import { useVisiblePoll } from "@/components/dashboard/use-remembered";
-import { fmtNum } from "@/lib/format";
+import { fmtNum, fill } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
-  ISSUE_CATEGORIES, ISSUE_STATUSES, NEXT_STATUS, MAX_REQUEST_BYTES,
-  cairoToday, countByStatus, dayLabel, diffIssue, extFor, hasProblem, matchesIssue,
+  CATEGORY_ORDER, DEFAULT_CATEGORY, ISSUE_STATUSES, NEXT_STATUS, MAX_REQUEST_BYTES,
+  cairoToday, countByStatus, dayLabel, diffIssue, extFor, hasProblem, isMachineCategory, matchesIssue, productKey,
   type AudioRef, type IssueStatus,
 } from "@/lib/issues";
 import { AudioField, SavedClip, useAudioRecorder, type Recording } from "@/components/dashboard/audio-recorder";
+import { MasterProductPicker, findProduct, type MasterPick } from "@/components/dashboard/master-product-picker";
+import { IssueMasterNotes, type MasterRow } from "@/components/dashboard/issue-master-notes";
 
 type Issue = {
   row: number; date: string; machine: string; product: string; category: string;
@@ -100,8 +108,13 @@ export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [audioOk, setAudioOk] = useState(false);
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [products, setProducts] = useState<string[]>([]);
+  // «الرئيسي» for the product picker and the mould numbers — null until it
+  // answers; a failed read shows a retry in the picker and asks again.
+  const [master, setMaster] = useState<MasterRow[] | null>(null);
+  const [masterFailed, setMasterFailed] = useState(false);
+  const masterStarted = useRef(false);
   const [statusFilter, setStatusFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
   const [machineFilter, setMachineFilter] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [query, setQuery] = useState("");
@@ -144,6 +157,21 @@ export default function IssuesPage() {
     setLoadErr(!r.ok && r.timedOut ? "timeout" : "net");
   }, []);
 
+  const loadMaster = useCallback(() => {
+    if (masterStarted.current) return;
+    masterStarted.current = true;
+    setMasterFailed(false);
+    void timedJson<{ molds?: MasterRow[] }>(authedFetch, "/api/molds").then((r) => {
+      if (r.ok && Array.isArray(r.data.molds)) { setMaster(r.data.molds); setMasterFailed(false); return; }
+      // Not final: the picker shows a retry, and the next open asks again.
+      setMasterFailed(true);
+      masterStarted.current = false;
+    });
+  }, []);
+  // Master is read once per page life; the server saying a row moved
+  // (identity_mismatch / not_found on a write) is the one reason to read again.
+  const reloadMaster = useCallback(() => { masterStarted.current = false; loadMaster(); }, [loadMaster]);
+
   useEffect(() => {
     let alive = true;
     // Deferred a tick: the first list read sets state, and an effect body that
@@ -163,20 +191,16 @@ export default function IssuesPage() {
         if (!alive) return;
         // ONLY after the log has answered. Both of these are sheet reads that
         // the bridge serialises, and they feed nothing but the form's machine
-        // dropdown and product datalist — started first, they queued the tab
+        // dropdown and the product picker — started first, they queued the tab
         // the page is actually waiting for behind them.
-        // Both carry the token since 2026-09-23: the registry and the product
-        // list are no longer open reads (a product name comes paired with a
-        // real client name in «الرئيسي»).
+        // Both carry the token: the registry and Master are guarded reads (a
+        // product name comes paired with a real client name in «الرئيسي»).
         void timedJson<{ machines?: Machine[] }>(authedFetch, "/api/machines")
           .then((r) => { if (alive && r.ok) setMachines(uniqueByLabel(r.data.machines ?? [])); });
-        void timedJson<{ records?: { name?: string }[] }>(authedFetch, "/api/sheet/products")
-          .then((r) => {
-            if (alive && r.ok) setProducts((r.data.records ?? []).map((x) => x.name || "").filter(Boolean));
-          });
+        loadMaster();
       });
     return () => { alive = false; };
-  }, [load]);
+  }, [load, loadMaster]);
   const modalOpen = adding || openRow !== null;
   // Skip a tick while a read is still in flight — a slow sheet must not stack
   // polls on top of each other. Hidden tabs do not poll at all.
@@ -235,10 +259,59 @@ export default function IssuesPage() {
   }
 
   const counts = useMemo(() => countByStatus(issues ?? []), [issues]);
+  // The moulds the log names, each once (by productKey), in the log's own
+  // spelling, with how many issues it carries — the mould filter.
+  const productOptions = useMemo(() => {
+    const byKey = new Map<string, { label: string; count: number }>();
+    for (const i of issues ?? []) {
+      const k = productKey(i.product);
+      if (!k) continue;
+      const cur = byKey.get(k);
+      if (cur) cur.count++; else byKey.set(k, { label: i.product.trim(), count: 1 });
+    }
+    return Array.from(byKey.entries()).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.label.localeCompare(b.label, "ar"));
+  }, [issues]);
+  // The mould number for each product the log names — the chip on the cards
+  // and rows. A name Master holds twice (24 of them) gets a number only when
+  // every twin carries the same one: the first twin's number beside the name
+  // could be another customer's mould, and on a maintenance log a wrong
+  // number is worse than none.
+  const moldOf = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!master) return m;
+    for (const o of productOptions) {
+      const twins = master.filter((r) => productKey(r.name) === o.key);
+      const numbers = new Set(twins.map((r) => r.number));
+      m.set(o.key, twins.length > 0 && numbers.size === 1 ? twins[0].number : "");
+    }
+    return m;
+  }, [master, productOptions]);
+  const moldNumberOf = (product: string) => moldOf.get(productKey(product)) ?? "";
+  // The search also finds a mould by the number printed on its chip: the
+  // number is joined into the row's haystack here, so lib/issues.ts stays
+  // import-free.
   const filtered = useMemo(
-    () => (issues ?? []).filter((i) => matchesIssue(i, { status: statusFilter, machine: machineFilter, category: catFilter, query })),
-    [issues, statusFilter, machineFilter, catFilter, query],
+    () => (issues ?? []).filter((i) => {
+      const number = moldOf.get(productKey(i.product)) ?? "";
+      const hay = number ? { ...i, note: `${i.note} ${number}` } : i;
+      return matchesIssue(hay, { status: statusFilter, product: productFilter, machine: machineFilter, category: catFilter, query });
+    }),
+    [issues, moldOf, statusFilter, productFilter, machineFilter, catFilter, query],
   );
+  // Issues on the same mould as this one, this one excluded.
+  const otherOnMold = (issue: Issue) => {
+    const k = productKey(issue.product);
+    return k ? (issues ?? []).filter((i) => i.row !== issue.row && productKey(i.product) === k).length : 0;
+  };
+  // «اعرضهم»: the list promised «{n} عطل على الاسطمبة دي», so every other
+  // filter is cleared first — a status tile or search text left on would show
+  // fewer than promised with no hint why.
+  const showMold = (product: string) => {
+    const k = productKey(product);
+    if (!productOptions.some((x) => x.key === k)) return;
+    setStatusFilter(""); setMachineFilter(""); setCatFilter(""); setQuery("");
+    setProductFilter(k);
+  };
   // The registry first; any label the log holds that the registry no longer
   // does (it has been renumbered four times) stays selectable for old rows.
   const machineOptions = useMemo(() => {
@@ -246,7 +319,7 @@ export default function IssuesPage() {
     const extra = Array.from(new Set((issues ?? []).map((i) => i.machine).filter((m) => m && !seen.has(m))));
     return [...machines.map((m) => m.label), ...extra];
   }, [machines, issues]);
-  const anyFilter = Boolean(statusFilter || machineFilter || catFilter || query);
+  const anyFilter = Boolean(statusFilter || productFilter || machineFilter || catFilter || query);
   const selected = openRow === null ? null : (issues ?? []).find((i) => i.row === openRow) ?? null;
 
   const dateText = (iso: string) => {
@@ -308,9 +381,21 @@ export default function IssuesPage() {
         ))}
       </div>
 
-      {/* Filters: machine, category, text. Wrap freely — four controls in one
-          un-wrapping row is how the storage header overflowed a phone. */}
+      {/* Filters: mould, machine, category, text. Wrap freely — four controls
+          in one un-wrapping row is how the storage header overflowed a phone. */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
+        <select
+          className={`${inputCls} w-full sm:w-56`}
+          value={productFilter}
+          onChange={(e) => setProductFilter(e.target.value)}
+          aria-label={t.mold}
+        >
+          <option value="">{t.allMolds}</option>
+          {/* The KEY is the value: the label is the newest spelling seen for
+              that key and may change between polls; matchesIssue folds the
+              filter through productKey too, so a key filters the same. */}
+          {productOptions.map((o) => <option key={o.key} value={o.key}>{`${o.label} (${n(o.count)})`}</option>)}
+        </select>
         <select
           className={`${inputCls} w-full sm:w-56`}
           value={machineFilter}
@@ -329,7 +414,7 @@ export default function IssuesPage() {
         />
         <div className="flex gap-2 overflow-x-auto w-full sm:w-auto -mx-1 px-1 py-0.5">
           <button type="button" onClick={() => setCatFilter("")} className={chipCls(catFilter === "")}>{t.allCategories}</button>
-          {ISSUE_CATEGORIES.map((c) => (
+          {CATEGORY_ORDER.map((c) => (
             <button key={c} type="button" onClick={() => setCatFilter(catFilter === c ? "" : c)} className={chipCls(catFilter === c)}>
               {catText(c)}
             </button>
@@ -338,7 +423,7 @@ export default function IssuesPage() {
         {anyFilter && (
           <button
             type="button"
-            onClick={() => { setStatusFilter(""); setMachineFilter(""); setCatFilter(""); setQuery(""); }}
+            onClick={() => { setStatusFilter(""); setProductFilter(""); setMachineFilter(""); setCatFilter(""); setQuery(""); }}
             className="inline-flex items-center gap-1 min-h-11 sm:min-h-0 px-2 text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded-lg"
           >
             <X size={14} /> {t.clearFilters}
@@ -391,14 +476,19 @@ export default function IssuesPage() {
                 className="bg-white border border-gray-200 rounded-xl px-4 py-3 cursor-pointer hover:border-blue-300 active:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 <div className="flex items-center justify-between gap-3 min-w-0">
-                  <span className="font-semibold text-gray-900 leading-snug min-w-0 truncate">
-                    {i.machine || i.product || "—"}
+                  {/* The chip sits OUTSIDE the truncating span: a long name
+                      used to clip the mould number off entirely at 375px. */}
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-semibold text-gray-900 leading-snug min-w-0 truncate">
+                      {i.product ? i.product : i.machine ? <bdi dir="ltr">{i.machine}</bdi> : "—"}
+                    </span>
+                    {i.product && <span className="shrink-0"><MoldChip number={moldNumberOf(i.product)} title={t.moldNumber} /></span>}
                   </span>
                   <StatusPill issue={i} t={t} onCycle={cycle} />
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   {dateText(i.date)}{i.category ? ` · ${catText(i.category)}` : ""}
-                  {i.machine && i.product ? ` · ${i.product}` : ""}
+                  {i.machine && i.product ? <> · <bdi dir="ltr">{i.machine}</bdi></> : null}
                 </div>
                 <div className="mt-2 flex flex-wrap items-start gap-2">
                   {i.issueAudio && <Stop><SavedClip clip={i.issueAudio} strings={t} compact /></Stop>}
@@ -422,7 +512,7 @@ export default function IssuesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/50">
-                    {[t.date, t.machine, t.product, t.category, t.problem, t.solution, t.status].map((h) => (
+                    {[t.date, t.mold, t.machine, t.category, t.problem, t.solution, t.status].map((h) => (
                       <th key={h} className="text-start px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -435,8 +525,10 @@ export default function IssuesPage() {
                       className="hover:bg-blue-50/40 transition-colors align-top cursor-pointer"
                     >
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums">{dateText(i.date)}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{i.machine || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600">{i.product || "—"}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {i.product ? <>{i.product} <MoldChip number={moldNumberOf(i.product)} title={t.moldNumber} /></> : i.machine ? <bdi dir="ltr">{i.machine}</bdi> : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{i.machine ? <bdi dir="ltr">{i.machine}</bdi> : "—"}</td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{catText(i.category) || "—"}</td>
                       <td className="px-4 py-3 text-gray-700 max-w-md">
                         <div className="flex flex-col gap-1.5">
@@ -469,7 +561,9 @@ export default function IssuesPage() {
           onSaved={() => { notify("ok", t.logged); load(); }}
           onRefresh={load}
           machines={machines}
-          products={products}
+          master={master}
+          masterFailed={masterFailed}
+          onRetryMaster={loadMaster}
           audioOk={audioOk}
           t={t}
           c={p.common}
@@ -486,7 +580,15 @@ export default function IssuesPage() {
           onStatus={setStatus}
           onSave={saveEdit}
           machines={machineOptions}
-          products={products}
+          master={master}
+          masterFailed={masterFailed}
+          onRetryMaster={loadMaster}
+          onReloadMaster={reloadMaster}
+          onMasterNotes={(row, notes) => setMaster((list) => (list ?? []).map((r) => (r.row === row ? { ...r, notes } : r)))}
+          changeLabel={p.jobs.changeProduct}
+          moldNumber={moldNumberOf(selected.product)}
+          othersOnMold={otherOnMold(selected)}
+          onShowMold={() => { setOpenRow(null); showMold(selected.product); }}
           audioOk={audioOk}
           t={t}
           c={p.common}
@@ -526,6 +628,20 @@ function Stop({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
+/** The mould number beside a product name — small, Latin, never reversed inside Arabic. */
+function MoldChip({ number, title }: { number: string; title: string }) {
+  if (!number) return null;
+  return (
+    <bdi
+      dir="ltr"
+      title={title}
+      className="inline-flex items-center align-middle rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 tabular-nums"
+    >
+      {number}
+    </bdi>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-gray-50/60 p-3 mb-3">
@@ -541,7 +657,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function CategoryChips({ value, onChange, t }: { value: string; onChange: (c: string) => void; t: Strings }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {ISSUE_CATEGORIES.map((c) => (
+      {CATEGORY_ORDER.map((c) => (
         <button key={c} type="button" onClick={() => onChange(c)} className={chipCls(value === c)} aria-pressed={value === c}>
           {t.catLabels[c] || c}
         </button>
@@ -550,22 +666,39 @@ function CategoryChips({ value, onChange, t }: { value: string; onChange: (c: st
   );
 }
 
+/** The machine dropdown — the registry, plus the value the row already holds when the registry no longer lists it. */
+function MachineSelect({ label, value, onChange, machines }: { label: string; value: string; onChange: (v: string) => void; machines: string[] }) {
+  const opts = value && !machines.includes(value) ? [value, ...machines] : machines;
+  return (
+    <Field label={label}>
+      <select className={`${inputCls} text-base sm:text-sm`} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">—</option>
+        {opts.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+    </Field>
+  );
+}
+
 /* ------------------------------ new issue -------------------------------- */
 
 function NewIssueSheet({
-  open, onClose, onSaved, onRefresh, machines, products, audioOk, t, c, isAr, errorText,
+  open, onClose, onSaved, onRefresh, machines, master, masterFailed, onRetryMaster, audioOk, t, c, isAr, errorText,
 }: {
   open: boolean; onClose: () => void; onSaved: () => void; onRefresh: () => void;
-  machines: Machine[]; products: string[]; audioOk: boolean;
+  machines: Machine[]; master: MasterRow[] | null; masterFailed: boolean; onRetryMaster: () => void; audioOk: boolean;
   t: Strings; c: Common; isAr: boolean; errorText: (reason: string) => string;
 }) {
   const issueRec = useAudioRecorder();
   const solRec = useAudioRecorder();
   const blank = (): Draft => ({
-    date: cairoToday(), machine: "", product: "", category: ISSUE_CATEGORIES[0],
+    date: cairoToday(), machine: "", product: "", category: DEFAULT_CATEGORY,
     description: "", action: "", status: "مفتوح", note: "",
   });
   const [form, setForm] = useState<Draft>(blank);
+  // The product is PICKED from «الرئيسي» (Master's exact spelling is what the
+  // row gets); a machine fault has none.
+  const [picked, setPicked] = useState<MasterPick | null>(null);
+  const machineMain = isMachineCategory(form.category);
   const [more, setMore] = useState(false);
   const [withSolution, setWithSolution] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -584,7 +717,7 @@ function NewIssueSheet({
     setSaving(true); setErr(null);
     try {
       const fd = new FormData();
-      const draft = withSolution ? form : { ...form, action: "" };
+      const draft = { ...form, product: picked?.name ?? "", action: withSolution ? form.action : "" };
       for (const [k, v] of Object.entries(draft)) fd.set(k, v);
       if (files.issue) fd.set("issueAudio", files.issue.blob, `issue.${extFor(files.issue.mime)}`);
       if (files.solution) fd.set("solutionAudio", files.solution.blob, `solution.${extFor(files.solution.mime)}`);
@@ -609,16 +742,39 @@ function NewIssueSheet({
   return (
     <Modal open={open} title={t.add} onClose={onClose} isAr={isAr}>
       <form onSubmit={submit}>
-        <Field label={t.machine}>
-          <select className={`${inputCls} text-base`} value={form.machine} onChange={(e) => set("machine", e.target.value)}>
-            <option value="">—</option>
-            {machines.map((m) => <option key={m.label} value={m.label}>{m.label}</option>)}
-          </select>
-        </Field>
+        {/* Mould-first (owner, 2026-10-07): what kind of fault, then WHICH
+            mould. The machine is up front only for a machine/electrical
+            fault; otherwise it waits under «حقول إضافية». */}
         <div className="mb-3">
           <span className="block text-xs font-medium text-gray-600 mb-1.5">{t.category}</span>
-          <CategoryChips value={form.category} onChange={(v) => set("category", v)} t={t} />
+          <CategoryChips
+            value={form.category}
+            onChange={(v) => {
+              // A machine chosen under a machine category must stay in view
+              // when the category stops being one: the select moves under
+              // «حقول إضافية», which opens so the value is never sent unseen.
+              if (isMachineCategory(form.category) && !isMachineCategory(v) && form.machine) setMore(true);
+              set("category", v);
+            }}
+            t={t}
+          />
         </div>
+        {/* Not a <Field>: a <label> around a search box and a list of buttons
+            sends every tap to the first control. No autoFocus: the keyboard
+            would cover the record button on a phone, on a voice-first form. */}
+        <div className="mb-3">
+          <span className="block text-xs font-medium text-gray-600 mb-1">{t.mold}</span>
+          <MasterProductPicker
+            rows={master ?? []}
+            value={picked}
+            onChange={setPicked}
+            loading={master === null && !masterFailed}
+            failed={masterFailed}
+            onRetry={onRetryMaster}
+            autoFocus={false}
+          />
+        </div>
+        {machineMain && <MachineSelect label={t.machine} value={form.machine} onChange={(v) => set("machine", v)} machines={machines.map((m) => m.label)} />}
 
         {/* THE PROBLEM — the big button first; words are optional once it is recorded. */}
         <div className="mb-3 rounded-2xl border border-gray-200 bg-gray-50/60 p-3">
@@ -682,12 +838,7 @@ function NewIssueSheet({
             <Field label={t.date}>
               <input className={inputCls} type="date" value={form.date} onChange={(e) => set("date", e.target.value)} />
             </Field>
-            <Field label={t.product}>
-              <input className={inputCls} list="issue-products" value={form.product} onChange={(e) => set("product", e.target.value)} />
-              <datalist id="issue-products">
-                {products.slice(0, 500).map((nm) => <option key={nm} value={nm} />)}
-              </datalist>
-            </Field>
+            {!machineMain && <MachineSelect label={t.machineOptional} value={form.machine} onChange={(v) => set("machine", v)} machines={machines.map((m) => m.label)} />}
             <Field label={t.status}>
               <select className={inputCls} value={form.status} onChange={(e) => set("status", e.target.value)}>
                 {ISSUE_STATUSES.map((s) => <option key={s} value={s}>{t.statusLabels[s] || s}</option>)}
@@ -714,13 +865,18 @@ function NewIssueSheet({
 /* ------------------------------ opened issue ----------------------------- */
 
 function IssueDrawer({
-  issue, onClose, onStatus, onSave, machines, products, audioOk, t, c, isAr, lang, errorText, dateText,
+  issue, onClose, onStatus, onSave, machines, master, masterFailed, onRetryMaster, onReloadMaster, onMasterNotes, changeLabel,
+  moldNumber, othersOnMold, onShowMold, audioOk, t, c, isAr, lang, errorText, dateText,
 }: {
   issue: Issue | null;
   onClose: () => void;
   onStatus: (issue: Issue, next: string) => Promise<void>;
   onSave: (issue: Issue, changes: Record<string, string>, files: Files) => Promise<{ ok: true } | { ok: false; reason: string }>;
-  machines: string[]; products: string[]; audioOk: boolean;
+  machines: string[]; master: MasterRow[] | null; masterFailed: boolean; onRetryMaster: () => void; onReloadMaster: () => void;
+  onMasterNotes: (row: number, notes: string) => void;
+  changeLabel: string;
+  moldNumber: string; othersOnMold: number; onShowMold: () => void;
+  audioOk: boolean;
   t: Strings; c: Common; isAr: boolean; lang: "ar" | "en";
   errorText: (reason: string) => string;
   dateText: (iso: string) => string;
@@ -731,6 +887,12 @@ function IssueDrawer({
   const [form, setForm] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // «تغيير» on the picker opens the search list WITHOUT blanking the draft's
+  // product; only «بدون منتج» blanks it, and a pick replaces it.
+  const [changingProduct, setChangingProduct] = useState(false);
+  // The Master ROW the person tapped — for a name Master holds twice, the
+  // name alone would show the first twin's client and number again.
+  const [pickedRow, setPickedRow] = useState<MasterPick | null>(null);
   const solutionRef = useRef<HTMLDivElement>(null);
   // Keyed by row where the page renders it: opening another issue mounts a
   // fresh drawer, so no state has to be reset here.
@@ -745,7 +907,7 @@ function IssueDrawer({
   const draft = form ?? original;
   const set = (k: keyof Draft, v: string) => setForm((f) => ({ ...(f ?? original), [k]: v }));
   const startEditing = (toSolution = false) => {
-    setForm(original); setEditing(true); setErr(null);
+    setForm(original); setEditing(true); setErr(null); setChangingProduct(false); setPickedRow(null);
     if (toSolution) setTimeout(() => solutionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
   };
   const noSolution = !issue.action && !issue.solutionAudio;
@@ -768,14 +930,28 @@ function IssueDrawer({
 
   return (
     <Modal open title={t.details} onClose={onClose} isAr={isAr}>
-      {/* identity */}
+      {/* identity — the mould first, the machine second */}
       <div className="mb-3">
-        <p className="text-lg font-semibold text-gray-900 break-words">{issue.machine || issue.product || "—"}</p>
+        <p className="text-lg font-semibold text-gray-900 break-words">
+          {issue.product ? <>{issue.product} <MoldChip number={moldNumber} title={t.moldNumber} /></> : issue.machine ? <bdi dir="ltr">{issue.machine}</bdi> : "—"}
+        </p>
         <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="tabular-nums" title={issue.date}>{dateText(issue.date)}</span>
           {issue.category && <span>· {t.catLabels[issue.category] || issue.category}</span>}
-          {issue.machine && issue.product && <span>· {issue.product}</span>}
+          {issue.machine && issue.product && <span>· <bdi dir="ltr">{issue.machine}</bdi></span>}
         </p>
+        {!editing && issue.product && othersOnMold > 0 && (
+          <p className="text-xs text-gray-600 mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>{fill(t.moldIssues, { n: othersOnMold })}</span>
+            <button
+              type="button"
+              onClick={onShowMold}
+              className="inline-flex items-center min-h-11 sm:min-h-0 px-1 text-blue-600 font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 rounded"
+            >
+              {t.showMoldIssues}
+            </button>
+          </p>
+        )}
       </div>
 
       {!editing ? (
@@ -832,6 +1008,22 @@ function IssueDrawer({
             </Section>
           )}
 
+          {/* THE ONLY WRITE TO MASTER — previewed, on an explicit save. */}
+          {issue.product.trim() !== "" && (
+            <IssueMasterNotes
+              product={issue.product}
+              issue={{ date: issue.date, description: issue.description, action: issue.action }}
+              master={master}
+              masterFailed={masterFailed}
+              onRetry={onRetryMaster}
+              onReload={onReloadMaster}
+              onSaved={onMasterNotes}
+              changeLabel={changeLabel}
+              t={t}
+              c={c}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-3 mt-2">
             <Btn variant="outline" onClick={() => startEditing(false)}><Pencil size={14} /> {c.edit}</Btn>
             <Btn variant="ghost" onClick={onClose}>{c.cancel}</Btn>
@@ -839,33 +1031,65 @@ function IssueDrawer({
         </>
       ) : (
         <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+          <div className="mb-3">
+            <span className="block text-xs font-medium text-gray-600 mb-1.5">{t.category}</span>
+            <CategoryChips value={draft.category} onChange={(v) => set("category", v)} t={t} />
+          </div>
+          {/* Not a <Field> — see the new-issue form. The picker shows the Master
+              row the draft names; a recorded name Master does not hold stays
+              on the row (grey line) until something is picked. */}
+          <div className="mb-3">
+            <span className="block text-xs font-medium text-gray-600 mb-1">{t.mold}</span>
+            {(() => {
+              const tapped = pickedRow && productKey(pickedRow.name) === productKey(draft.product) ? pickedRow : null;
+              const matched = master && !changingProduct ? tapped ?? findProduct(master, draft.product) : null;
+              return (
+                <>
+                  {!matched && draft.product.trim() !== "" && (
+                    <p className="text-xs text-gray-500 mb-1.5">{t.currentProduct}: {draft.product}</p>
+                  )}
+                  {/* The keyboard opens only after «تغيير» was tapped — not on
+                      «إضافة الحل» for an issue whose product is blank. */}
+                  <MasterProductPicker
+                    rows={master ?? []}
+                    value={matched}
+                    onChange={(m) => {
+                      if (m) { set("product", m.name); setPickedRow(m); setChangingProduct(false); }
+                      else setChangingProduct(true);
+                    }}
+                    loading={master === null && !masterFailed}
+                    failed={masterFailed}
+                    onRetry={onRetryMaster}
+                    autoFocus={changingProduct}
+                  />
+                  {draft.product.trim() !== "" && (
+                    <button
+                      type="button"
+                      onClick={() => { set("product", ""); setPickedRow(null); setChangingProduct(false); }}
+                      className="mt-1.5 inline-flex items-center gap-1 min-h-11 sm:min-h-0 px-2 -mx-2 rounded-lg text-xs text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                    >
+                      <X size={12} /> {t.clearProduct}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+          </div>
           <div className="grid sm:grid-cols-2 gap-x-4">
             <Field label={t.date}>
               <input className={inputCls} type="date" value={draft.date} onChange={(e) => set("date", e.target.value)} />
             </Field>
-            <Field label={t.machine}>
-              <select className={inputCls} value={draft.machine} onChange={(e) => set("machine", e.target.value)}>
-                <option value="">—</option>
-                {(draft.machine && !machines.includes(draft.machine) ? [draft.machine, ...machines] : machines).map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t.product}>
-              <input className={inputCls} list="issue-products-edit" value={draft.product} onChange={(e) => set("product", e.target.value)} />
-              <datalist id="issue-products-edit">
-                {products.slice(0, 500).map((nm) => <option key={nm} value={nm} />)}
-              </datalist>
-            </Field>
+            <MachineSelect
+              label={isMachineCategory(draft.category) ? t.machine : t.machineOptional}
+              value={draft.machine}
+              onChange={(v) => set("machine", v)}
+              machines={machines}
+            />
             <Field label={t.status}>
               <select className={inputCls} value={draft.status} onChange={(e) => set("status", e.target.value)}>
                 {ISSUE_STATUSES.map((s) => <option key={s} value={s}>{t.statusLabels[s] || s}</option>)}
               </select>
             </Field>
-          </div>
-          <div className="mb-3">
-            <span className="block text-xs font-medium text-gray-600 mb-1.5">{t.category}</span>
-            <CategoryChips value={draft.category} onChange={(v) => set("category", v)} t={t} />
           </div>
 
           <Section title={t.problem}>
@@ -911,7 +1135,7 @@ function IssueDrawer({
             <Btn type="submit" disabled={saving || issueRec.state === "recording" || solRec.state === "recording"}>
               {saving ? t.saving : t.saveChanges}
             </Btn>
-            <Btn type="button" variant="outline" onClick={() => { setEditing(false); setErr(null); resetIssue(); resetSol(); }}>{c.cancel}</Btn>
+            <Btn type="button" variant="outline" onClick={() => { setEditing(false); setErr(null); setChangingProduct(false); setPickedRow(null); resetIssue(); resetSol(); }}>{c.cancel}</Btn>
           </div>
           <p className="sr-only">{formatDate(issue.date, lang)}</p>
         </form>

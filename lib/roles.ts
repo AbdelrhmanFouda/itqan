@@ -108,7 +108,9 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   // mould number for the product in front of them, and may correct the row
   // (owner's word, 2026-09-04: "allow for editing for everyone"). This entry
   // only decides who can OPEN the page; /api/molds guards the write.
-  { href: "/dashboard/molds", key: "molds", roles: ["worker"] },
+  // Maintenance was added 2026-10-07 (owner: "what is concerning maintenance
+  // here is mainly molds not machines").
+  { href: "/dashboard/molds", key: "molds", roles: ["worker", "maintenance"] },
   { href: "/dashboard/products", key: "products", roles: ["sales", "storage"] },
   { href: "/dashboard/jobs", key: "jobs", roles: ["production", "sales", "storage"] },
   // «طلبات العملاء» — the customer portal's review queue (2026-09-23, owner's

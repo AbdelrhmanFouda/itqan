@@ -160,7 +160,9 @@ test("the pages switched to authedFetch on 2026-09-23 still use it", () => {
     ["app/dashboard/machines/[id]/page.tsx", "/api/machines/"],
     ["app/dashboard/downtime/page.tsx", "/api/machines"],
     ["app/dashboard/issues/page.tsx", "/api/machines"],
-    ["app/dashboard/issues/page.tsx", "/api/sheet/products"],
+    // 2026-10-07: the issues log went mould-first and reads Master through the
+    // guarded register route instead of the «المنتجات» view.
+    ["app/dashboard/issues/page.tsx", "/api/molds"],
     ["app/dashboard/production/page.tsx", "/api/machines"],
     ["app/dashboard/quality/page.tsx", "/api/machines"],
     ["app/dashboard/jobs/[id]/page.tsx", "/api/machines"],

@@ -11,6 +11,7 @@ import {
   driveIdFromLink, driveViewLink, audioRef, isDriveId,
   hasProblem, sameIssue, diffIssue, dayLabel, cairoToday, matchesIssue, foldArabic, countByStatus,
   MAX_AUDIO_BYTES, MAX_REQUEST_BYTES, MAX_AUDIO_SECONDS, NEXT_STATUS, ISSUE_STATUSES,
+  ISSUE_CATEGORIES, CATEGORY_ORDER, DEFAULT_CATEGORY, isMachineCategory, productKey, masterNoteLine,
 } from "../lib/issues.ts";
 
 /* ------------------------------- recording ------------------------------- */
@@ -166,4 +167,42 @@ test("the three tiles count every status, and an unknown one counts as open", ()
     { status: "مفتوح" }, { status: "تم" }, { status: "تم" }, { status: "قيد التنفيذ" }, { status: "" },
   ]), { "مفتوح": 2, "قيد التنفيذ": 1, "تم": 2 });
   for (const s of ISSUE_STATUSES) assert.ok(NEXT_STATUS[s], `${s} has a next status`);
+});
+
+/* --------------------------- mould first (2026-10-07) --------------------- */
+
+test("the page offers the mould first, with the sheet's own five categories", () => {
+  assert.equal(DEFAULT_CATEGORY, "اسطمبة");
+  assert.equal(CATEGORY_ORDER[0], DEFAULT_CATEGORY);
+  // Same five words as the sheet's dropdown — only the order differs.
+  assert.deepEqual([...CATEGORY_ORDER].sort(), [...ISSUE_CATEGORIES].sort());
+  assert.equal(isMachineCategory("ماكينة"), true);
+  assert.equal(isMachineCategory(" كهرباء "), true);
+  for (const c of ["اسطمبة", "خامة", "أخرى", "", undefined, null]) assert.equal(isMachineCategory(c), false);
+});
+
+test("the mould filter matches a product name across digit, case and spacing variants", () => {
+  assert.equal(productKey("  رشاش   ٠١٠ "), "رشاش 010");
+  assert.equal(productKey("EXT ۵۲L"), "ext 52l");
+  assert.equal(productKey(undefined), "");
+  const i = { ...issue, product: "رشاش 010" };
+  assert.equal(matchesIssue(i, { product: "رشاش  ٠١٠" }), true);
+  assert.equal(matchesIssue(i, { product: "رشاش 030" }), false);
+  assert.equal(matchesIssue(i, { product: "" }), true); // blank = every mould
+  // The other filters still apply beside it.
+  assert.equal(matchesIssue(i, { product: "رشاش 010", status: "مفتوح" }), false);
+  assert.equal(matchesIssue({ ...i, product: "" }, { product: "رشاش 010" }), false);
+});
+
+test("the Master note line: date, the fault, and the fix when there is one", () => {
+  assert.equal(
+    masterNoteLine({ date: "2026-10-07", description: "كسر في البنز", action: "تغيير البنز" }),
+    "2026-10-07: كسر في البنز — الحل: تغيير البنز",
+  );
+  assert.equal(masterNoteLine({ date: "2026-10-07", description: "كسر في البنز", action: "  " }), "2026-10-07: كسر في البنز");
+  // Line breaks and runs of spaces collapse — the note is ONE line.
+  assert.equal(masterNoteLine({ date: "2026-10-07", description: " كسر\n في   البنز ", action: "" }), "2026-10-07: كسر في البنز");
+  // No typed description (a voice note): the fix alone, or just the date to type after.
+  assert.equal(masterNoteLine({ date: "2026-10-07", description: "", action: "تغيير البنز" }), "2026-10-07: الحل: تغيير البنز");
+  assert.equal(masterNoteLine({ date: "2026-10-07", description: "", action: "" }), "2026-10-07:");
 });

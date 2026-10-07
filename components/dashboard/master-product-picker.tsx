@@ -57,7 +57,7 @@ export function pieceGrams(weight: string | undefined | null): number {
   return m ? Number(m[0]) : 0;
 }
 
-export function MasterProductPicker({ rows, value, onChange, loading, failed, onRetry }: {
+export function MasterProductPicker({ rows, value, onChange, loading, failed, onRetry, autoFocus = true }: {
   rows: readonly MasterPick[];
   value: MasterPick | null;
   onChange: (m: MasterPick | null) => void;
@@ -66,6 +66,9 @@ export function MasterProductPicker({ rows, value, onChange, loading, failed, on
   /** Master could not be read — say so and offer to ask again. */
   failed?: boolean;
   onRetry?: () => void;
+  /** Focus the search box on mount (the jobs forms). The issues page passes
+   *  false: on a phone the keyboard would cover the voice-first form. */
+  autoFocus?: boolean;
 }) {
   const { lang } = useLang();
   const t = pd[lang];
@@ -135,7 +138,7 @@ export function MasterProductPicker({ rows, value, onChange, loading, failed, on
           }}
           enterKeyHint="search"
           autoComplete="off"
-          autoFocus
+          autoFocus={autoFocus}
         />
       </label>
       <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100 bg-white">

@@ -46,6 +46,15 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-10-07) — the issues log is MOULD-first, and writes into Master's notes
+
+Owner: "the problem is with the mold more than machine … i want to write in the master notes about each issue for each product".
+- **`/dashboard/issues`**: category first (`CATEGORY_ORDER`, default «اسطمبة»), then the product from `MasterProductPicker` (reads `/api/molds`, no longer `/api/sheet/products`); the machine is in the main form only for «ماكينة»/«كهرباء» (`isMachineCategory`), else under «حقول إضافية». Cards, rows and the drawer are titled by product + mould number; a mould filter (`productKey`, lib/issues.ts) sits before the machine one. The picker took an `autoFocus` prop — off here.
+- **The ONE Master write**: `components/dashboard/issue-master-notes.tsx` in the opened issue → `PATCH /api/molds { name, row, expect:{client,code}, appendNote }`, only on an explicit save of an editable line (`masterNoteLine`). The rule is `appendToNotes()` in `lib/mold-number.ts`: appended under what is there, a customer's bare mould number is labelled «رقم الاسطمبة …» first so it still reads, a line that would read as a NEW number is refused, the same line twice writes nothing (at-least-once bridge), over 400 chars is `too_long`. A name Master holds twice asks which twin and is refused unless client + code still agree.
+- ⚠ `getRecords(entity, { raw: ["notes"] })` (lib/sheets.ts) keeps a cell's line breaks; the default `clean()` flattens them, which would have glued every appended line onto one.
+- `maintenance` opens `/dashboard/molds` now (owner's word, same day) — pins moved in tests/roles + views-matrix.
+- Seen live on localhost (list, drawer, the prefilled line, the new form). ⚠ **A real save into «الرئيسي» has NOT been run.**
+
 ## Recently landed (2026-10-07) — «تم إنتاج»: a customer sees how many were made
 
 Owner, signed in as a customer: "I only see my orders, not how many were made". `PORTAL_ORDER_KEYS` gained ONE key, `produced`.

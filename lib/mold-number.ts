@@ -114,3 +114,55 @@ export function moldKey(name: string | undefined | null): string {
   // Filler («غير متاح / N/A») folds to "" — nothing may ever join on it.
   return clean(name).toLowerCase();
 }
+
+/* ------------------------- writing into the notes ------------------------- */
+
+/** One note line: long enough for a fault and its fix, short enough for a cell that collects them. */
+export const NOTE_LINE_MAX = 400;
+
+/**
+ * A line a person typed, made safe for a cell: one line, capped, and never
+ * starting with a character Sheets would read as a formula (the write is
+ * typed in as if by hand).
+ */
+export function noteLine(line: string | undefined | null): string {
+  return String(line ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[=+\-@\s]+/, "")
+    .slice(0, NOTE_LINE_MAX)
+    .trim();
+}
+
+export type NotesAppend =
+  | { ok: true; notes: string; changed: boolean }
+  | { ok: false; reason: "empty_line" | "mold_number_changed" };
+
+/**
+ * «ملاحظات» with one more line under what it already holds (the issues page,
+ * 2026-10-07, owner: "write in the master notes about each issue for each
+ * product"). Three things it must not do:
+ *
+ *  - LOSE A MOULD NUMBER. On 26 rows the whole note is the customer's number
+ *    (`HD16713`), and it reads as one only while it stands alone. So a bare
+ *    number is labelled first — «رقم الاسطمبة HD16713» — which the reader
+ *    above accepts with anything after it.
+ *  - INVENT ONE. A line that itself says «كود الاسطمبة 12» would start
+ *    reading as the product's number; that is refused, never written.
+ *  - WRITE TWICE. The bridge is at-least-once: a line the cell already holds
+ *    is `changed: false` and nothing is written.
+ */
+export function appendToNotes(existing: string | undefined | null, line: string | undefined | null): NotesAppend {
+  const add = noteLine(line);
+  if (!add) return { ok: false, reason: "empty_line" };
+  const raw = String(existing ?? "").replace(/\r\n?/g, "\n").trim();
+  const cur = clean(raw) ? raw : "";
+  const flat = (s: string) => clean(s).toLowerCase();
+  if (cur && flat(cur).includes(flat(add))) return { ok: true, notes: cur, changed: false };
+  const before = moldNumberFromNotes(cur);
+  const bare = before !== "" && clean(cur) === before;
+  const head = bare ? `رقم الاسطمبة ${before}` : cur;
+  const notes = head ? `${head}\n${add}` : add;
+  if (moldNumberFromNotes(notes) !== before) return { ok: false, reason: "mold_number_changed" };
+  return { ok: true, notes, changed: true };
+}

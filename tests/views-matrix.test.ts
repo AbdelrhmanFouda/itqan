@@ -38,7 +38,8 @@ const MATRIX: Record<NavKey, Role[]> = {
   sales:       ["owner", "manager", "sales"],
   machines:    ["owner", "manager", "maintenance"],
   // worker added 2026-09-04 (owner's word): the floor reads the mould number.
-  molds:       ["owner", "manager", "worker"],
+  // maintenance added 2026-10-07 (owner's word): maintenance is mainly moulds.
+  molds:       ["owner", "manager", "worker", "maintenance"],
   products:    ["owner", "manager", "sales", "storage"], // storage added 2026-10-05 (owner)
   jobs:        ["owner", "manager", "production", "sales", "storage"], // storage added 2026-10-05 (owner)
   // The customer portal's review queue (2026-09-23). Sales, manager, owner —
@@ -114,7 +115,7 @@ test("pages that name a client, a quantity or a stock are closed to the floor", 
   for (const key of ["jobs", "clients", "storage", "stock", "changeover", "finance", "sales", "reports", "products", "machines", "performance", "quality", "overview", "approvals"] as NavKey[]) {
     assert.equal(MATRIX[key].includes("worker"), false, `worker was given ${key}`);
   }
-  assert.deepEqual(MATRIX.molds.filter((r) => !hasFullAccess(r)), ["worker"]);
+  assert.deepEqual(MATRIX.molds.filter((r) => !hasFullAccess(r)), ["worker", "maintenance"]);
 });
 
 test("approvals belongs to owner and manager only — no requestable role but manager", () => {

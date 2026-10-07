@@ -124,3 +124,46 @@ test("moldKey folds digits, case and whitespace the way the other joins do", () 
   assert.equal(moldKey(undefined), "");
   assert.equal(latinDigits("۱۲۳"), "123");
 });
+
+/* ------------------------- writing into the notes ------------------------- */
+
+test("appendToNotes: a line goes under what the cell holds; filler counts as empty", async () => {
+  const { appendToNotes } = await import("../lib/mold-number.ts");
+  assert.deepEqual(appendToNotes("", "2026-10-07: كسر في البنز"), { ok: true, notes: "2026-10-07: كسر في البنز", changed: true });
+  assert.deepEqual(appendToNotes("غير متاح / N/A", "فلاش في الخط"), { ok: true, notes: "فلاش في الخط", changed: true });
+  assert.deepEqual(appendToNotes("قديم", "فلاش في الخط"), { ok: true, notes: "قديم\nفلاش في الخط", changed: true });
+});
+
+test("appendToNotes: a customer's bare mould number survives — it is labelled first", async () => {
+  const { appendToNotes, moldNumberFromNotes } = await import("../lib/mold-number.ts");
+  const r = appendToNotes("HD16713", "2026-10-07: تسريب مياه");
+  assert.ok(r.ok && r.changed);
+  if (r.ok) {
+    assert.equal(r.notes, "رقم الاسطمبة HD16713\n2026-10-07: تسريب مياه");
+    assert.equal(moldNumberFromNotes(r.notes), "HD16713");
+    // …and a second line keeps it too, without labelling twice.
+    const again = appendToNotes(r.notes, "2026-10-09: اتغيّر البنز");
+    assert.ok(again.ok && again.changed);
+    if (again.ok) {
+      assert.equal(again.notes, "رقم الاسطمبة HD16713\n2026-10-07: تسريب مياه\n2026-10-09: اتغيّر البنز");
+      assert.equal(moldNumberFromNotes(again.notes), "HD16713");
+    }
+  }
+});
+
+test("appendToNotes: never twice, never a formula, never a new mould number", async () => {
+  const { appendToNotes, noteLine, NOTE_LINE_MAX } = await import("../lib/mold-number.ts");
+  // The bridge is at-least-once: the same line again writes nothing.
+  assert.deepEqual(appendToNotes("قديم\n2026-10-07: تسريب  مياه", "2026-10-07: تسريب مياه"),
+    { ok: true, notes: "قديم\n2026-10-07: تسريب  مياه", changed: false });
+  assert.equal(noteLine("=IMPORTRANGE(1)"), "IMPORTRANGE(1)");
+  assert.equal(noteLine("  سطر\nتاني  "), "سطر تاني");
+  assert.equal(noteLine("x".repeat(900)).length, NOTE_LINE_MAX);
+  assert.deepEqual(appendToNotes("قديم", "   "), { ok: false, reason: "empty_line" });
+  // The cell's own line breaks survive — a third line goes under the second,
+  // and a Windows-style break is normalised rather than doubled.
+  assert.deepEqual(appendToNotes("A\nB", "C"), { ok: true, notes: "A\nB\nC", changed: true });
+  assert.deepEqual(appendToNotes("A\r\nB", "C"), { ok: true, notes: "A\nB\nC", changed: true });
+  // A line that would start reading as the product's number is refused.
+  assert.deepEqual(appendToNotes("", "كود الاسطمبة 12 اتكسر"), { ok: false, reason: "mold_number_changed" });
+});

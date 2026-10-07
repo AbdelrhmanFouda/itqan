@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, updateRecord, sheetsWritable, type SheetRecord } from "@/lib/sheets";
 import { requireRole } from "@/lib/api-guard";
-import { resolveMoldNumber, moldKey, type MoldNumberSource } from "@/lib/mold-number";
+import { resolveMoldNumber, moldKey, appendToNotes, NOTE_LINE_MAX, type MoldNumberSource } from "@/lib/mold-number";
 import { masterRowByName } from "@/lib/master-lookup";
 
 /**
@@ -61,6 +61,14 @@ export type MoldRow = {
 
 const s = (v: string | undefined) => (v ?? "").trim();
 
+/**
+ * «ملاحظات» is read with its LINE BREAKS (getRecords' `raw`): the cell collects
+ * one line per fault since 2026-10-07, and the default reader collapses every
+ * newline to a space — the page would show a flattened cell, and the next
+ * append would write the flattened text back for good.
+ */
+const MASTER_READ = { raw: ["notes"] as const };
+
 function shape(r: SheetRecord, nameCount: Map<string, number>): MoldRow {
   const mn = resolveMoldNumber({ code: r.code, notes: r.notes });
   return {
@@ -90,7 +98,7 @@ export async function GET(req: NextRequest) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
   try {
-    const tab = await getRecords("master");
+    const tab = await getRecords("master", MASTER_READ);
     const nameCount = new Map<string, number>();
     for (const r of tab.records) {
       const k = moldKey(r.name);
@@ -128,7 +136,46 @@ export async function PATCH(req: NextRequest) {
   const g = await requireRole(req);
   if ("deny" in g) return g.deny;
   try {
-    const body = (await req.json()) as { row?: unknown; name?: unknown; changes?: unknown };
+    const body = (await req.json()) as {
+      row?: unknown; name?: unknown; changes?: unknown; appendNote?: unknown;
+      expect?: { client?: unknown; code?: unknown } | null;
+    };
+
+    // { name, row?, expect?, appendNote } — ONE line added under what «ملاحظات»
+    // already holds (the issues log's "write this in Master notes", 2026-10-07).
+    // The notes are taken from the FRESH row (line breaks kept), never from the
+    // browser, so nothing a colleague wrote meanwhile is erased; appendToNotes
+    // refuses a line that would change the customer's mould number kept in
+    // that cell, and answers `changed: false` for a line already there (the
+    // bridge is at-least-once). A line longer than the cap is REFUSED, not
+    // sliced: the person approved the text they saw.
+    if (body.appendNote !== undefined) {
+      const line = String(body.appendNote ?? "").replace(/\s+/g, " ").trim();
+      if (line.length > NOTE_LINE_MAX) return NextResponse.json({ ok: false, reason: "too_long" }, { status: 400 });
+      const master = await getRecords("master", { fresh: true, ...MASTER_READ });
+      const preferRow = body.row === undefined || body.row === null ? undefined : Number(body.row);
+      const m = masterRowByName(master.records, String(body.name ?? ""), preferRow);
+      if (!m.ok) return NextResponse.json({ ok: false, reason: m.reason }, { status: 400 });
+      // A name Master holds twice is tied to the chosen twin only by the row
+      // NUMBER the browser holds, and a row deleted above adjacent twins puts
+      // the OTHER twin on that number. The browser sends the twin's client and
+      // code as well; a fresh row that no longer agrees is refused.
+      const twins = master.records.filter((r) => moldKey(r.name) === moldKey(m.row.name)).length;
+      if (body.expect && typeof body.expect === "object" && twins > 1) {
+        const same = (a: unknown, b: string | undefined) => moldKey(String(a ?? "")) === moldKey(b);
+        if (!same(body.expect.client, m.row.client) || !same(body.expect.code, m.row.code)) {
+          return NextResponse.json({ ok: false, reason: "identity_mismatch" }, { status: 400 });
+        }
+      }
+      const a = appendToNotes(m.row.notes, line);
+      if (!a.ok) return NextResponse.json({ ok: false, reason: a.reason }, { status: 400 });
+      if (!a.changed) return NextResponse.json({ ok: true, unchanged: true, notes: a.notes });
+      const res = await updateRecord("master", m.row.row, { notes: a.notes });
+      if (!res.ok) return NextResponse.json(res, { status: 400 });
+      console.log(`[molds] ${g.user.email} added a note to Master row ${m.row.row} («${s(m.row.name)}»)`);
+      return NextResponse.json({ ok: true, notes: a.notes, row: m.row.row });
+    }
+
     const changes: Record<string, string> = {};
     for (const [k, v] of Object.entries((body.changes ?? {}) as Record<string, unknown>)) {
       if (EDITABLE.has(k)) changes[k] = String(v ?? "");

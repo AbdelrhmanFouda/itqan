@@ -55,8 +55,10 @@ test("worker sees exactly downtime, issues, assistant, molds", () => {
 
 test("worker can open the mould register — decided here; the write is guarded in /api/molds (any approved role)", () => {
   assert.ok(canAccess("worker", "/dashboard/molds"));
-  // The register is the ONLY page the worker gained; nothing else came with it.
-  for (const role of ["production", "quality", "sales", "finance", "maintenance", "storage"] as Role[]) {
+  // Maintenance was given it on 2026-10-07 (owner's word: maintenance here is
+  // mainly moulds). Nobody else.
+  assert.ok(canAccess("maintenance", "/dashboard/molds"));
+  for (const role of ["production", "quality", "sales", "finance", "storage"] as Role[]) {
     assert.equal(canAccess(role, "/dashboard/molds"), false, `${role} was not given the register`);
   }
 });
@@ -120,7 +122,8 @@ test("the pages production and quality lost are really gone", () => {
 /* --------------------------- untouched roles ------------------------------ */
 
 test("maintenance, sales, finance and storage are unchanged", () => {
-  assert.deepEqual(keysFor("maintenance").sort(), ["downtime", "issues", "machines"]);
+  // `molds` is a DELIBERATE move of this pin (owner, 2026-10-07), not drift.
+  assert.deepEqual(keysFor("maintenance").sort(), ["downtime", "issues", "machines", "molds"]);
   // Sales gained `requests` on 2026-09-23 — a DELIBERATE move of this pin, not
   // drift: the customer portal's review queue is theirs, the owner's and the
   // manager's, and nobody else's (owner's decision 6). The matrix row is in

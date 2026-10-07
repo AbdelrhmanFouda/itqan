@@ -557,9 +557,23 @@ function labelCell(rec: SheetRecord, present: readonly { key: string }[]): strin
   return "";
 }
 
+/**
+ * A cell kept with its LINE BREAKS: filler («غير متاح / N/A») folds to "",
+ * `\r\n` becomes `\n`, the ends are trimmed — and nothing else is touched.
+ * `clean()` collapses every run of whitespace to one space, which is right
+ * for a name or a number and wrong for a notes cell that collects lines
+ * (Master's «ملاحظات», where the issues page appends one line per fault):
+ * read through `clean()`, "A\nB" came back as "A B" and the next append
+ * flattened everything the cell held.
+ */
+function cleanKeepLines(v: string | undefined): string {
+  const s = (v ?? "").replace(/\r\n?/g, "\n").trim();
+  return clean(s) === "" ? "" : s;
+}
+
 export async function getRecords(
   entity: string,
-  opts: { fresh?: boolean } = {},
+  opts: { fresh?: boolean; /** Fields read with `cleanKeepLines` instead of `clean`. */ raw?: readonly string[] } = {},
 ): Promise<RecordsResult> {
   const cfg = ENTITIES[entity];
   const empty: RecordsResult = { records: [], fields: [], longFields: [], labels: {}, writable: sheetsWritable(), readAt: Date.now() };
@@ -585,6 +599,7 @@ export async function getRecords(
   const labels: Record<string, { en: string; ar: string }> = {};
   for (const f of present) labels[f.key] = splitLabel(headers[idx[f.key]]);
 
+  const raw = new Set(opts.raw ?? []);
   const records: SheetRecord[] = [];
   for (let r = h + 1; r < values.length; r++) {
     const row = values[r];
@@ -592,7 +607,7 @@ export async function getRecords(
     const rec = { row: r + 1 } as unknown as SheetRecord;
     let any = false;
     for (const f of present) {
-      const v = clean(row[idx[f.key]]);
+      const v = raw.has(f.key) ? cleanKeepLines(row[idx[f.key]]) : clean(row[idx[f.key]]);
       rec[f.key] = v;
       if (v) any = true;
     }
