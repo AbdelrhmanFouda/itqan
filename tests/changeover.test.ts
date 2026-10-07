@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANY_COLOUR, BASELINE_REASON, CHANGEOVER_NUMBERS, FITS_UNKNOWN, MAP_COLS, MAP_MAX_ROWS, MAP_TILE, MISSING_ITEMS,
-  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE,
+  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE, standsTall, turnLayout,
   answersFor, barrelColours, bestStart, colourFromMaterial, colourKey, colourRelation, colourToSheet,
   coloursFromSheet, coloursIn, coloursToSheet, dryingFor, estimateChange, estimateFrom, formatLayout, guessColour,
   isBaselineRow, isNightHour, isRecent, kindFromSheet, kindToSheet, latestRuns, listFromSheet, listToSheet,
@@ -1029,7 +1029,7 @@ test("the first, 7-column map is scaled onto the landscape sheet when read — n
 test("the floor map is one cell: written with the sheet it is on, and read back the same", () => {
   const tiles = parseLayout(FLOOR_V1);
   const cell = formatLayout(tiles);
-  assert.ok(cell.startsWith(`grid ${MAP_COLS}x${MAP_MAX_ROWS} ; `), cell.slice(0, 30));
+  assert.ok(cell.startsWith(`grid ${MAP_COLS}x${MAP_MAX_ROWS} ; wide ; `), cell.slice(0, 30));
   assert.deepEqual(parseLayout(cell), tiles, "a cell that says its sheet is NOT scaled again");
   assert.deepEqual(parseLayout(""), []);
   // A cell written for another sheet is scaled by its EDGES: what touched still touches.
@@ -1050,12 +1050,12 @@ test("placing a machine: one unit at a time, pulled inside the sheet, never stac
   tiles = placeTile(tiles, "PQ 9 — 140", { c: 20, r: 10 })!;
   assert.deepEqual(at(tiles, "PQ 9 — 140"), { label: "PQ 9 — 140", c: 20, r: 10, w: MAP_TILE.w, h: MAP_TILE.h });
   // Moving keeps its size; hanging over the right edge is pulled back in.
-  tiles = placeTile(tiles, "PQ 9 — 140", { c: MAP_COLS, r: 17 })!;
+  tiles = placeTile(tiles, "PQ 9 — 140", { c: MAP_COLS, r: 13 })!;
   assert.equal(at(tiles, "PQ 9 — 140")?.c, MAP_COLS - MAP_TILE.w + 1);
   // A drag hands in fractions of a unit: they snap to the nearest one —
   // 56 places across where the first map had seven.
-  tiles = placeTile(tiles, "PQ 9 — 140", { c: 30.4, r: 17.6 })!;
-  assert.deepEqual([at(tiles, "PQ 9 — 140")?.c, at(tiles, "PQ 9 — 140")?.r], [30, 18]);
+  tiles = placeTile(tiles, "PQ 9 — 140", { c: 30.4, r: 12.6 })!;
+  assert.deepEqual([at(tiles, "PQ 9 — 140")?.c, at(tiles, "PQ 9 — 140")?.r], [30, 13]);
   // Onto another machine: refused, and nothing moved.
   assert.equal(placeTile(tiles, "PQ 9 — 140", { c: 1, r: 9 }), null);
   // Resizing in place is a placement too — refused when it would overlap, and held at the minimum.
@@ -1081,46 +1081,103 @@ test("a machine coming onto the map takes the first free spot; a full sheet says
   assert.equal(freeSpot([{ label: "ALL", c: 1, r: 1, w: MAP_COLS, h: MAP_MAX_ROWS }]), null);
 });
 
-// The owner's own arrangement of 2026-10-06, as he saved it from his phone:
-// every machine in the left 33 units of the 56-unit sheet (all he could see of
-// a sheet that panned sideways), PQ 1 nine units wide.
-const FLOOR_PHONE = "grid 56x32 ; PQ 1 — 550@1,9,9,5 ; PQ 13 — 150@10,1,11,4 ; PQ 11 — 180@10,5,11,4 ; PQ 9 — 140@10,9,11,4 ; "
-  + "PQ 14 — 180@24,1,10,4 ; PQ 12 — 180@24,5,10,4 ; PQ 10 — 150@24,9,10,4 ; PQ 2 — 280@2,28,15,4 ; PQ 3 — 280@19,28,15,4";
+// The owner's own arrangement of 2026-10-06, exactly as he saved it from his
+// phone: two columns of presses in the left 33 units of the sheet, PQ 1 beside
+// them, the two 280s along the bottom — a floor standing TALL.
+const FLOOR_TALL = "grid 56x32 ; PQ 1 — 550@1,9,9,5 ; PQ 13 — 150@10,1,11,4 ; PQ 11 — 180@10,5,11,4 ; PQ 9 — 140@10,9,11,4 ; "
+  + "PQ 7 — 100@10,13,11,4 ; PQ 5 — 100@10,17,11,4 ; PQ 4 — 138@10,21,11,4 ; PQ 14 — 180@24,1,10,4 ; PQ 12 — 180@24,5,10,4 ; "
+  + "PQ 10 — 150@24,9,10,4 ; PQ 8 — 138@24,13,10,4 ; PQ 6 — 220@24,17,10,4 ; PQ 2 — 280@2,28,15,4 ; PQ 3 — 280@19,28,15,4";
+const heightOf = (fit: ReturnType<typeof fitFloor>) => fit.rowFr.reduce((x, y) => x + y, 0) * fit.unitH;
 
-test("on a phone the floor fills the width, wherever on the sheet it was arranged — nothing pans, every tile is readable", () => {
-  const tiles = parseLayout(FLOOR_PHONE);
-  const fit = fitFloor(tiles, 342);
-  assert.equal(fit.pans, false, "the page never asks him to pan sideways for this floor");
-  assert.ok(Math.abs(fit.width - 342) < 0.01);
-  // The empty right part of the sheet and its empty top are not drawn at all;
-  // the three empty units between the two columns of presses are a sliver.
-  assert.equal(fit.colFr[33], 0);
-  assert.equal(fit.colFr[55], 0);
-  assert.ok(fit.colFr[20] > 0 && fit.colFr[20] < 0.5);
-  assert.equal(fit.colFr[0], 1);
-  // Rows 25–27 hold nothing: slivers too.
-  assert.ok(fit.rowFr[24] > 0 && fit.rowFr[24] < 0.5);
-  for (const t of tiles) {
-    assert.ok(tileWidthPx(fit, t) >= 96, `${t.label} is ${Math.round(tileWidthPx(fit, t))}px wide`);
-    assert.ok(tileHeightPx(fit, t) >= MAP_READABLE.stackedH - 0.01, `${t.label} is ${Math.round(tileHeightPx(fit, t))}px tall`);
+test("the map itself is landscape: a floor saved standing tall is read turned a quarter — turned, never mirrored", () => {
+  const tiles = parseLayout(FLOOR_TALL);
+  assert.equal(tiles.length, 14);
+  assert.equal(validLayout(tiles), true);
+  assert.equal(standsTall(tiles), false, "more machines across it than down it now");
+  const p = (label: string) => at(tiles, label)!;
+  // Its top went to the LEFT — the way a phone is turned sideways: the line
+  // that ran down the sheet now runs across it, in the same order.
+  const line = ["PQ 13 — 150", "PQ 11 — 180", "PQ 9 — 140", "PQ 7 — 100", "PQ 5 — 100", "PQ 4 — 138"].map(p);
+  for (let i = 1; i < line.length; i++) {
+    assert.equal(line[i].r, line[0].r);
+    assert.equal(line[i].c, line[i - 1].c + line[i - 1].w, "what touched still touches");
   }
-  // It was 186 × 42 px per machine on the sheet that panned.
-  const pq13 = tiles.find((t) => t.label === "PQ 13 — 150")!;
-  assert.ok(tileWidthPx(fit, pq13) > 115 && tileHeightPx(fit, pq13) > 110);
+  // What was on the RIGHT is now above, what was on the left below, what was
+  // at the bottom at the right end: a turn. (A mirror would put PQ 1 on top.)
+  assert.ok(p("PQ 14 — 180").r + p("PQ 14 — 180").h <= p("PQ 13 — 150").r);
+  assert.equal(p("PQ 14 — 180").c, p("PQ 13 — 150").c);
+  assert.ok(p("PQ 1 — 550").r >= p("PQ 13 — 150").r + p("PQ 13 — 150").h);
+  assert.ok(p("PQ 2 — 280").c >= p("PQ 4 — 138").c + p("PQ 4 — 138").w && p("PQ 3 — 280").c === p("PQ 2 — 280").c);
+  assert.ok(p("PQ 3 — 280").r < p("PQ 2 — 280").r, "PQ 3 stood right of PQ 2, so it is above it");
+  // The ordinary machine has the ordinary tile again.
+  assert.deepEqual([p("PQ 13 — 150").w, p("PQ 13 — 150").h], [MAP_TILE.w, MAP_TILE.h]);
+
+  // Reading the same cell again gives the same floor; and once it is SAVED
+  // wide it is never turned again — whatever shape he arranges after that.
+  assert.deepEqual(parseLayout(FLOOR_TALL), tiles);
+  assert.deepEqual(parseLayout(formatLayout(tiles)), tiles);
+  const tall = "grid 56x32 ; wide ; A — 1@1,1,7,10 ; B — 2@1,11,7,10 ; C — 3@1,21,7,10";
+  assert.deepEqual(parseLayout(tall).map((t) => t.r), [1, 11, 21]);
+  assert.deepEqual(parseLayout(tall.replace("wide ; ", "")).map((t) => t.r), [1, 1, 1], "the same three, saved before: laid across");
 });
 
-test("on a desk the same floor is drawn wide and flat — the drawing beside the words — and still fills the width", () => {
-  const tiles = parseLayout(FLOOR_PHONE);
-  const fit = fitFloor(tiles, 761);
-  assert.equal(fit.pans, false);
-  assert.equal(fit.colFr[20], 1, "no slivers on a wide screen: the aisles are drawn as arranged");
-  assert.equal(fit.colFr[40], 0, "…but the empty edge of the sheet still is not");
-  const pq13 = tiles.find((t) => t.label === "PQ 13 — 150")!;
-  assert.ok(tileWidthPx(fit, pq13) >= 240);
-  assert.ok(Math.abs(tileHeightPx(fit, pq13) - MAP_READABLE.sideH) < 0.01);
-  // The whole floor is wider than it is tall.
-  const height = fit.rowFr.reduce((x, y) => x + y, 0) * fit.unitH;
-  assert.ok(fit.width > height);
+test("turning the map in the editor: a quarter each press, upside down is lossless, four presses are back", () => {
+  const base = parseLayout(FLOOR_TALL.replace("grid 56x32 ; ", "grid 56x32 ; wide ; "));
+  assert.equal(standsTall(base), true);
+  assert.deepEqual(turnLayout(base, 0), base);
+  assert.deepEqual(turnLayout(base, 4), base);
+  const p = (tiles: MapTile[], label: string) => at(tiles, label)!;
+  // Clockwise: the top goes to the right — PQ 13 (top of its line) ends right of PQ 4.
+  const cw = turnLayout(base, 1), ccw = turnLayout(base, 3);
+  for (const t of [cw, ccw]) { assert.equal(t.length, 14); assert.equal(validLayout(t), true); assert.equal(standsTall(t), false); }
+  assert.ok(p(cw, "PQ 13 — 150").c > p(cw, "PQ 4 — 138").c);
+  assert.ok(p(ccw, "PQ 13 — 150").c < p(ccw, "PQ 4 — 138").c);
+  assert.ok(p(cw, "PQ 1 — 550").r < p(cw, "PQ 13 — 150").r, "clockwise, what was on the left is on top");
+  // Upside down keeps every size and is undone by itself.
+  const flip = turnLayout(base, 2);
+  assert.equal(validLayout(flip), true);
+  assert.deepEqual([p(flip, "PQ 2 — 280").w, p(flip, "PQ 2 — 280").h], [15, 4]);
+  assert.ok(p(flip, "PQ 2 — 280").r < p(flip, "PQ 13 — 150").r);
+  assert.deepEqual(turnLayout(flip, 2).map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`).sort(), base.map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`).sort());
+  assert.deepEqual(turnLayout([], 1), []);
+});
+
+test("a phone held sideways gets the whole floor on its screen: nothing pans, every machine can be read", () => {
+  const tiles = parseLayout(FLOOR_TALL);
+  for (const [w, h] of [[800, 290], [915, 330], [640, 270]]) {
+    const fit = fitFloor(tiles, w, { fill: h });
+    assert.equal(fit.pans, false);
+    assert.ok(Math.abs(fit.width - w) < 0.01);
+    assert.ok(heightOf(fit) <= h + 0.01, `${Math.round(heightOf(fit))} of ${h}`);
+    assert.ok(fit.width > heightOf(fit) * 2, "landscape");
+    for (const t of tiles) {
+      assert.ok(tileWidthPx(fit, t) >= 88, `${t.label} is ${Math.round(tileWidthPx(fit, t))}px wide in ${w}`);
+      assert.ok(tileHeightPx(fit, t) >= 68, `${t.label} is ${Math.round(tileHeightPx(fit, t))}px tall in ${h}`);
+    }
+  }
+  // On a big screen a tile is not stretched into a pillar.
+  const big = fitFloor(tiles, 1400, { fill: 2000 });
+  assert.ok(heightOf(big) < 1400);
+  // Before the frame is measured nothing blows up.
+  assert.equal(fitFloor(tiles, 0, { fill: 0 }).unitH, 0);
+});
+
+test("in the page the plan stays landscape: it fills a desk, and on a phone held upright it pans rather than stand up", () => {
+  const tiles = parseLayout(FLOOR_TALL);
+  const desk = fitFloor(tiles, 761);
+  assert.equal(desk.pans, false);
+  assert.ok(Math.abs(desk.width - 761) < 0.01);
+  assert.ok(desk.width > heightOf(desk) * 1.5);
+  assert.equal(desk.colFr[MAP_COLS - 1], 0, "the empty edge of the sheet is not drawn");
+  const phone = fitFloor(tiles, 341);
+  assert.equal(phone.pans, true, "fourteen machines across 341px would be 40px each");
+  assert.ok(phone.width > heightOf(phone), "…and it is still wider than tall");
+  for (const fit of [desk, phone]) {
+    for (const t of tiles) {
+      assert.ok(tileWidthPx(fit, t) >= MAP_READABLE.stackedW - 0.01, `${t.label} is ${Math.round(tileWidthPx(fit, t))}px wide`);
+      assert.ok(tileHeightPx(fit, t) >= MAP_READABLE.stackedH - 0.01, `${t.label} is ${Math.round(tileHeightPx(fit, t))}px tall`);
+    }
+  }
 });
 
 test("a machine too narrow to read makes the sheet pan — and only then", () => {
@@ -1132,15 +1189,16 @@ test("a machine too narrow to read makes the sheet pan — and only then", () =>
   assert.equal(fitFloor(row.slice(0, 3), 342).pans, false);
 });
 
-test("the editor always shows the whole sheet, fitted, every unit the same", () => {
-  const tiles = parseLayout(FLOOR_PHONE);
+test("the editor always shows the whole sheet, fitted, every unit the same — and the sheet is landscape there too", () => {
+  const tiles = parseLayout(FLOOR_TALL);
   for (const frame of [324, 735]) {
     const fit = fitFloor(tiles, frame, { whole: true });
     assert.equal(fit.pans, false);
     assert.deepEqual([fit.colFr.length, fit.rowFr.length], [MAP_COLS, MAP_MAX_ROWS]);
     assert.ok(fit.colFr.every((f) => f === 1) && fit.rowFr.every((f) => f === 1));
     assert.ok(Math.abs(fit.unitW * MAP_COLS - frame) < 0.01);
-    assert.ok(fit.unitH >= 12);
+    assert.ok(fit.unitH >= 7, "a finger has to land on a machine");
+    assert.ok(heightOf(fit) < frame, "wider than tall, on a phone as on a desk");
   }
   // Before the frame is measured, and with nothing placed, nothing blows up.
   assert.equal(fitFloor([], 0).width, 0);

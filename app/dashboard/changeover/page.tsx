@@ -20,6 +20,7 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  * this file asks, ranks with those functions in the browser, and draws.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLang } from "@/context/LangContext";
 import { authedFetch } from "@/lib/authed-fetch";
 import { co } from "@/lib/i18n.changeover";
@@ -30,7 +31,7 @@ import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
   barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineKey, placeTile, rankFor, removeTile,
-  splitMinutes, tileHeightPx, tileWidthPx, type FloorFit,
+  splitMinutes, tileHeightPx, tileWidthPx, turnLayout, type FloorFit,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
   type Suggestion,
 } from "@/lib/changeover";
@@ -38,11 +39,11 @@ import type { ChangeoverResponse, MountResult } from "@/lib/changeover-data";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { Btn, EmptyState, LoadError, Modal, Pill, Spinner, StatTile, iconBtnCls, inputCls } from "@/components/dashboard/ui";
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCircle, LayoutGrid, List, Moon, Pencil, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCircle, LayoutGrid, List, Maximize2, Moon, Pencil, RefreshCw, RotateCw, X } from "lucide-react";
 
 // v3 (2026-10-05): the answer gained fields the page reads on every card; a
 // snapshot in the old shape is not shown under the new code.
-const LAST_KEY = "itqan.changeover.last.v3";
+const LAST_KEY = "itqan.changeover.last.v4";
 const STALE_AFTER_MS = 60_000;
 const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "red", info: "blue" };
 const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
@@ -196,36 +197,38 @@ function MachineGlyph({ colours, now, tonnage, state, className, style }: {
 }
 
 /**
- * The floor, drawn for the width it is given (lib/changeover.ts fitFloor): on
- * a desk the sheet as arranged; on a phone the same arrangement with the
- * empty aisles squeezed and the units drawn taller, so every machine keeps
- * its drawing, its colours and its name — and the page never pans sideways
- * unless a machine would otherwise be too narrow to read. `whole` is the
- * editor: the full sheet, unsqueezed.
+ * The floor, drawn for the frame it is given (lib/changeover.ts fitFloor) — a
+ * LANDSCAPE plan (owner, 2026-10-07: "I want the map itself to be
+ * landscape"). In the page it is as wide as the frame, and a frame too narrow
+ * for the machines to be read pans sideways rather than stand the floor up.
+ * `fill` is the full-screen view: the whole floor fitted into the frame both
+ * ways. `whole` is the editor: the full sheet, unsqueezed.
  */
-function Floor({ tiles, whole, sheetRef, onSheetClick, children }: {
-  tiles: readonly MapTile[]; whole?: boolean; sheetRef?: React.RefObject<HTMLDivElement | null>;
+function Floor({ tiles, whole, fill, sheetRef, onSheetClick, children }: {
+  tiles: readonly MapTile[]; whole?: boolean; fill?: boolean; sheetRef?: React.RefObject<HTMLDivElement | null>;
   onSheetClick?: (e: React.MouseEvent<HTMLDivElement>) => void; children: (fit: FloorFit) => React.ReactNode;
 }) {
   // The frame is measured, not guessed: the same page is a phone held either
-  // way, a tablet and a desk.
+  // way, a tablet and a desk. (clientWidth is the frame's own size even when
+  // the full-screen view is drawn turned.)
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
+  const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
     if (!frame) return;
-    const read = () => setWidth(frame.clientWidth);
+    const read = () => setBox((b) => (b.w === frame.clientWidth && b.h === frame.clientHeight ? b : { w: frame.clientWidth, h: frame.clientHeight }));
     read();
     const watch = new ResizeObserver(read);
     watch.observe(frame);
     return () => watch.disconnect();
   }, [frame]);
-  const fit = useMemo(() => fitFloor(tiles, width, { whole }), [tiles, width, whole]);
+  const width = box.w;
+  const fit = useMemo(() => fitFloor(tiles, width, fill ? { fill: box.h } : { whole }), [tiles, width, box.h, whole, fill]);
   const step = whole ? 1 : 4;
   return (
-    <div ref={setFrame} className="overflow-x-auto rounded-2xl border border-slate-300" dir="ltr">
+    <div ref={setFrame} className={fill ? "h-full w-full flex items-center overflow-hidden" : "overflow-x-auto rounded-2xl border border-slate-300"} dir="ltr">
       {width > 0 && (
         <div
-          ref={sheetRef} onClick={onSheetClick} className="relative grid"
+          ref={sheetRef} onClick={onSheetClick} className={`relative grid ${fill ? "rounded-xl" : ""}`}
           style={{
             width: fit.pans ? fit.width : "100%",
             gridTemplateColumns: fit.colFr.map((f) => `minmax(0, ${f}fr)`).join(" "),
@@ -240,6 +243,65 @@ function Floor({ tiles, whole, sheetRef, onSheetClick, children }: {
         </div>
       )}
     </div>
+  );
+}
+
+/** Is this a phone held sideways — a touch screen wider than tall, and short?
+ *  Judged by the WINDOW (screen.orientation is not kept up to date
+ *  everywhere), so a keyboard opening over an upright phone must not count:
+ *  on some browsers it leaves a window wider than it is tall. */
+function heldSideways(): boolean {
+  if (typeof window === "undefined") return false;
+  const touch = navigator.maxTouchPoints > 0 || window.matchMedia("(pointer: coarse)").matches;
+  const el = document.activeElement as HTMLElement | null;
+  const typing = !!el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable);
+  return touch && !typing && window.innerWidth > window.innerHeight && window.innerHeight <= 540;
+}
+
+/**
+ * The floor on the whole screen, landscape — what a phone is turned sideways
+ * for. In a window that is taller than wide (a phone held upright, or one
+ * whose rotation is locked) the view is drawn turned a quarter, so turning
+ * the phone reads it; when the browser rotates the page itself, it is not.
+ * Nothing scrolls and nothing pans: the whole floor is on the screen.
+ */
+function FloorScreen({ title, closeLabel, legend, onClose, children }: {
+  title: string; closeLabel: string; legend: React.ReactNode; onClose: () => void; children: React.ReactNode;
+}) {
+  const [win, setWin] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const read = () => setWin({ w: window.innerWidth, h: window.innerHeight });
+    read();
+    window.addEventListener("resize", read);
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", key);
+    const was = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("resize", read); window.removeEventListener("keydown", key); document.body.style.overflow = was; };
+  }, [onClose]);
+  if (!win) return null;
+  const upright = win.h > win.w;
+  const w = upright ? win.h : win.w, h = upright ? win.w : win.h;
+  return createPortal(
+    <div
+      role="dialog" aria-modal="true" aria-label={title}
+      className="fixed top-0 left-0 z-[70] flex flex-col bg-slate-100"
+      style={{
+        width: w, height: h,
+        ...(upright ? { transformOrigin: "top left", transform: `translateX(${win.w}px) rotate(90deg)` } : null),
+      }}
+    >
+      <div className="shrink-0 h-9 flex items-center gap-3 ps-3 bg-white border-b border-slate-200">
+        <span className="text-sm font-bold text-gray-900 whitespace-nowrap">{title}</span>
+        <span className="min-w-0 flex-1 flex items-center gap-x-3 overflow-hidden text-xs text-gray-600 whitespace-nowrap">{legend}</span>
+        <button type="button" onClick={onClose} aria-label={closeLabel}
+          className="shrink-0 h-9 min-w-14 px-3 inline-flex items-center justify-center gap-1 text-sm font-medium text-gray-800 border-s border-slate-200 hover:bg-gray-50 active:bg-gray-100">
+          <X size={16} />{closeLabel}
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 p-1">{children}</div>
+    </div>,
+    document.body,
   );
 }
 
@@ -344,6 +406,46 @@ export default function ChangeoverPage() {
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<"map" | "list">("map");
   const [arranging, setArranging] = useState(false);
+  // The floor on the whole screen. Turning the phone sideways opens it (and
+  // turning it back closes what the turn opened); closing it by hand keeps it
+  // closed until the phone is turned again.
+  const [wide, setWide] = useState(false);
+  const wideByTurn = useRef(false);
+  const wideShut = useRef(false);
+  useEffect(() => {
+    let was: boolean | null = null;
+    const check = () => {
+      const now = heldSideways();
+      if (now === was) return;
+      was = now;
+      if (now) { if (!wideShut.current) { wideByTurn.current = true; setWide(true); } }
+      else { wideShut.current = false; if (wideByTurn.current) { wideByTurn.current = false; setWide(false); } }
+    };
+    // A turn is announced before the window has its new size on some phones
+    // (and the size before the orientation on others): look now, and again
+    // once it has settled.
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const turned = () => { check(); clearTimeout(later); later = setTimeout(check, 350); };
+    const mq = window.matchMedia("(orientation: landscape)");
+    turned();
+    window.addEventListener("resize", turned);
+    window.addEventListener("orientationchange", turned);
+    mq.addEventListener?.("change", turned);
+    window.screen?.orientation?.addEventListener?.("change", turned);
+    // …and the page's own box changing size is a turn too, whichever event the
+    // browser forgot to send.
+    const box = new ResizeObserver(turned);
+    box.observe(document.documentElement);
+    return () => {
+      box.disconnect();
+      clearTimeout(later);
+      window.removeEventListener("resize", turned);
+      window.removeEventListener("orientationchange", turned);
+      mq.removeEventListener?.("change", turned);
+      window.screen?.orientation?.removeEventListener?.("change", turned);
+    };
+  }, []);
+  const closeWide = useCallback(() => { wideShut.current = heldSideways(); wideByTurn.current = false; setWide(false); }, []);
   const [machineForm, setMachineForm] = useState<PlanMachine | null>(null);
   const [orderForm, setOrderForm] = useState<PlanOrder | null>(null);
   const [confirm, setConfirm] = useState<{ machine: PlanMachine; pick: Suggestion } | null>(null);
@@ -478,7 +580,7 @@ export default function ChangeoverPage() {
   const showMap = view === "map" && layout.length > 0;
 
   /** A machine as one square of the floor. */
-  const tile = (m: PlanMachine, t: MapTile, fit: FloorFit) => {
+  const tile = (m: PlanMachine, t: MapTile, fit: FloorFit, after?: () => void) => {
     const isSel = m.label === selected;
     // What the tile really has, in px (3px of air, 2px of border and 3px of padding a side).
     const w = tileWidthPx(fit, t) - 16, h = tileHeightPx(fit, t) - 16;
@@ -486,7 +588,8 @@ export default function ChangeoverPage() {
     // sits BESIDE the words. Else it sits over them.
     const side = w >= h * 2.6 || (h < 84 && w >= 150);
     const roomy = w >= 150;
-    const nameSize = roomy ? 13 : 12, line = Math.round(nameSize * 1.17);
+    // A low tile (a small phone held sideways) keeps two lines of name in smaller type.
+    const nameSize = roomy ? 13 : h < 78 ? 11 : 12, line = Math.round(nameSize * 1.17);
     const colours = m.now.colours.slice(0, 5);
     // Stacked, the colour dots stand in a column BESIDE the drawing — a row of
     // their own would cost the name its second line.
@@ -531,7 +634,7 @@ export default function ChangeoverPage() {
     );
     return (
       <button
-        key={m.label} type="button" aria-pressed={isSel} onClick={() => pick(m.label)}
+        key={m.label} type="button" aria-pressed={isSel} onClick={() => { after?.(); pick(m.label); }}
         aria-label={`${m.label} · ${s.states[m.state]} · ${m.now.products.join(" / ") || s.machines.empty}`}
         style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
         className={`m-[3px] min-w-0 min-h-0 flex ${side ? "flex-row items-center gap-2" : "flex-col"} text-start border-2 rounded-xl p-[3px] overflow-hidden shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${STATE_TILE[m.state]} ${
@@ -689,9 +792,14 @@ export default function ChangeoverPage() {
               </button>
             ))}
           </div>
-          {data.writable && !arranging && (
-            <Btn variant="outline" onClick={() => setArranging(true)} disabled={!canWrite}><Pencil size={14} />{s.map.edit}</Btn>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {showMap && !arranging && (
+              <Btn variant="outline" onClick={() => { wideByTurn.current = false; setWide(true); }}><Maximize2 size={14} />{s.map.full}</Btn>
+            )}
+            {data.writable && !arranging && (
+              <Btn variant="outline" onClick={() => setArranging(true)} disabled={!canWrite}><Pencil size={14} />{s.map.edit}</Btn>
+            )}
+          </div>
         </div>
 
         {arranging ? (
@@ -710,6 +818,20 @@ export default function ChangeoverPage() {
                 <Floor tiles={layout}>
                   {(fit) => fit.tiles.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t, fit) : null; })}
                 </Floor>
+                {/* On a phone held upright the plan is wider than the screen. */}
+                <p className="sm:hidden text-xs text-gray-500 mt-1.5">{s.map.turnPhone}</p>
+                {wide && (
+                  <FloorScreen
+                    title={s.map.title} closeLabel={s.map.close} onClose={closeWide}
+                    legend={STATES.map((st) => (
+                      <span key={st} className="inline-flex items-center gap-1"><span className={`w-2.5 h-2.5 rounded-full ${STATE_DOT[st]}`} />{s.states[st]}</span>
+                    ))}
+                  >
+                    <Floor tiles={layout} fill>
+                      {(fit) => fit.tiles.map((t) => { const m = machines.find((x) => machineKey(x.label) === machineKey(t.label)); return m ? tile(m, t, fit, closeWide) : null; })}
+                    </Floor>
+                  </FloorScreen>
+                )}
                 {unplaced.length > 0 && (
                   <div className="mt-3">
                     <p className="text-xs text-gray-500 mb-1">{s.map.unplaced}</p>
@@ -946,6 +1068,17 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
   // The grab: which machine, moving or sizing, and where on the tile it was caught.
   const drag = useRef<{ label: string; mode: "move" | "size"; dx: number; dy: number } | null>(null);
 
+  // A quarter turn is lossy (edges are rounded), so every press turns the
+  // arrangement the FIRST press started from; four presses are back at it.
+  const turned = useRef<{ base: MapTile[]; n: number; out: MapTile[] } | null>(null);
+  const turn = () => {
+    const from = turned.current && turned.current.out === tiles ? turned.current : { base: tiles, n: 0, out: tiles };
+    const n = (from.n + 1) % 4;
+    const out = n === 0 ? from.base : turnLayout(from.base, n);
+    turned.current = { base: from.base, n, out };
+    setTiles(out); setPicked(""); setNote("");
+  };
+
   const placedKeys = new Set(tiles.map((t) => machineKey(t.label)));
   const tray = machines.filter((m) => !placedKeys.has(machineKey(m.label)));
   const current = tiles.find((t) => machineKey(t.label) === machineKey(picked));
@@ -1046,7 +1179,10 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
   const small = "min-h-11 min-w-11 px-3 inline-flex items-center justify-center rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40";
   return (
     <div className="bg-white border border-blue-200 rounded-2xl p-2 sm:p-3" dir={isAr ? "rtl" : "ltr"}>
-      <p className="text-sm text-gray-700 mb-3">{s.map.hint}</p>
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+        <p className="text-sm text-gray-700 min-w-0 flex-1 basis-64">{s.map.hint}</p>
+        <Btn variant="outline" onClick={turn} disabled={busy || tiles.length < 2}><RotateCw size={14} />{s.map.turn}</Btn>
+      </div>
 
       {tray.length > 0 && (
         <div className="mb-3">
@@ -1074,7 +1210,7 @@ function ArrangeMap({ machines, initial, isAr, s, cancel, onClose, onSaved }: {
               onPointerDown={grab(t, "move")}
               onKeyDown={(e) => keyMove(e, t)}
               style={{ gridColumn: `${t.c} / span ${t.w}`, gridRow: `${t.r} / span ${t.h}` }}
-              className={`relative m-[2px] min-w-0 min-h-0 flex items-center justify-center rounded-lg border-2 font-bold overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing text-[13px] sm:text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
+              className={`relative m-[2px] min-w-0 min-h-0 flex items-center justify-center rounded-lg border-2 font-bold overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing text-[12px] leading-tight text-center sm:text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
                 on ? "border-blue-600 bg-blue-600 text-white shadow-md z-10" : "border-slate-400 bg-white text-gray-900"
               }`}
             >

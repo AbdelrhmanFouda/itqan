@@ -41,6 +41,11 @@ export const co = {
     states: { running: "Running", stopped: "Stoppage", idle: "Idle", unknown: "No record" },
     map: {
       edit: "Arrange the map",
+      title: "The floor",
+      full: "Full screen",
+      close: "Back",
+      turnPhone: "Turn the phone sideways, or tap «Full screen» — the whole floor on one screen.",
+      turn: "Turn the map",
       empty: "The map is not arranged yet. Tap «Arrange the map» to place the machines as they stand on the floor.",
       unplaced: "Not on the map",
       hint: "Drag each machine to where it stands. Drag its corner to make it bigger or smaller; the arrows move it one step at a time.",
@@ -293,6 +298,11 @@ export const co = {
     states: { running: "شغالة", stopped: "توقف", idle: "واقفة", unknown: "بدون سجل" },
     map: {
       edit: "ترتيب الخريطة",
+      title: "خريطة الأرضية",
+      full: "ملء الشاشة",
+      close: "رجوع",
+      turnPhone: "لفّ الموبايل بالعرض أو اضغط «ملء الشاشة» — الخريطة كلها هتبان في شاشة واحدة.",
+      turn: "لفّ الخريطة",
       empty: "الخريطة لسه ما اترتبتش. اضغط «ترتيب الخريطة» وحط كل ماكينة في مكانها على الأرض.",
       unplaced: "غير موضوعة على الخريطة",
       hint: "اسحب كل ماكينة لمكانها على الأرض. اسحب الركن لتكبيرها أو تصغيرها، والأسهم تحرّكها خطوة خطوة.",

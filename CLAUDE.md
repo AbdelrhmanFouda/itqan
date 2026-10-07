@@ -130,7 +130,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
 - **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
   `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
-- **Tests:** 79 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
+- **Tests:** 81 for the rules, and **`tests/changeover-data.test.ts` (22) runs the
   REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
   `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
   defects were — **write the sequence there first** (dated shifts, page rows, orders → what
@@ -176,7 +176,35 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
   when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
   carried over, twice as wide as tall. Never keyed on PQ numbers in code.
+- **THE MAP ITSELF IS LANDSCAPE — 2026-10-07, owner: *"not like this, I want the map
+  itself to be landscape."*** The drawing of the evening before (next bullet) stood a
+  phone's floor up as a column of tall tiles, and a phone held SIDEWAYS — where the
+  dashboard keeps its sidebar and 300px of height — showed a slice of it. Three things:
+  - **The arrangement is saved wide.** The cell is `grid 56x32 ; wide ; …`. A cell with the
+    `grid` word and no `wide` one was saved before this, and when it `standsTall()` (more
+    machines down it than across — his own, arranged on an upright phone) `parseLayout`
+    reads it through `turnLayout(tiles, 3)`: a quarter TURN, its top to the left, never a
+    mirror; the ordinary machine gets the ordinary tile again (`MAP_TILE` is 7 × 10 now).
+    Nothing was written — the next save from the editor writes it wide, and a `wide` cell
+    is never turned again whatever its shape. The first 7-column map is not turned.
+  - **`/dashboard/changeover` has a full-screen map** (`FloorScreen`, a portal): «ملء
+    الشاشة», and it opens BY ITSELF when a phone is turned sideways (`heldSideways()` — a
+    touch screen wider than tall and ≤ 540px high, nobody typing) and closes when it is
+    turned back; closed by hand it stays closed until the next turn. `fitFloor(…, { fill })`
+    fits the whole floor into the frame both ways — nothing pans, nothing scrolls (his
+    fourteen at 800 × 360: ≈ 105 × 100px each, drawing + colours + name, none cut). In a
+    window TALLER than wide (upright phone, rotation locked) the view is drawn turned a
+    quarter with CSS, so turning the phone reads it. A tap on a machine picks it and closes.
+  - **In the page the plan pans rather than stands up** on a frame too narrow for it
+    (`MAP_READABLE.stackedW` 92), and the editor's sheet is drawn landscape too, with a
+    «لفّ الخريطة» button (four presses are back at the start — each press turns the
+    arrangement the FIRST press started from, because a quarter turn rounds edges).
+  ⚠ `screen.orientation.type` is not kept up to date everywhere (the in-app browser pane
+  reports `portrait-primary` for a 740 × 350 window): the WINDOW's shape decides, and a
+  focused input rules a turn out. ⚠ A hidden pane fires no resize events at all — dispatch
+  one by hand when testing the turn there.
 - **The sheet is where machines are PLACED; the DRAWING follows the width (`fitFloor`).**
+  *(The tall phone drawing described here is what the bullet above replaced.)*
   Owner, same evening: *"still feels weird … I meant to see it on the phone clearly, while
   reading the product, seeing the colour and the machine icon."* The first landscape map
   kept the sheet 42rem wide and let a phone pan it: he re-arranged every machine into the
@@ -203,7 +231,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 79 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 81 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,

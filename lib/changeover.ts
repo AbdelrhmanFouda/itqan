@@ -1295,12 +1295,14 @@ export function rankFor(
 export const MAP_COLS = 56;
 export const MAP_MAX_ROWS = 32;
 /** A machine dropped onto the map, and the smallest it can be made. */
-export const MAP_TILE = { w: 10, h: 6, minW: 4, minH: 3 } as const;
+export const MAP_TILE = { w: 7, h: 10, minW: 4, minH: 3 } as const;
 export const MAP_NAME = "الأرضية";
 export type MapTile = { label: string; c: number; r: number; w: number; h: number };
 
 const LEGACY_MAP_COLS = 7;
 const GRID_WORD = /^grid (\d+) ?x ?(\d+)$/;
+/** Its own part of the cell: the arrangement was saved as a LANDSCAPE plan. */
+const WIDE_WORD = "wide";
 
 /** Tiles from one sheet onto another. EDGES are scaled and rounded, not sizes,
  *  so two tiles that touched still touch and never overlap. */
@@ -1318,11 +1320,14 @@ function scaleTiles(tiles: readonly MapTile[], sx: number, sy: number): MapTile[
 export function parseLayout(text: string | undefined | null): MapTile[] {
   const raw: MapTile[] = [];
   let grid: { cols: number; rows: number } | null = null;
+  let wide = false;
   for (const part of String(text ?? "").split(";")) {
     const at = part.lastIndexOf("@");
     if (at <= 0) {
-      const m = latinDigits(part).replace(/\s+/g, " ").trim().toLowerCase().match(GRID_WORD);
+      const word = latinDigits(part).replace(/\s+/g, " ").trim().toLowerCase();
+      const m = word.match(GRID_WORD);
       if (m && !grid && +m[1] > 0 && +m[2] > 0) grid = { cols: +m[1], rows: +m[2] };
+      else if (word === WIDE_WORD) wide = true;
       continue;
     }
     const label = part.slice(0, at).replace(/\s+/g, " ").trim();
@@ -1348,11 +1353,59 @@ export function parseLayout(text: string | undefined | null): MapTile[] {
     if (!tileInBounds(t) || out.some((x) => machineKey(x.label) === machineKey(t.label))) continue;
     out.push(t);
   }
-  return out;
+  // Saved on the 56-unit sheet before the map was a landscape plan (the `grid`
+  // word without the `wide` one — the first, 7-column map is left as it was), and arranged
+  // TALLER than wide — the owner's own, placed on a phone held upright in the
+  // third of the sheet he could see: turned a quarter as it is read, its top
+  // to the left, the way a phone is turned sideways. The cell is not touched;
+  // the next save writes it wide.
+  return grid && !wide && standsTall(out) ? turnLayout(out, 3) : out;
 }
 
 export const formatLayout = (tiles: readonly MapTile[]): string =>
-  [`grid ${MAP_COLS}x${MAP_MAX_ROWS}`, ...tiles.map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`)].join(" ; ");
+  [`grid ${MAP_COLS}x${MAP_MAX_ROWS}`, WIDE_WORD, ...tiles.map((t) => `${t.label}@${t.c},${t.r},${t.w},${t.h}`)].join(" ; ");
+
+const middleOf = (xs: readonly number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 1;
+
+/** Is the floor arranged with more machines DOWN it than across it? */
+export function standsTall(tiles: readonly MapTile[]): boolean {
+  if (tiles.length < 2) return false;
+  const across = (Math.max(...tiles.map((t) => t.c + t.w)) - Math.min(...tiles.map((t) => t.c))) / middleOf(tiles.map((t) => t.w));
+  const down = (Math.max(...tiles.map((t) => t.r + t.h)) - Math.min(...tiles.map((t) => t.r))) / middleOf(tiles.map((t) => t.h));
+  return down > across;
+}
+
+/**
+ * The whole arrangement turned by quarter turns — 1 = clockwise (its top goes
+ * to the right), 3 = the other way (its top goes to the left), 2 = upside
+ * down. A turn, never a mirror: what stood on a machine's left still does.
+ * Only the PLACES turn; a machine's tile stays upright, so a quarter turn
+ * gives the ordinary machine the ordinary tile again (MAP_TILE) and lays the
+ * floor from the sheet's first unit. Edges are scaled and rounded, so tiles
+ * that touched still touch — which also makes a quarter turn lossy: turn
+ * from the SAME starting arrangement (the editor does), never turn a turn.
+ */
+export function turnLayout(tiles: readonly MapTile[], quarters = 1): MapTile[] {
+  const q = ((Math.round(quarters) % 4) + 4) % 4;
+  const same = tiles.map((t) => ({ ...t }));
+  if (q === 0 || tiles.length === 0) return same;
+  const left = Math.min(...tiles.map((t) => t.c - 1)), right = Math.max(...tiles.map((t) => t.c - 1 + t.w));
+  const top = Math.min(...tiles.map((t) => t.r - 1)), bottom = Math.max(...tiles.map((t) => t.r - 1 + t.h));
+  if (q === 2) {
+    return tiles.map((t) => ({ ...t, c: left + right - (t.c - 1 + t.w) + 1, r: top + bottom - (t.r - 1 + t.h) + 1 }));
+  }
+  const spanW = right - left, spanH = bottom - top;
+  const sx = Math.min(MAP_COLS / spanH, MAP_TILE.w / middleOf(tiles.map((t) => t.h)));
+  const sy = Math.min(MAP_MAX_ROWS / spanW, MAP_TILE.h / middleOf(tiles.map((t) => t.w)));
+  const out = tiles.map((t) => {
+    const x0 = t.c - 1 - left, x1 = x0 + t.w, y0 = t.r - 1 - top, y1 = y0 + t.h;
+    const [a0, a1] = q === 1 ? [spanH - y1, spanH - y0] : [y0, y1];
+    const [b0, b1] = q === 1 ? [x0, x1] : [spanW - x1, spanW - x0];
+    const l = Math.round(a0 * sx), u = Math.round(b0 * sy);
+    return { label: t.label, c: l + 1, r: u + 1, w: Math.max(1, Math.round(a1 * sx) - l), h: Math.max(1, Math.round(b1 * sy) - u) };
+  });
+  return validLayout(out) ? out : same;
+}
 
 export const tileInBounds = (t: MapTile): boolean =>
   t.w >= 1 && t.h >= 1 && t.c >= 1 && t.r >= 1 && t.c + t.w - 1 <= MAP_COLS && t.r + t.h - 1 <= MAP_MAX_ROWS;
@@ -1438,11 +1491,21 @@ export const removeTile = (tiles: readonly MapTile[], label: string): MapTile[] 
  *    of name on a phone, a drawing beside two lines on a desk.
  *
  * The ARRANGEMENT is never changed — only how big each unit is drawn.
+ *
+ * 2026-10-07, owner: "not like this — I want the map itself to be landscape."
+ * The drawing above stood a phone's floor up as a tall column of tiles, and a
+ * phone held SIDEWAYS (where the dashboard keeps its sidebar) showed a slice
+ * of it. The map is a landscape plan now: the arrangement is saved wide
+ * (parseLayout turns an older tall one), a frame too narrow for it PANS
+ * rather than stands it up, and `fill` fits the whole floor into a frame of a
+ * given height — the full-screen view a phone turned sideways gets.
  */
 export const MAP_NARROW_PX = 640;
 /** The px a tile needs: with the drawing OVER the words, or BESIDE them. */
-export const MAP_READABLE = { stackedW: 80, stackedH: 116, sideW: 190, sideH: 72 } as const;
+export const MAP_READABLE = { stackedW: 92, stackedH: 116, sideW: 190, sideH: 72 } as const;
 const AISLE = 0.15;
+/** Filling a screen, a unit is never drawn taller than this many times its width. */
+const FILL_TALLEST = 1.4;
 
 export type FloorFit = {
   tiles: MapTile[];
@@ -1469,17 +1532,20 @@ export const tileHeightPx = (fit: FloorFit, t: MapTile): number => spanOf(fit.ro
  * full sheet, every unit the same and rather flat, always fitted to the frame
  * — it is for placing machines, and shows only their codes.
  */
-export function fitFloor(tiles: readonly MapTile[], framePx: number, o: { whole?: boolean } = {}): FloorFit {
+export function fitFloor(tiles: readonly MapTile[], framePx: number, o: { whole?: boolean; fill?: number } = {}): FloorFit {
   const frame = Math.max(0, framePx);
   if (o.whole || tiles.length === 0) {
     const unitW = frame / MAP_COLS;
     const rows = o.whole ? MAP_MAX_ROWS : 1;
+    // The editor's sheet is drawn as wide as a sideways phone is: what is
+    // arranged there is what the full-screen map shows. Never under 7px a
+    // row — a finger has to land on a machine.
     return {
       tiles: [...tiles], colFr: new Array<number>(MAP_COLS).fill(1), rowFr: new Array<number>(rows).fill(1),
-      unitW, unitH: Math.max(12, Math.round(unitW * 0.62)), width: frame, pans: false,
+      unitW, unitH: Math.max(7, Math.round(unitW * 0.72)), width: frame, pans: false,
     };
   }
-  const narrow = frame < MAP_NARROW_PX;
+  const narrow = frame < MAP_NARROW_PX || o.fill != null;
   const left = Math.min(...tiles.map((t) => t.c)), right = Math.max(...tiles.map((t) => t.c + t.w - 1));
   const top = Math.min(...tiles.map((t) => t.r)), rows = mapRows(tiles);
   // The machines' own span, at full size; on a narrow screen everything in it
@@ -1491,12 +1557,21 @@ export function fitFloor(tiles: readonly MapTile[], framePx: number, o: { whole?
     // that only a long press along the wall crosses is an aisle.
     const widths = tiles.map((t) => t.w).sort((x, y) => x - y);
     const ordinary = widths[Math.floor(widths.length / 2)] * 1.25;
+    // The same down the sheet: a tall press standing across the aisle between
+    // two lines does not make that aisle a full row.
+    const usual = middleOf(tiles.map((t) => t.h)) * 1.25;
     for (const t of tiles) {
       if (t.w <= ordinary) for (let c = t.c; c < t.c + t.w && c <= MAP_COLS; c++) colFr[c - 1] = 1;
-      for (let r = t.r; r < t.r + t.h && r <= rows; r++) rowFr[r - 1] = 1;
+      if (t.h <= usual) for (let r = t.r; r < t.r + t.h && r <= rows; r++) rowFr[r - 1] = 1;
     }
   }
   const total = colFr.reduce((x, y) => x + y, 0) || 1;
+  if (o.fill != null) {
+    // The whole floor in the frame, both ways: nothing pans, nothing scrolls.
+    const unitW = frame / total;
+    const unitH = Math.max(0, Math.min(o.fill / (rowFr.reduce((x, y) => x + y, 0) || 1), unitW * FILL_TALLEST));
+    return { tiles: [...tiles], colFr, rowFr, unitW, unitH, width: frame, pans: false };
+  }
   const probe = { tiles: [...tiles], colFr, rowFr, unitW: 1, unitH: 1, width: 0, pans: false };
   const mw = Math.max(1, tiles.reduce((m, t) => Math.min(m, tileWidthPx(probe, t)), Infinity));
   const mh = Math.max(1, tiles.reduce((m, t) => Math.min(m, tileHeightPx(probe, t)), Infinity));
