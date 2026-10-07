@@ -14,13 +14,19 @@
  * without ever showing two rows to reconcile. `cardStep()` in
  * lib/customer-requests.ts decides which of the six lines a card shows.
  *
- * What is NOT here, and is a decision rather than an omission: the produced
- * piece count and a progress percentage. Production is credited to an order by
- * product NAME alone, with no client term and no end date, so two open orders
- * for one product each receive the full total and a finished order keeps
- * accruing. A number that is sometimes wrong is worse on this screen than no
- * number at all. «متوقف» likewise reads as «جاري التشغيل» — a stoppage is a
- * machine problem, not an order state.
+ * «تم إنتاج» — HOW MANY WERE MADE (2026-10-07, owner's word after signing in
+ * as a customer: "I only see my orders, not how many were made"). Until then
+ * the count was left out on purpose: the staff figure credits production to an
+ * order by product NAME alone, with no client term and no end date, so two
+ * orders for one product each received the full total. The number on this
+ * screen is a different one — lib/customer-progress.ts counts only the shift
+ * rows whose own client cell is this customer's, inside this one order's
+ * window, and sends `null` where that cannot be said honestly. `null` prints
+ * NOTHING here; a number that is sometimes wrong is still worse than none.
+ * What a card may say is decided by `progressLine()` in that module. Never
+ * here: scrap, the machine, the operator, shift dates, a daily rate, or a
+ * finish date worked out from one. «متوقف» likewise reads as «جاري التشغيل» —
+ * a stoppage is a machine problem, not an order state.
  *
  * FRESHNESS, STATED. A copy of any age up to the stale window is served at
  * once and refreshed behind, so a first look after a quiet period can be hours
@@ -41,11 +47,12 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { Btn, EmptyState, LoadError, Modal, Spinner } from "@/components/dashboard/ui";
-import { ageLabel, fill, fmtNum } from "@/lib/format";
+import { ageLabel, fill, fmtNum, fmtPct } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
-  cardStep, UNIT_PIECES, type CardStep, type PortalOrder, type PortalRequest,
+  cardStep, UNIT_PIECES, type CardStep, type PortalOrder, type PortalOrderStatus, type PortalRequest,
 } from "@/lib/customer-requests";
+import { orderedTotalPieces, progressLine, type ProgressLine } from "@/lib/customer-progress";
 
 type Data = { requests: PortalRequest[]; orders: PortalOrder[]; meta?: { dataAgeMs: number } };
 
@@ -86,7 +93,34 @@ type Card = {
   canCancel: boolean;
   /** What the list is sorted by — newest first. */
   sortKey: string;
+  /** Pieces made for the work order behind this card; null when there is no
+   *  order yet, or when the server could not attribute a count to it. */
+  produced: number | null;
+  /** That order's status as the customer sees it; null without an order. */
+  orderStatus: PortalOrderStatus | null;
 };
+
+/**
+ * The count off an order, or null. A snapshot this device saved before
+ * 2026-10-07 has no such key — it must read as "not known", never as zero.
+ */
+const madeCountOf = (o: PortalOrder | null): number | null =>
+  o && typeof o.produced === "number" && Number.isFinite(o.produced) && o.produced >= 0 ? o.produced : null;
+
+/**
+ * The ordered quantity in PIECES the count is measured against, or null when
+ * the order is known in kilograms only (no total, no bar). Decided by
+ * `orderedTotalPieces()`: the WORK ORDER's quantity — the factory may have
+ * approved, or later edited, a different quantity from the one typed — and the
+ * typed number only where the two agree within rounding.
+ */
+const totalPiecesOf = (card: Card): number | null =>
+  orderedTotalPieces(card.unit === UNIT_PIECES ? card.qtyAsked : null, card.qtyPieces, card.qtyKg);
+
+const progressOf = (card: Card): ProgressLine =>
+  card.step === "rejected" || card.step === "cancelled"
+    ? { kind: "none" }
+    : progressLine(card.produced, card.orderStatus, totalPiecesOf(card));
 
 /** «yyyy-mm-dd HH:MM» → «yyyy-mm-dd». The stamp is text, never re-parsed. */
 const dayOf = (stamp: string): string => (stamp || "").slice(0, 10);
@@ -119,6 +153,8 @@ function buildCards(requests: readonly PortalRequest[], orders: readonly PortalO
       rejectReason: r.rejectReason,
       canCancel: r.state === "pending",
       sortKey: r.submittedAt || r.wantedDate,
+      produced: madeCountOf(order),
+      orderStatus: order?.status ?? null,
     };
   });
 
@@ -144,6 +180,8 @@ function buildCards(requests: readonly PortalRequest[], orders: readonly PortalO
       rejectReason: "",
       canCancel: false,
       sortKey: o.startDate || o.dueDate,
+      produced: madeCountOf(o),
+      orderStatus: o.status,
     });
   }
 
@@ -158,6 +196,45 @@ const stepTone: Record<CardStep, string> = {
   rejected: "bg-red-50 text-red-700 border-red-200",
   cancelled: "bg-gray-100 text-gray-600 border-gray-200",
 };
+
+/**
+ * «تم إنتاج 1,350 من 5,000 قطعة» and, when the ordered piece count is known,
+ * a thin bar with the percentage beside it.
+ *
+ * The fill is a block inside a container that inherits the page's `dir`, so it
+ * grows from the START edge — the right in Arabic, the left in English — with
+ * no direction-specific class. The percentage is capped at 100 by
+ * `progressLine()`, so the fill cannot overflow the track; the sentence above
+ * it still states the real count. Hand-built, like every chart on the site.
+ */
+function ProducedLine({ text, pct, pctText }: { text: string; pct: number | null; pctText: string }) {
+  return (
+    <div className="mt-2">
+      <p className="text-sm font-medium text-gray-900">{text}</p>
+      {pct !== null && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <div
+            role="progressbar"
+            aria-label={text}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pct}
+            aria-valuetext={pctText}
+            className="h-1.5 flex-1 min-w-0 rounded-full bg-gray-100 overflow-hidden"
+          >
+            <div
+              className={`h-full rounded-full ${pct >= 100 ? "bg-emerald-600" : "bg-blue-600"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-xs text-gray-500 tabular-nums shrink-0">
+            <bdi dir="ltr">{pctText}</bdi>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function PortalHome() {
   const { lang } = useLang();
@@ -204,6 +281,9 @@ export default function PortalHome() {
     [data?.requests, data?.orders],
   );
   const dataAge = data?.meta?.dataAgeMs ?? 0;
+  /** The one line that says where the counts come from — printed only when a
+   *  card actually shows one. */
+  const showsProgress = useMemo(() => cards.some((card) => progressOf(card).kind !== "none"), [cards]);
 
   const doCancel = useCallback(async () => {
     if (!cancelling) return;
@@ -294,8 +374,12 @@ export default function PortalHome() {
           </a>
         </div>
       ) : (
+        <>
+        {showsProgress && <p className="text-xs text-gray-400 mb-3">{c.home.producedNote}</p>}
         <ul className="space-y-3">
-          {cards.map((card) => (
+          {cards.map((card) => {
+            const progress = progressOf(card);
+            return (
             <li key={card.key} className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
               <p className="text-lg font-semibold text-gray-900 break-words">{card.product}</p>
 
@@ -318,6 +402,24 @@ export default function PortalHome() {
               )}
               {card.unit === UNIT_PIECES && card.qtyKg > 0 && (
                 <p className="text-xs text-gray-400">{fill(c.home.approxKg, { kg: fmtNum(card.qtyKg, isAr) })}</p>
+              )}
+
+              {/* «تم إنتاج» — the count made for THIS order (see the header).
+                  Nothing when the server sent no number; the grey sentence
+                  when the order is running and no shift is credited yet. */}
+              {progress.kind === "empty" && (
+                <p className="text-sm text-gray-400 mt-2">{c.home.producedNone}</p>
+              )}
+              {progress.kind === "count" && (
+                <ProducedLine
+                  text={
+                    progress.total !== null
+                      ? fill(c.home.producedOf, { made: fmtNum(progress.made, isAr), total: fmtNum(progress.total, isAr) })
+                      : fill(c.home.producedOnly, { made: fmtNum(progress.made, isAr) })
+                  }
+                  pct={progress.pct}
+                  pctText={progress.pct === null ? "" : fmtPct(progress.pct / 100, isAr)}
+                />
               )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -389,8 +491,10 @@ export default function PortalHome() {
                 )}
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
+        </>
       )}
 
       <Modal

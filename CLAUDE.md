@@ -46,6 +46,20 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-10-07) — «تم إنتاج»: a customer sees how many were made
+
+Owner, signed in as a customer: "I only see my orders, not how many were made". `PORTAL_ORDER_KEYS` gained ONE key, `produced`.
+- **It is NOT the staff figure.** `lib/customer-progress.ts` (pure) `attributeProduction()` credits a shift row to an order only when
+  the row's OWN «العميل» cell is the customer's (blank counts only if Master holds the name once, under them — `uniqueOwner` — and
+  the log names no other client on that product) AND its date is inside that order's window (start → the customer's next order
+  of the same product; with no later order it never closes). `null` = no number on the card.
+- ⚠ **No shift rows at all = the log was not read** (a failed tab read arrives EMPTY): the route drops every answer (`made.clear()`),
+  so the cards print nothing rather than a false zero. Do not remove it.
+- `loadJobs()` returns `productionRuns` (built BESIDE `shaped` — `runsFor()` feeds /api/jobs/[id]) and exports `productKeyOf`;
+  `produced` / `remaining` / `runsFor` are unchanged. The orders route reads three tabs now and no staff figure (pinned).
+- Card: `progressLine()` decides the line — count, capped bar + % (100 only when made ≥ total; 1–99 before), «لم يُسجَّل إنتاج بعد», or
+  nothing; `orderedTotalPieces()` picks the total — the ORDER's pieces, the typed ones only within rounding. Never scrap, machine, rate, ETA.
+
 ## Recently landed (2026-10-05) — the portal shows a customer's stock
 
 Owner: "show al masreya al zakeya their stock and their jobs". `/portal/stock` («المخزون», the second
@@ -324,7 +338,8 @@ buyer sees their own orders and asks for new ones. `../CHANGES-2026-09-23-custom
   replay window; 5 open per customer. Column D is «اسم العميل / Client Name» on purpose —
   «العميل» alone would read the client NUMBER out of column C.
 - **Two whitelists, pinned exactly** (`PORTAL_REQUEST_KEYS` / `PORTAL_ORDER_KEYS`): a
-  customer never sees machine, scrap, operator, priority, notes, material or progress.
+  customer never sees machine, scrap, operator, priority, notes, material or the staff
+  progress figure (an attributed «تم إنتاج» count is on the wire since 2026-10-07 — above).
 - **ONE code path creates a work order**: `lib/work-orders-write.ts` `createWorkOrder`,
   called by `POST /api/jobs` and by the approval. The `[REQ-…]` marker in «ملاحظات» is
   what stops a second tap creating a second order.

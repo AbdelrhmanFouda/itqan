@@ -331,7 +331,23 @@ test("both customer reads are filtered by the link, server-side", () => {
   assert.ok(/belongsToCustomer\(j\.client, keys\)/.test(orders), "«أوامر العمل»!C must be filtered by the link");
   // Master's client is NOT the filter for orders — a product name held by two
   // Master rows would pull a competitor's order into the answer.
-  assert.equal(/masterClient/.test(orders), false, "orders are filtered on the ORDER's client cell");
+  //
+  // MOVED DELIBERATELY on 2026-10-07 (owner's word: the produced count is
+  // shown). This used to say the route never mentions `masterClient` at all.
+  // It now reads it in exactly ONE place — `uniqueOwner`, which decides whether
+  // a shift row with a BLANK client cell may be counted — and still never as
+  // the filter: the orders that leave are chosen on the order's own cell alone.
+  const ordersCode = code("app/api/portal/orders/route.ts");
+  assert.equal(
+    ordersCode.split("jobsRead.jobs.filter((j) => belongsToCustomer(j.client, keys))").length - 1, 1,
+    "orders are filtered on the ORDER's client cell",
+  );
+  assert.equal(/\.filter\([^\n]*masterClient/.test(ordersCode), false, "Master's client must never be the filter");
+  assert.equal(ordersCode.split("masterClient").length - 1, 1, "Master's client is read once, for uniqueOwner");
+  assert.ok(
+    ordersCode.includes("uniqueOwner: !j.ambiguous && belongsToCustomer(j.masterClient, keys)"),
+    "a blank shift row counts only for a name Master holds once, under this customer",
+  );
   const products = read("app/api/portal/products/route.ts");
   assert.ok(/belongsToCustomer\(m\.client, keys\)/.test(products), "Master must be filtered by the link");
 });
@@ -511,6 +527,119 @@ test("an order with no quantity says so, and nothing is read out of its notes", 
   assert.equal(cp.ar.home.qtyPending, "الكمية لم تُسجَّل بعد");
   assert.equal(cp.en.home.qtyPending, "Quantity not recorded yet");
   assert.equal(/notes/.test(src), false, "the customer screen never touches an order's notes");
+});
+
+/* ------------------------ 8. «تم إنتاج» (2026-10-07) ------------------------ */
+
+test("the produced count is ATTRIBUTED — the orders route never reads a staff figure", () => {
+  // The owner asked for the count on the customer's screen (2026-10-07). What
+  // leaves is lib/customer-progress.ts' answer; a job's own `produced` is by
+  // product NAME alone — another client's shifts, and every order of the
+  // product, all in one number — and must never be the thing that is sent.
+  const src = code("app/api/portal/orders/route.ts");
+  assert.ok(/from "@\/lib\/customer-progress"/.test(src), "the route must use the attribution module");
+  assert.ok(/const made = attributeProduction\(/.test(src), "the count is built by attributeProduction");
+  assert.ok(src.includes("produced: made.get(j.id) ?? null"), "…and that answer is what portalOrder is handed");
+  assert.equal(src.split("produced").length - 1, 1, "`produced` appears once: the attributed one");
+  for (const staff of [
+    /\bj\.produced\b/, /\bjob\.produced\b/, /\.remaining\b/, /\.scrapped\b/, /\brunsFor\b/,
+    /\.lastMachine\b/, /\.estHours\b/, /\.cycleSec\b/, /\.cavities\b/,
+  ]) {
+    assert.equal(staff.test(src), false, `the orders route reads ${staff} — a staff figure`);
+  }
+  // The customer's OWN orders and the guard's keys go in; nothing off the request.
+  assert.ok(/const own = jobsRead\.jobs\.filter\(\(j\) => belongsToCustomer\(j\.client, keys\)\)/.test(src));
+  assert.ok(/attributeProduction\(\s*own\.map\(/.test(src), "only the caller's own orders are attributed");
+  assert.ok(/jobsRead\.productionRuns,\s*keys,\s*\)/.test(src), "the shift rows and the guard's own keys");
+  assert.ok(src.includes("productKey: productKeyOf(j.product)"), "the SAME product key lib/jobs.ts joins on");
+  // The shift log is read without downtime and without the registry.
+  assert.ok(src.includes("loadJobs({ production: true, downtime: false, machines: false })"));
+  // The shift rows themselves never reach the wire — only the builder's keys do.
+  assert.equal(/productionRuns/.test(src.slice(src.indexOf("NextResponse.json("))), false);
+  // A FAILED READ IS NOT A ZERO (review, 2026-10-07). lib/sheets.ts hands back
+  // an EMPTY tab when «الإنتاج» cannot be read, and an empty log attributes 0
+  // to every order — «لم يُسجَّل إنتاج بعد» on an order that has thousands made,
+  // saved on the device and painted first next time. No shift rows at all means
+  // the log was not read: the answers are dropped, so `?? null` sends no number.
+  const guard = "if (jobsRead.productionRuns.length === 0) made.clear();";
+  assert.equal(src.split(guard).length - 1, 1, "an unread shift log must send null, never 0");
+  assert.ok(
+    src.indexOf("const made = attributeProduction(") < src.indexOf(guard) &&
+    src.indexOf(guard) < src.indexOf("produced: made.get(j.id) ?? null"),
+    "…and it is dropped after the attribution, before the orders are built",
+  );
+});
+
+test("the attribution rules are pure, and the staff rule in lib/jobs.ts is untouched", () => {
+  const rules = code("lib/customer-progress.ts");
+  const imports = [...new Set([...rules.matchAll(/from "([^"]+)"/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(imports, ["@/lib/customer-link"], "one pure sibling and nothing else");
+  assert.equal(/fetch\(|process\.env|getRecords|loadJobs/.test(rules), false);
+  assert.equal(/^import /m.test(code("lib/customer-link.ts")), false, "lib/customer-link.ts must stay import-free");
+  // The boundary is the shift row's OWN client cell.
+  assert.ok(/belongsToCustomer\(r\.client, clientKeys\)/.test(rules));
+
+  // lib/jobs.ts: the staff figures are still the name + start-date rule, and
+  // the rows handed to the portal are built BESIDE the staff rows — a client
+  // field added to those would ride onto /api/jobs/[id] through runsFor().
+  const jobs = code("lib/jobs.ts");
+  assert.ok(
+    jobs.includes("return runs.filter((r) => r.key === key && (!job.startDate || (r.date && r.date >= job.startDate)));"),
+    "matches() is the staff rule, unchanged",
+  );
+  assert.ok(jobs.includes("job.produced = rs.reduce((a, x) => a + x.goodUnits, 0);"));
+  assert.ok(jobs.includes("runsFor: (job) => matches(job).sort((a, b) => (a.date > b.date ? -1 : 1)),"));
+  const shaped = jobs.slice(jobs.indexOf("const shaped = prodTab.records.map("), jobs.indexOf("const lenByKey"));
+  assert.equal(/\bclient\b/.test(shaped), false, "the staff run rows must not gain a client field");
+  assert.ok(/productionRuns: shaped\.flatMap\(/.test(jobs), "the portal's rows are built from the same shaped rows");
+  assert.ok(jobs.includes("export const productKeyOf = (name: string | undefined): string => normKey(name);"));
+});
+
+test("the order card states the count, a capped bar, and nothing about how it was made", () => {
+  const src = code("app/portal/page.tsx");
+  // One reading of what a card may say — the page does not decide it itself.
+  assert.ok(/progressLine\(card\.produced, card\.orderStatus, totalPiecesOf\(card\)\)/.test(src));
+  // …nor which total the bar is measured against (review, 2026-10-07): the
+  // WORK ORDER's quantity, the typed pieces only where the two agree within
+  // rounding. The page used to prefer what was typed, so an order approved for
+  // more read 100% and green while it was still running.
+  assert.ok(
+    src.includes("orderedTotalPieces(card.unit === UNIT_PIECES ? card.qtyAsked : null, card.qtyPieces, card.qtyKg)"),
+    "the bar's total comes from orderedTotalPieces()",
+  );
+  const totalFn = src.slice(src.indexOf("const totalPiecesOf"), src.indexOf("const progressOf"));
+  assert.equal(/card\.qtyAsked\s*>\s*0/.test(totalFn), false, "the page must not prefer the typed quantity itself");
+  // An old device snapshot has no `produced` key: unknown, never zero.
+  assert.ok(src.includes('typeof o.produced === "number"'), "a missing count must read as null");
+  for (const k of ["producedOf", "producedOnly", "producedNone", "producedNote"]) {
+    assert.ok(new RegExp(`c\\.home\\.${k}\\b`).test(src), `the page must print cp.home.${k}`);
+  }
+  assert.equal(src.split("c.home.producedNote").length - 1, 1, "the source line is printed once, above the list");
+  // Accessible, hand-built, and it cannot overflow: the width is the capped percentage.
+  assert.ok(/role="progressbar"/.test(src));
+  for (const aria of ["aria-valuemin={0}", "aria-valuemax={100}", "aria-valuenow={pct}", "aria-label={text}"]) {
+    assert.ok(src.includes(aria), `the bar is missing ${aria}`);
+  }
+  assert.ok(src.includes("style={{ width: `${pct}%` }}"));
+  assert.ok(/overflow-hidden/.test(src.slice(src.indexOf('role="progressbar"'), src.indexOf("style={{ width"))));
+  // RTL: the fill starts at the START edge by inheritance — no physical side.
+  const bar = src.slice(src.indexOf("function ProducedLine"), src.indexOf("export default function PortalHome"));
+  assert.equal(/\b(?:left|right|ml|mr|pl|pr)-|float|flex-row-reverse|translate/.test(bar), false, "no direction-specific class on the bar");
+  // Numbers through lib/format.ts — Latin digits in both languages.
+  assert.ok(/fmtNum\(progress\.made, isAr\)/.test(src) && /fmtPct\(progress\.pct \/ 100, isAr\)/.test(src));
+  // Never on a customer's card: scrap, the machine, the operator, a rate, an ETA.
+  for (const never of [/scrap/i, /machine/i, /operator/i, /downtime/i, /perDay|\brate\b/i, /\beta\b/i, /remaining/i]) {
+    assert.equal(never.test(src), false, `the customer screen mentions ${never}`);
+  }
+  // The wording, both languages.
+  assert.equal(cp.ar.home.producedOf, "تم إنتاج {made} من {total} قطعة");
+  assert.equal(cp.ar.home.producedOnly, "تم إنتاج {made} قطعة");
+  assert.equal(cp.ar.home.producedNone, "لم يُسجَّل إنتاج بعد");
+  assert.equal(cp.ar.home.producedNote, "العدد المنتَج كما سُجِّل في ورديات المصنع");
+  assert.equal(cp.en.home.producedNote, "Produced counts as logged on the factory's shifts");
+  for (const s of [cp.en.home.producedOf, cp.ar.home.producedOf]) {
+    assert.ok(s.includes("{made}") && s.includes("{total}"));
+  }
 });
 
 test("the stock wording is the store's own three neutral words", () => {

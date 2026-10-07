@@ -85,6 +85,12 @@ export const cp = {
       // An order whose quantity cell is still empty in «أوامر العمل» — said
       // plainly, instead of the blank line it used to leave on the card.
       qtyPending: "Quantity not recorded yet",
+      // «تم إنتاج» (2026-10-07, owner's word): the count made for THIS order,
+      // attributed by lib/customer-progress.ts. Whole pieces, always.
+      producedOf: "{made} of {total} pcs made",
+      producedOnly: "{made} pcs made",
+      producedNone: "No production logged yet",
+      producedNote: "Produced counts as logged on the factory's shifts",
       due: "Delivery: {date}",
       dueAsked: "you asked for {date}",
       noDue: "Delivery date not set yet",
@@ -338,6 +344,10 @@ export const cp = {
       askedFor: "طلبت",
       approxKg: "≈ {kg} كجم",
       qtyPending: "الكمية لم تُسجَّل بعد",
+      producedOf: "تم إنتاج {made} من {total} قطعة",
+      producedOnly: "تم إنتاج {made} قطعة",
+      producedNone: "لم يُسجَّل إنتاج بعد",
+      producedNote: "العدد المنتَج كما سُجِّل في ورديات المصنع",
       due: "موعد التسليم: {date}",
       dueAsked: "طلبته في {date}",
       noDue: "موعد التسليم لم يُحدَّد بعد",

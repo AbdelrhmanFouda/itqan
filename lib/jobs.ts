@@ -47,6 +47,21 @@ const firstNum = (v: unknown) => {
 const normKey = (s: string | undefined) =>
   latinDigits(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
+/**
+ * The product key an order and a shift row are joined on — `normKey`, exported
+ * (2026-10-07) so the customer portal keys a customer's orders with the SAME
+ * function `matches()` and `productionRuns` use, never a copy of it.
+ */
+export const productKeyOf = (name: string | undefined): string => normKey(name);
+
+/**
+ * One «الإنتاج» shift row reduced to what a per-customer attribution needs
+ * (lib/customer-progress.ts): the product key, the normalised date, the typed
+ * good count and the row's OWN «العميل» cell. No machine, operator, scrap,
+ * downtime or note — those stay on `JobRun`, for the staff pages.
+ */
+export type ProductionRun = { productKey: string; date: string; goodUnits: number; client: string };
+
 export type JobRun = {
   id: string;
   date: string;       // ISO
@@ -145,6 +160,11 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
   registryLabels: string[];
   /** The OLDEST bridge answer behind these numbers (ms since epoch). */
   readAt: number;
+  /** Every shift row that names a product, with the row's own client cell —
+   *  the same rows, key and date `matches()` reads. Empty when
+   *  `production: false`. For /api/portal/orders ONLY: nothing here changes
+   *  `produced` / `remaining` / `runsFor`, which stay the staff rule. */
+  productionRuns: ProductionRun[];
 }> {
   const production = opts.production ?? true;
   const downtime = (opts.downtime ?? true) && production;
@@ -351,5 +371,13 @@ export async function loadJobs(opts: LoadJobsOptions = {}): Promise<{
     duplicates,
     registryLabels,
     readAt,
+    // Built beside `shaped`, not into it: `runsFor()` hands those objects to
+    // /api/jobs/[id] as they are, and a client field added there would ride
+    // onto the staff wire. Same index, so the same row.
+    productionRuns: shaped.flatMap((s, i) =>
+      s.key
+        ? [{ productKey: s.key, date: s.date, goodUnits: s.goodUnits, client: (prodTab.records[i].client || "").trim() }]
+        : [],
+    ),
   };
 }

@@ -406,11 +406,20 @@ export function findReplay(
  * machine, the mould number and code, material, masterbatch, piece weight,
  * cavities, cycle time, expected rates, possible defects, scrap and scrap
  * rate, downtime minutes and reason, the operator, the priority, the internal
- * notes, any other customer's anything — and the produced piece count and the
- * percentage, because production is credited to an order by product name alone
+ * notes, any other customer's anything — and the STAFF progress figures
+ * (`produced` / `remaining` on a job, the percentage, the list of shifts),
+ * because lib/jobs.ts credits production to an order by product name alone
  * with no client term and no end date, so two open orders for one product each
  * receive the full total. A number that is sometimes wrong is worse than no
  * number on a screen the customer reads instead of phoning.
+ *
+ * ONE count does leave since 2026-10-07 (owner's word, after signing in as a
+ * customer: "I only see my orders, not how many were made"): `produced` on an
+ * order — and it is NOT the staff figure. It is built by
+ * lib/customer-progress.ts from the shift rows whose OWN «العميل» cell is this
+ * customer's, inside this order's own window, and it is `null` wherever that
+ * split cannot be made honestly. Scrap, the machine, the operator, shift
+ * dates, a rate and the remaining count still never leave.
  *
  * tests/customer-requests.test.ts pins these two key sets EXACTLY, so a field
  * cannot ride along into the response on the back of a later change.
@@ -461,6 +470,7 @@ export function portalRequest(src: {
 
 export const PORTAL_ORDER_KEYS = [
   "code", "product", "qtyKg", "qtyPieces", "startDate", "dueDate", "status", "reqId",
+  "produced",
 ] as const;
 
 /** The three words a customer is shown. «متوقف» is NOT one of them. */
@@ -478,7 +488,15 @@ export type PortalOrder = {
   /** The request this order came from, from the `[REQ-…]` marker; "" for an
    *  order the factory entered itself. */
   reqId: string;
+  /** Whole pieces made for THIS order, attributed and client-filtered by
+   *  lib/customer-progress.ts. `null` when it cannot be stated — the page then
+   *  shows no number. 0 is a real answer: nothing logged yet. */
+  produced: number | null;
 };
+
+/** A produced count fit for the wire: a whole, non-negative number, else null. */
+const producedOrNull = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
 
 /**
  * A work order's status as the customer sees it.
@@ -497,6 +515,7 @@ export function portalOrderStatus(status: string, open: boolean): PortalOrderSta
 export function portalOrder(src: {
   code?: string; product?: string; qtyKg?: number; qtyPieces?: number | null;
   startDate?: string; dueDate?: string; status: PortalOrderStatus; reqId?: string;
+  produced?: number | null;
 }): PortalOrder {
   return {
     code: src.code ?? "",
@@ -507,6 +526,7 @@ export function portalOrder(src: {
     dueDate: src.dueDate ?? "",
     status: src.status,
     reqId: src.reqId ?? "",
+    produced: producedOrNull(src.produced),
   };
 }
 

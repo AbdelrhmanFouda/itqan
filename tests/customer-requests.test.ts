@@ -290,23 +290,50 @@ test("a request answers with EXACTLY these twelve keys", () => {
   }
 });
 
-test("an order answers with EXACTLY these eight keys — no machine, no scrap, no progress", () => {
+test("an order answers with EXACTLY these nine keys — no machine, no scrap, no staff progress", () => {
+  // MOVED DELIBERATELY on 2026-10-07, at the owner's word after he signed in
+  // with a customer account ("I only see my orders, not how many were made"):
+  // `produced` was on the leak list below and is now the ninth key. It is the
+  // ONLY key that moved — and what it carries is the attributed, client-
+  // filtered count from lib/customer-progress.ts, never a job's own figure
+  // (tests/portal-access.test.ts pins that the route does not read one).
+  assert.deepEqual([...PORTAL_ORDER_KEYS], [
+    "code", "product", "qtyKg", "qtyPieces", "startDate", "dueDate", "status", "reqId",
+    "produced",
+  ]);
   assert.deepEqual(Object.keys(portalOrder({ status: "not_started" })), [...PORTAL_ORDER_KEYS]);
   const built = portalOrder({ code: "Job 012", status: "in_production", ...({
-    machine: "PQ 7 — 100", moldCode: "6", material: "ABS", produced: 4000, remaining: 1000,
+    machine: "PQ 7 — 100", moldCode: "6", material: "ABS", remaining: 1000,
     scrapped: 12, operator: "أحمد", priority: "High", notes: "[REQ-2026-0001] عاجل",
     pieceWeightG: 12.5, cavities: 4, cycleSec: 18, client: "المصرية الذكية",
+    lastMachine: "PQ 7 — 100", progress: 80, percent: 80, runs: [], estHours: 12,
   } as Record<string, unknown>) });
   assert.deepEqual(Object.keys(built), [...PORTAL_ORDER_KEYS]);
   for (const leak of [
-    "machine", "moldCode", "material", "produced", "remaining", "scrapped",
+    "machine", "moldCode", "material", "remaining", "scrapped",
     "operator", "priority", "notes", "pieceWeightG", "cavities", "cycleSec", "client",
+    "lastMachine", "progress", "percent", "runs", "estHours",
   ]) {
     assert.equal(leak in built, false, `${leak} leaked into a portal order`);
   }
   // The two keys the whitelists share are the only ones that may.
   const shared = [...PORTAL_REQUEST_KEYS].filter((k) => ([...PORTAL_ORDER_KEYS] as string[]).includes(k));
   assert.deepEqual(shared.sort(), ["product", "qtyKg", "reqId"].sort());
+});
+
+test("the produced count is null unless the route hands one in — never a zero by default", () => {
+  assert.equal(portalOrder({ status: "in_production" }).produced, null);
+  assert.equal(portalOrder({ status: "in_production", produced: null }).produced, null);
+  assert.equal(portalOrder({ status: "in_production", produced: 0 }).produced, 0, "a real zero is kept");
+  assert.equal(portalOrder({ status: "in_production", produced: 4000 }).produced, 4000);
+  // Whole pieces, and nothing that is not a count gets through.
+  assert.equal(portalOrder({ status: "in_production", produced: 12.6 }).produced, 13);
+  for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, "4000", {}, undefined]) {
+    assert.equal(
+      portalOrder({ status: "in_production", produced: bad as unknown as number }).produced, null,
+      `${String(bad)} must not reach the customer as a count`,
+    );
+  }
 });
 
 test("a piece count is null, never zero, when Master has no weight", () => {
