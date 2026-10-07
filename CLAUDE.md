@@ -46,6 +46,20 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-10-05) — the portal shows a customer's stock
+
+Owner: "show al masreya al zakeya their stock and their jobs". `/portal/stock` («المخزون», the second
+link under the portal header) → `GET /api/portal/stock` (`requireCustomer`, reads nothing off the request).
+Also: an order with no quantity on `/portal` reads «الكمية لم تُسجَّل بعد» instead of an empty line.
+- **Rules: `lib/customer-stock.ts`** (pure; the test loads it through `tests/_alias.ts`, which maps `@/` for the
+  test process only). «مخزن اتقان» rows whose «العميل» matches the link EXACTLY, aggregated per item across
+  places; `PORTAL_STOCK_KEYS` is the whole wire — no place, loss, client, number or note.
+- **«تحت المراجعة», no number**: negative summed balance, sheet figure ≠ Σ movements (`netMismatch`,
+  `lib/storage-filter.ts`, shared with the storage drawer), or a duplicated movement number.
+- A product KEPT BY WEIGHT is stated in **kg** from its movements: an entry with «وزن الحبة» = 1 (`isWeightEntry`)
+  or every movement a scale entry (`isScaleEntry`). A counted movement there is `null` unless its own weight is 1;
+  piece counts are whole; unknown is never 0. Cards: `components/portal/stock-view.tsx` (prop-driven).
+
 ## Recently landed (2026-09-30) — «خطة الاسطمبات»: which mould goes on which machine next
 
 Owner + the production engineer: today the engineer decides "by what is priority and what
@@ -835,10 +849,10 @@ sidebar and `canAccess()`.
 | Role | Pages |
 |---|---|
 | `worker` (عامل) | downtime, issues, assistant, **molds** (added 2026-09-04, owner's word; editing open to every role) |
-| `production` | overview, production, jobs, downtime, performance, assistant, issues, **changeover** (2026-09-30) |
+| `production` | overview, production, jobs, downtime, performance, assistant, issues, **requests** (2026-09-23), **changeover** (2026-09-30) |
 | `quality` | overview, quality, issues, performance, assistant |
 | `maintenance` | machines, downtime, issues |
-| `sales` | sales, products, jobs, clients |
+| `sales` | sales, products, jobs, clients, **requests** (2026-09-23) |
 | `finance` | finance, reports |
 | `storage` | storage, **stock, jobs, products, assistant** (2026-10-05, owner's word; also in `/api/agent` `ALLOWED`) |
 

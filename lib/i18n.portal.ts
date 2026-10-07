@@ -63,6 +63,12 @@ export const cp = {
       closedBody: "This account is no longer active. Message us and we will sort it out.",
     },
     units: { pieces: "pcs", kg: "kg" },
+    // The two screens of the portal (2026-10-05) — the bar under the header.
+    nav: {
+      label: "Portal sections",
+      orders: "Orders",
+      stock: "Stock",
+    },
     home: {
       title: "Your orders",
       company: "Company",
@@ -76,6 +82,9 @@ export const cp = {
       ref: "Reference",
       askedFor: "You asked for",
       approxKg: "≈ {kg} kg",
+      // An order whose quantity cell is still empty in «أوامر العمل» — said
+      // plainly, instead of the blank line it used to leave on the card.
+      qtyPending: "Quantity not recorded yet",
       due: "Delivery: {date}",
       dueAsked: "you asked for {date}",
       noDue: "Delivery date not set yet",
@@ -99,6 +108,27 @@ export const cp = {
         cancelled: "You cancelled this request",
       },
       rejectedWhy: "Reason: {reason}",
+    },
+    // «المخزون» (2026-10-05): what the factory store holds for this customer.
+    // Neutral store words on purpose — a product leaving is a delivery, a
+    // material leaving is an issue to production, and «المنصرف» covers both.
+    stock: {
+      title: "Your stock",
+      note: "Figures as recorded in the factory store",
+      loadError: "We could not refresh your stock.",
+      empty: "No stock on record for this account",
+      products: "Finished products",
+      materials: "Materials",
+      other: "Other",
+      balance: "Balance",
+      flow: "Received {in} · Issued {out}",
+      lastIn: "Last received: {date}",
+      lastOut: "Last issued: {date}",
+      approxKg: "≈ {kg} kg",
+      exactKg: "{kg} kg",
+      unknown: "Not recorded",
+      review: "Under review",
+      reviewBody: "We are checking the store record for this item. Its figure will appear here once that is done.",
     },
     neu: {
       title: "New request",
@@ -291,6 +321,11 @@ export const cp = {
       closedBody: "هذا الحساب لم يعد مفعّلاً. تواصل معنا وسنتولى الأمر.",
     },
     units: { pieces: "قطعة", kg: "كجم" },
+    nav: {
+      label: "أقسام البوابة",
+      orders: "الأوامر",
+      stock: "المخزون",
+    },
     home: {
       title: "أوامرك",
       company: "الشركة",
@@ -302,6 +337,7 @@ export const cp = {
       ref: "رقم المتابعة",
       askedFor: "طلبت",
       approxKg: "≈ {kg} كجم",
+      qtyPending: "الكمية لم تُسجَّل بعد",
       due: "موعد التسليم: {date}",
       dueAsked: "طلبته في {date}",
       noDue: "موعد التسليم لم يُحدَّد بعد",
@@ -325,6 +361,24 @@ export const cp = {
         cancelled: "ألغيت الطلب",
       },
       rejectedWhy: "السبب: {reason}",
+    },
+    stock: {
+      title: "مخزونك",
+      note: "الأرقام كما سُجِّلت في مخزن المصنع",
+      loadError: "تعذّر تحديث المخزون.",
+      empty: "لا يوجد مخزون مسجل على هذا الحساب",
+      products: "منتجات جاهزة",
+      materials: "خامات",
+      other: "أخرى",
+      balance: "الرصيد",
+      flow: "الوارد {in} · المنصرف {out}",
+      lastIn: "آخر وارد: {date}",
+      lastOut: "آخر صرف: {date}",
+      approxKg: "≈ {kg} كجم",
+      exactKg: "{kg} كجم",
+      unknown: "غير مسجَّل",
+      review: "تحت المراجعة",
+      reviewBody: "نراجع تسجيل هذا الصنف في المخزن، وسيظهر رقمه هنا فور الانتهاء.",
     },
     neu: {
       title: "طلب جديد",

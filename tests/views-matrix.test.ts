@@ -44,7 +44,7 @@ const MATRIX: Record<NavKey, Role[]> = {
   // The customer portal's review queue (2026-09-23). Sales, manager, owner —
   // and deliberately nobody else: the page shows who asked for what, and one
   // tap on it creates a work order. A NEW pin, not a moved one.
-  requests:    ["owner", "manager", "sales"],
+  requests:    ["owner", "manager", "production", "sales"], // production added 2026-09-23 (owner: production and sales approve)
   // The production side's read-only warehouse view (2026-09-09): «can I
   // promise this?». Not the storekeeper's page, and not the floor's.
   stock:       ["owner", "manager", "production", "storage"], // storage added 2026-10-05 (owner)

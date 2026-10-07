@@ -387,6 +387,18 @@ export function sumNet(movements: Movement[]): number {
   return Math.round(t * 100) / 100;
 }
 
+/**
+ * Does the sheet's own balance figure disagree with Σ movements? The drawer's
+ * «الرقمان مختلفان» check (components/dashboard/storage-item.tsx), written
+ * once so the customer portal (lib/customer-stock.ts) holds a figure back on
+ * exactly the lines the storekeeper is warned about — a balance formula typed
+ * over by hand is the case that produced it (2026-09-02). Half a hundredth of
+ * tolerance: both sides are display strings rounded to two decimals.
+ */
+export function netMismatch(sheetAvail: number, summed: number): boolean {
+  return Math.abs(sheetAvail - summed) > 0.005;
+}
+
 /** The other lines of the SAME item and owner — the ones a negative balance is
  *  usually hiding behind. Excludes the line itself. */
 export function siblingLines<B extends StockLine>(balance: B[], line: StockLine): B[] {

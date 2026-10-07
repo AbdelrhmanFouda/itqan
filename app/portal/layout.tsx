@@ -22,7 +22,8 @@ import { StatusScreen } from "@/components/dashboard/status-screen";
  *   waiting  — signed up, not linked to a company yet;
  *   closed   — refused, or approved once and stopped since (the owner's
  *              decision 17: a closed account keeps no history);
- *   the app  — approved AND linked.
+ *   the app  — approved AND linked: «الأوامر» and «المخزون», the two links
+ *              under the header (2026-10-05).
  *
  * Revoked is told apart from never-approved by `approvedAt`: `revokeCustomer`
  * puts the status back to pending and clears the link, so the status alone
@@ -124,6 +125,12 @@ function PortalShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const onStock = pathname === "/portal/stock" || !!pathname?.startsWith("/portal/stock/");
+  const tabs = [
+    { href: "/portal", label: c.nav.orders, active: !onStock },
+    { href: "/portal/stock", label: c.nav.stock, active: onStock },
+  ];
+
   return (
     <div dir={isAr ? "rtl" : "ltr"} className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 h-14 flex items-center px-4 sm:px-6 gap-3 sticky top-0 z-40">
@@ -149,6 +156,27 @@ function PortalShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
+      {/* The portal's two screens (2026-10-05). Not the dashboard's NAV and not
+          a role table — two fixed links, shown only here, to an approved and
+          linked account. «طلب جديد» is part of «الأوامر». */}
+      <nav aria-label={c.nav.label} className="bg-white border-b border-gray-200">
+        <div className="max-w-2xl mx-auto flex px-2 sm:px-6">
+          {tabs.map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              aria-current={tab.active ? "page" : undefined}
+              className={`flex-1 min-w-0 min-h-11 inline-flex items-center justify-center px-3 text-sm font-medium border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
+                tab.active
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50 active:bg-gray-100"
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
       <main className="flex-1 min-w-0 px-4 py-5 sm:px-6 sm:py-8">{children}</main>
     </div>
   );

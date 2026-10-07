@@ -28,6 +28,7 @@ type Kind =
   | "guard"       // requireRole(req): any approved role
   | "owner"       // requireRole(req, []): owner + manager only
   | "sales"       // requireRole(req, ["sales"]): sales + owner/manager
+  | "prodSales"   // requireRole(req, ["production", "sales"]): the request queue (owner, 2026-09-23)
   | "storage"     // requireRole(req, ["storage"]): storage + owner/manager
   | "production"  // requireRole(req, ["production"]): the mould plan (2026-09-30)
   | "token"       // verifies the ID token itself (verifyIdToken + roleFor)
@@ -104,6 +105,10 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "portal/register":     { POST: "customerRegister" },
   "portal/requests":     { POST: "customer" },
   "portal/requests/[reqId]": { PATCH: "customer" },
+  // «المخزون» (2026-10-05): the stock the factory holds for THIS customer,
+  // filtered by the same link and answered through one pinned whitelist
+  // (lib/customer-stock.ts). GET only — the file imports no storage writer.
+  "portal/stock":        { GET: "customer" },
   "public/showcase":     { GET: "open" },
   // «خطة الاسطمبات» (2026-09-30): production + owner/manager. The rows name
   // clients and orders, and a confirmed change rewrites a work order's
@@ -113,10 +118,10 @@ const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   // the owner's decision 6 — never a bare requireRole(req), which would hand
   // the queue and the «موافقة» button to production, quality and the worker.
   // A row here names a customer and one tap on it creates a work order.
-  "requests":                     { GET: "sales" },
-  "requests/[reqId]/approve":     { POST: "sales" },
-  "requests/[reqId]/preview":     { GET: "sales" },
-  "requests/[reqId]/reject":      { POST: "sales" },
+  "requests":                     { GET: "prodSales" },
+  "requests/[reqId]/approve":     { POST: "prodSales" },
+  "requests/[reqId]/preview":     { GET: "prodSales" },
+  "requests/[reqId]/reject":      { POST: "prodSales" },
   "reports":             { GET: "guard", POST: "guard" },
   "reports/[id]":        { GET: "guard", DELETE: "guard" },
   "reports/draft":       { GET: "guard" },
@@ -216,6 +221,10 @@ test("each handler does what its classification says", () => {
           assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"sales"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["sales"])`);
           assert.ok(denies, `${where}: must return g.deny`);
           break;
+        case "prodSales":
+          assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"production"\s*,\s*"sales"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["production", "sales"])`);
+          assert.ok(denies, `${where}: must return g.deny`);
+          break;
         case "storage":
           assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"storage"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["storage"])`);
           assert.ok(denies, `${where}: must return g.deny`);
@@ -302,7 +311,7 @@ test("a mutating handler that is guarded checks the guard BEFORE reading the bod
   for (const [route, kinds] of Object.entries(ROUTES)) {
     const hs = handlers(FILES[route]);
     for (const [method, kind] of Object.entries(kinds) as [Method, Kind][]) {
-      if (method === "GET" || !["guard", "owner", "sales", "storage", "production", "customer", "customerAccount", "customerRegister"].includes(kind)) continue;
+      if (method === "GET" || !["guard", "owner", "sales", "prodSales", "storage", "production", "customer", "customerAccount", "customerRegister"].includes(kind)) continue;
       const body = hs[method];
       // Whatever this route's guard is — a role, a customer document, or the
       // token verification the register route does itself — it must be the

@@ -20,7 +20,7 @@ import { Btn, Field, inputCls, Modal } from "@/components/dashboard/ui";
 import type { sd } from "@/lib/i18n.storage";
 import type { StorageBalance, StorageMovement } from "@/lib/storage";
 import {
-  caseTwin, dupKey, historyFor, locKey, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
+  caseTwin, dupKey, historyFor, locKey, netMismatch, siblingLines, storageDate, sumNet, toNumber, type LineWeight,
 } from "@/lib/storage-filter";
 import { fill, fmtNum } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
@@ -59,7 +59,7 @@ export function ItemDrawer({
 
   const sheetAvail = toNumber(line.avail);
   const summed = sumNet(history);
-  const mismatch = Math.abs(sheetAvail - summed) > 0.005;
+  const mismatch = netMismatch(sheetAvail, summed);
   const negative = sheetAvail < 0;
   const availCls = negative ? "text-red-600" : sheetAvail === 0 ? "text-gray-400" : "text-emerald-700";
   const bestSibling = negative ? siblings.filter((b) => toNumber(b.avail) > 0).sort((a, b) => toNumber(b.avail) - toNumber(a.avail))[0] : undefined;

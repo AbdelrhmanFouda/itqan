@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   normalizeDate, latinDigits, factoryDay,
   parseClockMinutes, formatClock, factoryDayInstant, factoryDaySpan, todayIso,
+  formatDate, formatDateWithYear,
 } from "../lib/dates.ts";
 import { cairoToday } from "../lib/issues.ts";
 
@@ -211,4 +212,22 @@ test("todayIso is NOT the factory day — the night shift is the difference", ()
   // After 08:00 Cairo the two agree, which is why this hid for a month.
   const morning = Date.parse("2026-09-13T07:00:00Z"); // 10:00 Cairo
   assert.equal(todayIso(morning), factoryDay(morning));
+});
+
+test("formatDateWithYear prints the year only when it is not this Cairo year", () => {
+  // A stock line can sit untouched for months: «27 يوليو» read in January is
+  // last year's, and must say so. A date in the current year stays short.
+  const today = "2027-01-15";
+  assert.equal(formatDateWithYear("2027-01-03", "en", today), formatDate("2027-01-03", "en"));
+  assert.equal(formatDateWithYear("2027-01-03", "ar", today), formatDate("2027-01-03", "ar"));
+  assert.equal(formatDateWithYear("2026-07-27", "en", today), "27 Jul 2026");
+  const ar = formatDateWithYear("2026-07-27", "ar", today);
+  assert.ok(ar.includes("2026") && ar.includes("27") && ar.includes("يوليو"), ar);
+  assert.equal(/[٠-٩]/.test(ar), false, "Latin digits in Arabic too");
+  // a date that is not ISO is handed back, never invented
+  assert.equal(formatDateWithYear("A17", "ar", today), "A17");
+  assert.equal(formatDateWithYear("", "en", today), "");
+  // the default "today" is the Cairo day
+  const y = todayIso().slice(0, 4);
+  assert.equal(formatDateWithYear(`${y}-03-09`, "en"), formatDate(`${y}-03-09`, "en"));
 });

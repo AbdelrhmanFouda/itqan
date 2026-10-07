@@ -19,7 +19,7 @@ import { loadRequests } from "@/lib/customer-requests-data";
  * an answer is always at the top of the phone.
  */
 export async function GET(req: NextRequest) {
-  const g = await requireRole(req, ["sales"]);
+  const g = await requireRole(req, ["production", "sales"]);
   if ("deny" in g) return g.deny;
   try {
     const { rows, readAt } = await loadRequests();

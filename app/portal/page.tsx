@@ -302,15 +302,20 @@ export default function PortalHome() {
               {/* The quantity AS THEY ASKED FOR IT, with the kilograms small
                   underneath — never the other way round, and never a computed
                   piece count when Master has no weight to compute it from. */}
-              <p className="text-sm text-gray-700 mt-1">
-                {card.qtyAsked > 0
-                  ? `${c.home.askedFor}: ${fmtNum(card.qtyAsked, isAr)} ${unitLabel(card.unit)}`
-                  : card.qtyPieces !== null
-                  ? `${c.home.askedFor}: ${fmtNum(card.qtyPieces, isAr)} ${c.units.pieces}`
-                  : card.qtyKg > 0
-                  ? `${c.home.askedFor}: ${fmtNum(card.qtyKg, isAr)} ${c.units.kg}`
-                  : ""}
-              </p>
+              {card.qtyAsked > 0 || card.qtyPieces !== null || card.qtyKg > 0 ? (
+                <p className="text-sm text-gray-700 mt-1">
+                  {card.qtyAsked > 0
+                    ? `${c.home.askedFor}: ${fmtNum(card.qtyAsked, isAr)} ${unitLabel(card.unit)}`
+                    : card.qtyPieces !== null
+                    ? `${c.home.askedFor}: ${fmtNum(card.qtyPieces, isAr)} ${c.units.pieces}`
+                    : `${c.home.askedFor}: ${fmtNum(card.qtyKg, isAr)} ${c.units.kg}`}
+                </p>
+              ) : (
+                // No kilograms and no piece count on the order row (2026-10-05):
+                // said in words, quietly, instead of the empty line it used to
+                // leave. Nothing is parsed out of the order's notes.
+                <p className="text-sm text-gray-400 mt-1">{c.home.qtyPending}</p>
+              )}
               {card.unit === UNIT_PIECES && card.qtyKg > 0 && (
                 <p className="text-xs text-gray-400">{fill(c.home.approxKg, { kg: fmtNum(card.qtyKg, isAr) })}</p>
               )}

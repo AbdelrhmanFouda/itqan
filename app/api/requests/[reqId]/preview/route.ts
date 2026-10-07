@@ -21,7 +21,7 @@ import { planWorkOrder, sheetDeps } from "@/lib/work-orders-write";
  * clients. The approver taps the right row and it comes back as `masterRow`.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ reqId: string }> }) {
-  const g = await requireRole(req, ["sales"]);
+  const g = await requireRole(req, ["production", "sales"]);
   if ("deny" in g) return g.deny;
   const { reqId } = await params;
   const want = reqIdKey(reqId);

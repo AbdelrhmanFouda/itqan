@@ -116,7 +116,9 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   // quality: a row here names a customer and turns into a real work order with
   // material bought against it. Without an entry of its own the page would be
   // inherited through the overview prefix by exactly those two roles.
-  { href: "/dashboard/requests", key: "requests", roles: ["sales"] },
+  // Production AND sales approve (owner, 2026-09-23: "approved first by the
+  // production guy"; then "production and sales"). Owner + manager always.
+  { href: "/dashboard/requests", key: "requests", roles: ["production", "sales"] },
   // «المتاح في المخزن» (2026-09-09 brief): the production side reads the
   // warehouse to answer «can I promise this?» — المتوفر, المحجوز on open work
   // orders, المتاح — and writes NOTHING there. Not the storekeeper's page

@@ -77,7 +77,7 @@ test("production sees exactly its eight pages", () => {
   // this?» — production's, not quality's and not the storekeeper's.
   assert.deepEqual(
     keysFor("production").sort(),
-    ["assistant", "changeover", "downtime", "issues", "jobs", "overview", "performance", "production", "stock"],
+    ["assistant", "changeover", "downtime", "issues", "jobs", "overview", "performance", "production", "requests", "stock"],
   );
   assert.equal(canAccess("quality", "/dashboard/stock"), false, "quality was not given stock");
   assert.equal(canAccess("storage", "/dashboard/stock"), true, "the storekeeper reads availability too (owner, 2026-10-05)");

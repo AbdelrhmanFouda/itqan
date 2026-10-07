@@ -18,7 +18,7 @@ import { cairoStamp, NOTE_MAX, reqIdKey, requestStateToSheet } from "@/lib/custo
  * instead), so a row that moved is refused rather than mis-stamped.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ reqId: string }> }) {
-  const g = await requireRole(req, ["sales"]);
+  const g = await requireRole(req, ["production", "sales"]);
   if ("deny" in g) return g.deny;
   const bad = (reason: string, status = 400) => NextResponse.json({ ok: false, reason }, { status });
 

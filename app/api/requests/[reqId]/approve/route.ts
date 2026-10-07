@@ -33,7 +33,7 @@ import { createWorkOrder, sheetDeps } from "@/lib/work-orders-write";
  * last place a mis-parsed standard can be caught before material is bought.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ reqId: string }> }) {
-  const g = await requireRole(req, ["sales"]);
+  const g = await requireRole(req, ["production", "sales"]);
   if ("deny" in g) return g.deny;
   const bad = (reason: string, status = 400, extra: Record<string, unknown> = {}) =>
     NextResponse.json({ ok: false, reason, ...extra }, { status });

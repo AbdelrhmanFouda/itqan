@@ -127,7 +127,7 @@ for (const p of ["/dashboard/downtime", "/dashboard/jobs", "/dashboard/storage",
   // The customer portal, 2026-09-23. Its shell bounces a signed-out visitor to
   // /portal/login on the client, so the HTML itself answers 200 like the
   // dashboard's does.
-  "/portal", "/portal/login", "/portal/new"]) {
+  "/portal", "/portal/login", "/portal/new", "/portal/stock"]) {
   await check(`${p} answers 200`, async () => { const r = await req(p); expect(r.status === 200, `HTTP ${r.status}`); return `${r.ms}ms`; });
 }
 await check("/robots.txt keeps the dashboard, the API, login and the portal out of search", async () => {
@@ -257,7 +257,7 @@ await check("GET /api/runs/1 → 405 (that route only deletes)", async () => { c
 //                   customers/{uid} AS THE CALLER. No token ⇒ no document ⇒
 //                   401, and that is also what a STAFF token gets (checked in
 //                   the signed group, where there is a real token to try).
-//   /api/requests*  requireRole(req, ["sales"]) — the factory's side of the
+//   /api/requests*  requireRole(req, ["production", "sales"]) — the factory's side of the
 //                   same queue. A customer's token is refused here for the
 //                   mirror reason: a customer has no role at all.
 //
@@ -271,6 +271,7 @@ const PORTAL = [
   ["GET", "/api/portal/me"],
   ["GET", "/api/portal/products"],
   ["GET", "/api/portal/orders"],
+  ["GET", "/api/portal/stock"],
   ["GET", "/api/requests"],
   ["GET", "/api/requests/REQ-2026-0001/preview"],
   ["POST", "/api/portal/register"],
@@ -295,7 +296,7 @@ for (const [m, p] of PORTAL) {
 await check("a refused portal answer carries no order, no product and no customer", async () => {
   for (const [m, p] of PORTAL) {
     const r = await req(p, { method: m, token: "not-a-real-token", body: m === "GET" ? undefined : {} });
-    expect(!/requests|orders|products|clients|@/.test(r.text), `${m} ${p} says «${r.text.slice(0, 80)}»`);
+    expect(!/requests|orders|products|clients|lines|@/.test(r.text), `${m} ${p} says «${r.text.slice(0, 80)}»`);
   }
   return `${PORTAL.length} routes · unauthorized only`;
 });
@@ -379,7 +380,7 @@ if (!TOKEN) {
   // customers/{uid}, a staff member has no such document, and the answer is
   // 401 — not 403, because the portal does not admit that the caller exists.
   // A 200 here would mean the portal had fallen back to a role lookup.
-  for (const p of ["/api/portal/me", "/api/portal/products", "/api/portal/orders"]) {
+  for (const p of ["/api/portal/me", "/api/portal/products", "/api/portal/orders", "/api/portal/stock"]) {
     await check(`GET ${p} with a STAFF token → still 401 (a customer is not a role)`, async () => {
       const r = await req(p, { token: TOKEN });
       expect(r.status === 401, `HTTP ${r.status}${r.json ? ` ${JSON.stringify(r.json).slice(0, 80)}` : ""}`);
@@ -389,9 +390,9 @@ if (!TOKEN) {
   // The staff side of the same queue. Sales, manager and owner may read it;
   // every other approved role must be refused — and refused with a 403, which
   // is what says the guard ran and the ROLE was the reason.
-  await check("GET /api/requests with the token → the queue for sales/manager/owner, 403 for anyone else", async () => {
+  await check("GET /api/requests with the token → the queue for production/sales/manager/owner, 403 for anyone else", async () => {
     const r = await req("/api/requests", { token: TOKEN });
-    if (["owner", "manager", "sales"].includes(role)) {
+    if (["owner", "manager", "production", "sales"].includes(role)) {
       expect(r.status === 200 && Array.isArray(r.json?.requests), `HTTP ${r.status}`);
       expect(typeof r.json.pending === "number", "no pending count for the jobs-page badge");
       return `${r.json.requests.length} requests · ${r.json.pending} pending · ${r.ms}ms`;

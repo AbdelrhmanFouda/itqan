@@ -238,6 +238,23 @@ export function formatDate(iso: string, lang: "ar" | "en"): string {
 }
 
 /**
+ * `formatDate`, plus the YEAR whenever the date is not in the current Cairo
+ * year. For dates with no bound on their age — the last movement of a stock
+ * line that has not been touched since last July — where «27 يوليو» alone
+ * reads as this year's, or as a day still to come. A due date a few weeks out
+ * does not need it and keeps `formatDate`.
+ */
+export function formatDateWithYear(iso: string, lang: "ar" | "en", today: string = todayIso()): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  if (m[1] === today.slice(0, 4)) return formatDate(iso, lang);
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.toLocaleDateString(lang === "ar" ? "ar-EG-u-nu-latn" /* = lib/format.ts LOCALE_AR */ : "en-GB", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+  });
+}
+
+/**
  * Today in Cairo as "YYYY-MM-DD" — the factory day, and the sheet's date
  * convention everywhere.
  *

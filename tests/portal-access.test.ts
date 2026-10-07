@@ -125,15 +125,15 @@ test("every handler under app/api/portal is guarded by a customer guard", () => 
   }
 });
 
-test("the staff side of the portal is sales-only (when it exists)", () => {
+test("the staff side of the portal is production + sales only (when it exists)", () => {
   // /api/requests arrives with the review-and-approve phase. Written now so
   // that phase cannot land ungated: the screen behind it shows customer email
   // addresses and creates real work orders.
   for (const f of filesUnder("app/api/requests", [".ts"]).filter((x) => x.endsWith("route.ts"))) {
     for (const [method, body] of Object.entries(handlers(read(f)))) {
       assert.ok(
-        /requireRole\(\s*req\s*,\s*\[\s*"sales"\s*\]\s*\)/.test(body),
-        `${method} ${f}: must call requireRole(req, ["sales"])`,
+        /requireRole\(\s*req\s*,\s*\[\s*"production"\s*,\s*"sales"\s*\]\s*\)/.test(body),
+        `${method} ${f}: must call requireRole(req, ["production", "sales"])`,
       );
     }
   }
@@ -401,7 +401,7 @@ test("the portal never says «مباشر», and reuses the jobs page's freshness
   // behind, so a customer's first look after a quiet period can be hours old.
   // Claiming "live" on that screen is the one thing that would make staleness
   // read as lying.
-  for (const f of [...filesUnder("app/portal", [".tsx"]), "lib/i18n.portal.ts"]) {
+  for (const f of [...filesUnder("app/portal", [".tsx"]), ...filesUnder("components/portal", [".tsx"]), "lib/i18n.portal.ts"]) {
     // `code()`, not `read()`: the page's own comment explains the rule.
     assert.equal(code(f).includes("مباشر"), false, `${f} says «مباشر»`);
   }
@@ -410,6 +410,121 @@ test("the portal never says «مباشر», and reuses the jobs page's freshness
   const prod = read("lib/i18n.prod.ts");
   for (const s of [cp.en.home.dataAge, cp.ar.home.dataAge]) {
     assert.ok(prod.includes(s), `«${s}» is not the wording the jobs page uses`);
+  }
+});
+
+/* ------------------------ 7. «المخزون» (2026-10-05) ------------------------ */
+
+test("the stock route takes nothing from the caller and answers through one builder", () => {
+  const f = "app/api/portal/stock/route.ts";
+  assert.ok(exists(f), `${f} is missing`);
+  // Covered by the walk above ("every handler under app/api/portal is guarded
+  // by a customer guard") — asserted, so a rename cannot quietly drop it.
+  assert.ok(
+    filesUnder("app/api/portal", [".ts"]).filter((x) => x.endsWith("route.ts")).includes(f),
+    "the guard walk does not reach the stock route",
+  );
+  const src = code(f);
+  assert.deepEqual(Object.keys(handlers(src)), ["GET"], "the stock route is a read and nothing else");
+  assert.ok(/requireCustomer\(\s*req\s*\)/.test(src), "must be guarded by requireCustomer(req)");
+  // Nothing in the request names a client: no query string, no body, no params.
+  for (const forbidden of [/searchParams/, /nextUrl/, /req\.json\(/, /req\.text\(/, /req\.formData\(/, /\bparams\b/]) {
+    assert.equal(forbidden.test(src), false, `${f} reads ${forbidden} off the request`);
+  }
+  // The link is the guard's, and the answer is the builder's whitelist.
+  assert.ok(/const keys = g\.customer\.clientKeys/.test(src), "the link must come from the guard");
+  assert.ok(/clientKeys: keys/.test(src), "…and be what the builder filters on");
+  assert.ok(/const lines = buildCustomerStock\(/.test(src), "the lines must be built by buildCustomerStock");
+  assert.ok(/\{ ok: true, lines, meta:/.test(src), "the answer carries the builder's lines");
+  // The storage read itself never reaches the wire: outside the builder call,
+  // the route touches only the read's `ok`, `readAt` and `stale`.
+  const at = src.indexOf("buildCustomerStock(");
+  const outside = src.slice(0, at) + src.slice(src.indexOf("});", at));
+  assert.deepEqual(
+    [...new Set([...outside.matchAll(/\bdata\.(\w+)/g)].map((m) => m[1]))].sort(),
+    ["ok", "readAt", "stale"],
+  );
+  assert.equal(/\.\.\.data\b/.test(src), false, "the storage read must never be spread into the answer");
+  assert.ok(/"Cache-Control": "no-store"/.test(src), "an answer scoped to one account is never cached");
+  assert.ok(/status: 503/.test(src) && /read_failed/.test(src), "a failed read is a 503, not an empty stock");
+});
+
+test("the stock route can read the store and cannot write to it", () => {
+  const src = code("app/api/portal/stock/route.ts");
+  assert.ok(/getStorageData\(/.test(src));
+  for (const w of ["saveMovement", "updateMovement", "deleteMovement", "refreshStorageLists", "appendRecord", "updateRecord"]) {
+    assert.equal(src.includes(w), false, `the stock route must not import ${w}`);
+  }
+  // …and the rules module is pure: two pure siblings, no reader, no network.
+  const rules = code("lib/customer-stock.ts");
+  const imports = [...new Set([...rules.matchAll(/from "([^"]+)"/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(imports, ["@/lib/customer-link", "@/lib/storage-filter"]);
+  assert.equal(/fetch\(|process\.env/.test(rules), false);
+  for (const pure of ["lib/customer-link.ts", "lib/storage-filter.ts"]) {
+    assert.equal(/^import /m.test(code(pure)), false, `${pure} must stay import-free — the stock rules lean on that`);
+  }
+});
+
+test("the stock page keeps its snapshot per account, where sign-out clears it", () => {
+  const src = read("app/portal/stock/page.tsx");
+  assert.ok(src.includes("`itqan.portal.stock.last.${uid}`"), "the snapshot key must carry the uid");
+  // The pattern clearLastSeen() removes on sign-out (components/dashboard/last-seen.ts).
+  const pattern = /^itqan\..*\.last(\.|$)/;
+  assert.ok(read("components/dashboard/last-seen.ts").includes(pattern.source), "clearLastSeen's pattern moved");
+  assert.ok(pattern.test("itqan.portal.stock.last.some-uid"));
+  // Bounded, remembered, and never blanked by a failed refresh.
+  assert.ok(/useRemembered</.test(src));
+  assert.ok(src.includes('timedJson<Data>(authedFetch, "/api/portal/stock")'), "the read must be bounded and carry a token");
+  assert.ok(/<LoadError/.test(src), "a failed refresh is a line with a retry, above what is already on screen");
+  assert.ok(/staleRefetches\.current < 2/.test(src) && /8000/.test(src), "at most two refetches, eight seconds apart");
+  assert.ok(/c\.home\.dataAge/.test(src), "the age line is the SAME sentence the orders screen prints");
+  // The cards are the prop-driven component — it fetches nothing itself.
+  assert.ok(src.includes("<StockView lines={data.lines} lang={lang} />"));
+  const view = code("components/portal/stock-view.tsx");
+  assert.equal(/fetch\(|authedFetch|useEffect|useRemembered/.test(view), false, "StockView must not fetch");
+  // No total across different products, anywhere on the screen.
+  assert.equal(
+    /\.reduce\(/.test(view) || /\.reduce\(/.test(code("app/portal/stock/page.tsx")), false,
+    "the stock screen adds nothing up",
+  );
+  // A last-movement date has no bound on its age: it carries the year when it is not this year's.
+  assert.ok(/formatDateWithYear\(line\.lastIn, lang\)/.test(view) && /formatDateWithYear\(line\.lastOut, lang\)/.test(view));
+  assert.equal(/formatDate\(/.test(view), false, "the year-less printer is for due dates, not for stock");
+  // A sheet name mixes Arabic and Latin; isolated, its word order does not follow the page's direction.
+  assert.equal(view.split("<bdi>{line.item}</bdi>").length - 1, 2, "both card shapes isolate the item name");
+  assert.equal(/>\{line\.item\}<\/p>/.test(view), false);
+});
+
+test("the portal shell offers the two screens, and only those", () => {
+  const src = code("app/portal/layout.tsx");
+  assert.ok(src.includes('{ href: "/portal", label: c.nav.orders,'));
+  assert.ok(src.includes('{ href: "/portal/stock", label: c.nav.stock,'));
+  assert.ok(src.includes('aria-current={tab.active ? "page" : undefined}'), "the active screen is announced");
+  assert.ok(/min-h-11/.test(src.slice(src.indexOf("<nav"), src.indexOf("</nav>"))), "44px tap targets");
+  assert.equal(cp.ar.nav.orders, "الأوامر");
+  assert.equal(cp.ar.nav.stock, "المخزون");
+});
+
+test("an order with no quantity says so, and nothing is read out of its notes", () => {
+  const src = code("app/portal/page.tsx");
+  assert.ok(/c\.home\.qtyPending/.test(src), "the empty quantity line must be replaced by the sentence");
+  assert.equal(cp.ar.home.qtyPending, "الكمية لم تُسجَّل بعد");
+  assert.equal(cp.en.home.qtyPending, "Quantity not recorded yet");
+  assert.equal(/notes/.test(src), false, "the customer screen never touches an order's notes");
+});
+
+test("the stock wording is the store's own three neutral words", () => {
+  assert.ok(cp.ar.stock.flow.includes("الوارد") && cp.ar.stock.flow.includes("المنصرف"));
+  assert.equal(cp.ar.stock.balance, "الرصيد");
+  assert.equal(cp.ar.stock.review, "تحت المراجعة");
+  assert.equal(cp.ar.stock.note, "الأرقام كما سُجِّلت في مخزن المصنع");
+  assert.equal(cp.ar.stock.empty, "لا يوجد مخزون مسجل على هذا الحساب");
+  for (const lang of ["en", "ar"] as const) {
+    for (const k of ["in", "out"]) assert.ok(cp[lang].stock.flow.includes(`{${k}}`), `${lang}: flow must fill {${k}}`);
+    for (const k of ["lastIn", "lastOut"] as const) assert.ok(cp[lang].stock[k].includes("{date}"), `${lang}: ${k}`);
+    for (const k of ["approxKg", "exactKg"] as const) assert.ok(cp[lang].stock[k].includes("{kg}"), `${lang}: ${k}`);
+    assert.ok(cp[lang].stock.approxKg.startsWith("≈"), `${lang}: an estimated weight is marked`);
+    assert.equal(cp[lang].stock.exactKg.includes("≈"), false, `${lang}: a weighed one is not`);
   }
 });
 
@@ -433,7 +548,7 @@ test("the portal is linked from the public site, by its login page", () => {
 const REQ_ROUTES = ["route.ts", "[reqId]/preview/route.ts", "[reqId]/approve/route.ts", "[reqId]/reject/route.ts"]
   .map((f) => `app/api/requests/${f}`);
 
-test("the four staff routes exist and are all sales-only", () => {
+test("the four staff routes exist and are all production + sales only", () => {
   for (const f of REQ_ROUTES) assert.ok(exists(f), `${f} is missing`);
   // The vacuous check above became real with these files: assert it is.
   const files = filesUnder("app/api/requests", [".ts"]).filter((x) => x.endsWith("route.ts"));
