@@ -92,38 +92,40 @@ const piecesOf = (r: ProgressRun): number =>
  * What an order's card prints under its quantity — decided HERE so the page
  * and the tests share one reading of it.
  *
- *  - `none`  — nothing at all: the count is unknown (`null`), or it is 0 on an
- *              order that has not started or is already closed;
- *  - `empty` — «لم يُسجَّل إنتاج بعد»: the order is in production and no shift
- *              has been credited to it yet;
- *  - `count` — the count, with the ordered total and a percentage when the
- *              ordered PIECE count is known. The percentage is capped at 100 so
- *              the bar never overflows; `made` is never capped — an order that
- *              ran over still states what was really made.
+ *  - `none`  — nothing at all: the count is unknown (`null`) — the server could
+ *              not state it honestly;
+ *  - `count` — the count, ZERO included, with the ordered total and a
+ *              percentage when the ordered PIECE count is known. The percentage
+ *              is capped at 100 so the bar never overflows; `made` is never
+ *              capped — an order that ran over still states what was really made.
+ *
+ * Zero used to be its own case (a sentence on a running order, nothing on the
+ * others). Since 2026-10-07 the card draws the same bar the factory's jobs tab
+ * draws (owner: "show the loading bar like the one in jobs tab"), and that tab
+ * shows an EMPTY bar with «0 / 20,000» on an order nothing was made for — so a
+ * real zero is a count like any other, and the status no longer decides it.
  */
 export type ProgressLine =
   | { kind: "none" }
-  | { kind: "empty" }
   | { kind: "count"; made: number; total: number | null; pct: number | null };
 
 export function progressLine(
   produced: number | null | undefined,
-  /** The customer-facing status: not_started · in_production · completed. */
-  status: string | null | undefined,
   /** The ordered quantity in PIECES, or null when only kilograms are known. */
   totalPieces: number | null | undefined,
 ): ProgressLine {
   if (typeof produced !== "number" || !Number.isFinite(produced) || produced < 0) return { kind: "none" };
   const made = Math.round(produced);
-  if (made === 0) return status === "in_production" ? { kind: "empty" } : { kind: "none" };
   const total =
     typeof totalPieces === "number" && Number.isFinite(totalPieces) && totalPieces > 0 ? Math.round(totalPieces) : null;
   // 100 means DONE and nothing less does: 4,990 of 5,000 rounds to 100 and
   // would paint a full green bar over an order still ten pieces short, and 40
   // of 90,000 rounds to 0 — an empty bar under a sentence that says 40 were
   // made. So an unfinished order reads 1–99, and only `made >= total` is 100.
+  // …and nothing made is an EMPTY bar, 0 — the one count the 1–99 rule skips.
   const pct =
     total === null ? null
+    : made === 0 ? 0
     : made >= total ? 100
     : Math.max(1, Math.min(99, Math.round((made / total) * 100)));
   return { kind: "count", made, total, pct };

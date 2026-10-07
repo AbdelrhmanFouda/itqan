@@ -47,7 +47,7 @@ import { authedFetch } from "@/lib/authed-fetch";
 import { timedJson } from "@/components/dashboard/last-seen";
 import { useRemembered } from "@/components/dashboard/use-remembered";
 import { Btn, EmptyState, LoadError, Modal, Spinner } from "@/components/dashboard/ui";
-import { ageLabel, fill, fmtNum, fmtPct } from "@/lib/format";
+import { ageLabel, fill, fmtNum } from "@/lib/format";
 import { formatDate } from "@/lib/dates";
 import {
   cardStep, UNIT_PIECES, type CardStep, type PortalOrder, type PortalOrderStatus, type PortalRequest,
@@ -120,7 +120,7 @@ const totalPiecesOf = (card: Card): number | null =>
 const progressOf = (card: Card): ProgressLine =>
   card.step === "rejected" || card.step === "cancelled"
     ? { kind: "none" }
-    : progressLine(card.produced, card.orderStatus, totalPiecesOf(card));
+    : progressLine(card.produced, totalPiecesOf(card));
 
 /** «yyyy-mm-dd HH:MM» → «yyyy-mm-dd». The stamp is text, never re-parsed. */
 const dayOf = (stamp: string): string => (stamp || "").slice(0, 10);
@@ -198,40 +198,33 @@ const stepTone: Record<CardStep, string> = {
 };
 
 /**
- * «تم إنتاج 1,350 من 5,000 قطعة» and, when the ordered piece count is known,
- * a thin bar with the percentage beside it.
+ * The order's bar — the SAME bar the factory's own jobs tab draws
+ * (app/dashboard/jobs/page.tsx; owner, 2026-10-07: "show the loading bar like
+ * the one in jobs tab"): a track with the count beside it, «13,539 / 50,000
+ * قطعة», drawn the way that tab draws it in both languages. The three class
+ * strings are that page's own, and tests/portal-access.test.ts pins the two
+ * files to each other so the bars cannot drift apart.
  *
- * The fill is a block inside a container that inherits the page's `dir`, so it
- * grows from the START edge — the right in Arabic, the left in English — with
- * no direction-specific class. The percentage is capped at 100 by
- * `progressLine()`, so the fill cannot overflow the track; the sentence above
- * it still states the real count. Hand-built, like every chart on the site.
+ * `text` is the whole sentence («تم إنتاج … من … قطعة») for a screen reader.
+ * The width is the percentage `progressLine()` capped at 100, so the fill
+ * cannot overflow the track; the count beside it is never capped. Hand-built,
+ * like every chart on the site.
  */
-function ProducedLine({ text, pct, pctText }: { text: string; pct: number | null; pctText: string }) {
+function ProducedLine({ text, pct, label }: { text: string; pct: number; label: string }) {
   return (
-    <div className="mt-2">
-      <p className="text-sm font-medium text-gray-900">{text}</p>
-      {pct !== null && (
-        <div className="mt-1.5 flex items-center gap-2">
-          <div
-            role="progressbar"
-            aria-label={text}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={pct}
-            aria-valuetext={pctText}
-            className="h-1.5 flex-1 min-w-0 rounded-full bg-gray-100 overflow-hidden"
-          >
-            <div
-              className={`h-full rounded-full ${pct >= 100 ? "bg-emerald-600" : "bg-blue-600"}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <span className="text-xs text-gray-500 tabular-nums shrink-0">
-            <bdi dir="ltr">{pctText}</bdi>
-          </span>
-        </div>
-      )}
+    <div className="flex items-center gap-3 mt-3">
+      <div
+        role="progressbar"
+        aria-label={text}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"
+        dir="ltr"
+      >
+        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums" dir="ltr">{label}</span>
     </div>
   );
 }
@@ -404,22 +397,32 @@ export default function PortalHome() {
                 <p className="text-xs text-gray-400">{fill(c.home.approxKg, { kg: fmtNum(card.qtyKg, isAr) })}</p>
               )}
 
-              {/* «تم إنتاج» — the count made for THIS order (see the header).
-                  Nothing when the server sent no number; the grey sentence
-                  when the order is running and no shift is credited yet. */}
-              {progress.kind === "empty" && (
-                <p className="text-sm text-gray-400 mt-2">{c.home.producedNone}</p>
-              )}
-              {progress.kind === "count" && (
+              {/* «تم إنتاج» — the count made for THIS order (see the header), as
+                  the jobs tab's bar. Nothing when the server sent no number. An
+                  order nothing was made for shows the empty bar, as it does
+                  there. With no ordered PIECE count there is nothing to measure
+                  a non-zero count against, so it is stated as a sentence. */}
+              {progress.kind === "count" && (progress.total !== null || progress.made === 0) && (
                 <ProducedLine
                   text={
-                    progress.total !== null
+                    progress.made === 0
+                      ? c.home.producedNone
+                      : progress.total !== null
                       ? fill(c.home.producedOf, { made: fmtNum(progress.made, isAr), total: fmtNum(progress.total, isAr) })
                       : fill(c.home.producedOnly, { made: fmtNum(progress.made, isAr) })
                   }
-                  pct={progress.pct}
-                  pctText={progress.pct === null ? "" : fmtPct(progress.pct / 100, isAr)}
+                  pct={progress.pct ?? 0}
+                  label={
+                    progress.total !== null
+                      ? `${fmtNum(progress.made, isAr)} / ${fmtNum(progress.total, isAr)} ${c.units.pieces}`
+                      : `${fmtNum(progress.made, isAr)} ${c.units.pieces}`
+                  }
                 />
+              )}
+              {progress.kind === "count" && progress.total === null && progress.made > 0 && (
+                <p className="text-sm font-medium text-gray-900 mt-2">
+                  {fill(c.home.producedOnly, { made: fmtNum(progress.made, isAr) })}
+                </p>
               )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">

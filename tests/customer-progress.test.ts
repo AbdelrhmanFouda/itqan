@@ -251,51 +251,55 @@ test("every order handed in gets an answer, and nothing else does", () => {
 /* ------------------------------ what a card says --------------------------- */
 
 test("no number is sent → the card prints nothing", () => {
-  for (const status of ["not_started", "in_production", "completed", null]) {
-    assert.deepEqual(progressLine(null, status, 5000), { kind: "none" });
-    assert.deepEqual(progressLine(undefined, status, 5000), { kind: "none" });
-  }
+  assert.deepEqual(progressLine(null, 5000), { kind: "none" });
+  assert.deepEqual(progressLine(undefined, 5000), { kind: "none" });
+  assert.deepEqual(progressLine(null, null), { kind: "none" });
   // A snapshot from before the count existed, or a broken value, is "not known".
-  assert.deepEqual(progressLine(Number.NaN, "in_production", 5000), { kind: "none" });
-  assert.deepEqual(progressLine(-3, "in_production", 5000), { kind: "none" });
+  assert.deepEqual(progressLine(Number.NaN, 5000), { kind: "none" });
+  assert.deepEqual(progressLine(-3, 5000), { kind: "none" });
 });
 
-test("zero: a quiet sentence while the order is running, nothing otherwise", () => {
-  assert.deepEqual(progressLine(0, "in_production", 5000), { kind: "empty" });
-  assert.deepEqual(progressLine(0, "not_started", 5000), { kind: "none" });
-  assert.deepEqual(progressLine(0, "completed", 5000), { kind: "none" });
-  assert.deepEqual(progressLine(0, null, 5000), { kind: "none" });
+test("zero is a count like any other: an EMPTY bar, as on the jobs tab", () => {
+  // MOVED DELIBERATELY on 2026-10-07 (owner: "show the loading bar like the one
+  // in jobs tab"). Zero used to be a sentence on a running order and nothing on
+  // the others; the jobs tab draws an empty bar with «0 / 5,000» on every
+  // order nothing was made for, and the customer's card now does the same.
+  assert.deepEqual(progressLine(0, 5000), { kind: "count", made: 0, total: 5000, pct: 0 });
+  // No ordered piece count: still a real zero, with nothing to measure against.
+  assert.deepEqual(progressLine(0, null), { kind: "count", made: 0, total: null, pct: null });
+  // A fraction of a piece is not a piece.
+  assert.deepEqual(progressLine(0.4, 5000), { kind: "count", made: 0, total: 5000, pct: 0 });
 });
 
 test("a count with a known total carries a percentage; without one, no bar", () => {
-  assert.deepEqual(progressLine(1350, "in_production", 5000), { kind: "count", made: 1350, total: 5000, pct: 27 });
-  assert.deepEqual(progressLine(1350, "in_production", null), { kind: "count", made: 1350, total: null, pct: null });
-  assert.deepEqual(progressLine(1350, "in_production", 0), { kind: "count", made: 1350, total: null, pct: null });
+  assert.deepEqual(progressLine(1350, 5000), { kind: "count", made: 1350, total: 5000, pct: 27 });
+  assert.deepEqual(progressLine(1350, null), { kind: "count", made: 1350, total: null, pct: null });
+  assert.deepEqual(progressLine(1350, 0), { kind: "count", made: 1350, total: null, pct: null });
   // Shifts logged before anybody moved the order's status are still shown.
-  assert.deepEqual(progressLine(40, "not_started", 1000), { kind: "count", made: 40, total: 1000, pct: 4 });
-  assert.deepEqual(progressLine(1000, "completed", 1000), { kind: "count", made: 1000, total: 1000, pct: 100 });
+  assert.deepEqual(progressLine(40, 1000), { kind: "count", made: 40, total: 1000, pct: 4 });
+  assert.deepEqual(progressLine(1000, 1000), { kind: "count", made: 1000, total: 1000, pct: 100 });
 });
 
 test("an order that ran over: the bar stops at 100, the count does not", () => {
-  const line = progressLine(1260, "completed", 1000);
+  const line = progressLine(1260, 1000);
   assert.deepEqual(line, { kind: "count", made: 1260, total: 1000, pct: 100 });
 });
 
 test("100% means the whole order was made — rounding never says it early", () => {
   // 99.8% rounds to 100, and the page paints 100 full and green.
-  assert.deepEqual(progressLine(4990, "in_production", 5000), { kind: "count", made: 4990, total: 5000, pct: 99 });
-  assert.deepEqual(progressLine(4999, "in_production", 5000), { kind: "count", made: 4999, total: 5000, pct: 99 });
-  assert.deepEqual(progressLine(5000, "in_production", 5000), { kind: "count", made: 5000, total: 5000, pct: 100 });
+  assert.deepEqual(progressLine(4990, 5000), { kind: "count", made: 4990, total: 5000, pct: 99 });
+  assert.deepEqual(progressLine(4999, 5000), { kind: "count", made: 4999, total: 5000, pct: 99 });
+  assert.deepEqual(progressLine(5000, 5000), { kind: "count", made: 5000, total: 5000, pct: 100 });
   // The status does not decide it: a closed order that fell short is not 100.
-  assert.equal(progressLine(4990, "completed", 5000).pct, 99);
+  assert.equal(progressLine(4990, 5000).pct, 99);
 });
 
 test("a real count never reads 0% with an empty bar", () => {
-  assert.deepEqual(progressLine(40, "in_production", 90000), { kind: "count", made: 40, total: 90000, pct: 1 });
-  assert.deepEqual(progressLine(1, "in_production", 90000), { kind: "count", made: 1, total: 90000, pct: 1 });
+  assert.deepEqual(progressLine(40, 90000), { kind: "count", made: 40, total: 90000, pct: 1 });
+  assert.deepEqual(progressLine(1, 90000), { kind: "count", made: 1, total: 90000, pct: 1 });
   // In between, ordinary rounding.
-  assert.equal(progressLine(2000, "in_production", 90000).pct, 2);
-  assert.equal(progressLine(45000, "in_production", 90000).pct, 50);
+  assert.equal(progressLine(2000, 90000).pct, 2);
+  assert.equal(progressLine(45000, 90000).pct, 50);
 });
 
 /* ------------------------ the total a card measures against ----------------- */
@@ -305,7 +309,7 @@ test("the total is the WORK ORDER's quantity when the factory changed it", () =>
   assert.equal(orderedTotalPieces(8000, 10000, 100), 10000);
   // …so 8,800 made is 88% of a running order, not a full green bar.
   assert.deepEqual(
-    progressLine(8800, "in_production", orderedTotalPieces(8000, 10000, 100)),
+    progressLine(8800, orderedTotalPieces(8000, 10000, 100)),
     { kind: "count", made: 8800, total: 10000, pct: 88 },
   );
   // Edited DOWN after approval: the order is still the total.
@@ -335,6 +339,6 @@ test("one known quantity is the total; none means no total and no bar", () => {
   assert.equal(orderedTotalPieces(null, null, 40), null);
   assert.equal(orderedTotalPieces(0, 0, 0), null);
   assert.equal(orderedTotalPieces(Number.NaN, -5, 3), null);
-  assert.deepEqual(progressLine(740, "in_production", orderedTotalPieces(null, null, 40)),
+  assert.deepEqual(progressLine(740, orderedTotalPieces(null, null, 40)),
     { kind: "count", made: 740, total: null, pct: null });
 });

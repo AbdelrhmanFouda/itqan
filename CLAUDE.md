@@ -57,8 +57,10 @@ Owner, signed in as a customer: "I only see my orders, not how many were made". 
   so the cards print nothing rather than a false zero. Do not remove it.
 - `loadJobs()` returns `productionRuns` (built BESIDE `shaped` — `runsFor()` feeds /api/jobs/[id]) and exports `productKeyOf`;
   `produced` / `remaining` / `runsFor` are unchanged. The orders route reads three tabs now and no staff figure (pinned).
-- Card: `progressLine()` decides the line — count, capped bar + % (100 only when made ≥ total; 1–99 before), «لم يُسجَّل إنتاج بعد», or
-  nothing; `orderedTotalPieces()` picks the total — the ORDER's pieces, the typed ones only within rounding. Never scrap, machine, rate, ETA.
+- Card: `progressLine()` decides the line — a count (zero included) or nothing. The bar IS the jobs tab's bar
+  (owner, 2026-10-07: "like the one in jobs tab"): same three class strings, pinned to `app/dashboard/jobs/page.tsx`
+  by tests/portal-access.test.ts, count beside it («13,539 / 50,000 قطعة»), empty at 0, width capped (100 only when
+  made ≥ total; 1–99 before). A non-zero count with no ordered piece total is a sentence, no bar; `orderedTotalPieces()` picks the total — the ORDER's pieces, the typed ones only within rounding. Never scrap, machine, rate, ETA.
 
 ## Recently landed (2026-10-05) — the portal shows a customer's stock
 

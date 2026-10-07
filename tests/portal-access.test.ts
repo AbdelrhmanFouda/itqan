@@ -598,7 +598,7 @@ test("the attribution rules are pure, and the staff rule in lib/jobs.ts is untou
 test("the order card states the count, a capped bar, and nothing about how it was made", () => {
   const src = code("app/portal/page.tsx");
   // One reading of what a card may say — the page does not decide it itself.
-  assert.ok(/progressLine\(card\.produced, card\.orderStatus, totalPiecesOf\(card\)\)/.test(src));
+  assert.ok(/progressLine\(card\.produced, totalPiecesOf\(card\)\)/.test(src));
   // …nor which total the bar is measured against (review, 2026-10-07): the
   // WORK ORDER's quantity, the typed pieces only where the two agree within
   // rounding. The page used to prefer what was typed, so an order approved for
@@ -622,11 +622,32 @@ test("the order card states the count, a capped bar, and nothing about how it wa
   }
   assert.ok(src.includes("style={{ width: `${pct}%` }}"));
   assert.ok(/overflow-hidden/.test(src.slice(src.indexOf('role="progressbar"'), src.indexOf("style={{ width"))));
-  // RTL: the fill starts at the START edge by inheritance — no physical side.
+  // MOVED DELIBERATELY on 2026-10-07 (owner: "show the loading bar like the one
+  // in jobs tab"). The card's bar IS the jobs tab's bar: the same three class
+  // strings, in both files, and the same forced left-to-right drawing — so a
+  // restyle of one cannot leave the other behind. It used to be a thinner bar
+  // with a percentage, filling from the start edge.
   const bar = src.slice(src.indexOf("function ProducedLine"), src.indexOf("export default function PortalHome"));
-  assert.equal(/\b(?:left|right|ml|mr|pl|pr)-|float|flex-row-reverse|translate/.test(bar), false, "no direction-specific class on the bar");
+  const jobsTab = code("app/dashboard/jobs/page.tsx");
+  for (const cls of [
+    'className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"',
+    'className="h-full bg-blue-500 rounded-full"',
+    'className="text-xs text-gray-500 whitespace-nowrap tabular-nums"',
+  ]) {
+    assert.ok(bar.includes(cls), `the card's bar lost ${cls}`);
+    assert.ok(jobsTab.includes(cls), `the jobs tab no longer draws ${cls} — move both together`);
+  }
+  assert.equal(bar.split('dir="ltr"').length - 1, 2, "track and count are drawn left-to-right, as on the jobs tab");
+  assert.equal(/\b(?:left|right|ml|mr|pl|pr)-|float|flex-row-reverse|translate/.test(bar), false, "no physical-side class on the bar");
+  // The count sits beside the bar («13,539 / 50,000 قطعة»), not a percentage.
+  assert.ok(bar.includes("{label}") && !/fmtPct/.test(src), "the bar carries the count, as the jobs tab's does");
+  // An order nothing was made for still gets its (empty) bar; a count with no
+  // ordered piece total is a sentence, because there is nothing to fill against.
+  assert.ok(src.includes('progress.kind === "count" && (progress.total !== null || progress.made === 0)'));
+  assert.ok(src.includes('progress.kind === "count" && progress.total === null && progress.made > 0'));
+  assert.ok(src.includes("pct={progress.pct ?? 0}"));
   // Numbers through lib/format.ts — Latin digits in both languages.
-  assert.ok(/fmtNum\(progress\.made, isAr\)/.test(src) && /fmtPct\(progress\.pct \/ 100, isAr\)/.test(src));
+  assert.ok(/fmtNum\(progress\.made, isAr\)/.test(src) && /fmtNum\(progress\.total, isAr\)/.test(src));
   // Never on a customer's card: scrap, the machine, the operator, a rate, an ETA.
   for (const never of [/scrap/i, /machine/i, /operator/i, /downtime/i, /perDay|\brate\b/i, /\beta\b/i, /remaining/i]) {
     assert.equal(never.test(src), false, `the customer screen mentions ${never}`);
