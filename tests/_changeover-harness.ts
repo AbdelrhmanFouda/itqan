@@ -1,6 +1,7 @@
 /**
- * Loads the REAL lib/changeover-data.ts in Node's test runner, with the three
- * modules that touch the network — lib/sheets, lib/jobs, lib/db — replaced by
+ * Loads the REAL lib/changeover-data.ts in Node's test runner, with the four
+ * modules that touch the network — lib/sheets, lib/jobs, lib/db and (since
+ * 2026-10-07, when the plan began to read the store) lib/storage — replaced by
  * the in-memory stand-ins exported from THIS file. Everything else it imports
  * (lib/changeover, lib/work-orders, lib/master-lookup, lib/dates, …) is the
  * real, import-free module, reached through the app's own `@/` alias, which
@@ -21,7 +22,9 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SELF = pathToFileURL(path.join(import.meta.dirname, "_changeover-harness.ts")).href;
-const STUBBED = new Set(["@/lib/sheets", "@/lib/jobs", "@/lib/db"]);
+// lib/storage pulls in next/server and @vercel/functions (its copies), which
+// Node's test runner cannot load — and it would call the storage bridge.
+const STUBBED = new Set(["@/lib/sheets", "@/lib/jobs", "@/lib/db", "@/lib/storage"]);
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -43,6 +46,12 @@ export type Fixture = {
   jobs: Row[];
   /** The stoppages running now (Firestore). */
   stops: Row[];
+  /** «مخزن اتقان» as lib/storage getStorageData() shapes it: the lines of
+   *  «الرصيد الحالي» and the sheet's own list of material names. null = the
+   *  storage bridge did not answer (`ok: false`, nothing in it). */
+  store: { balance: Row[]; materials?: string[] } | null;
+  /** The store read goes wrong: it THROWS, or it never answers at all. */
+  storeFault: "" | "throws" | "hangs";
   appends: { entity: string; values: Record<string, string> }[];
   updates: { entity: string; row: number; changes: Record<string, string> }[];
   /** Entities whose read FAILS (an empty tab with no fields). */
@@ -58,8 +67,8 @@ const F = (): Fixture => G.__changeover!;
 
 export function fresh(): Fixture {
   G.__changeover = {
-    tabs: { machines: [], master: [], production: [], jobs: [], changeoverAnswers: [], changeoverLog: [] },
-    jobs: [], stops: [], appends: [], updates: [],
+    tabs: { machines: [], master: [], production: [], jobs: [], downtime: [], changeoverAnswers: [], changeoverLog: [] },
+    jobs: [], stops: [], store: null, storeFault: "", appends: [], updates: [],
     failRead: new Set(), headerOnly: new Set(), lazyMissing: new Set(),
   };
   return G.__changeover;
@@ -79,6 +88,14 @@ export const reg = (labels: readonly string[]): Row[] => labels.map((l, i) => {
 /** One «الإنتاج» row. */
 export const shift = (date: string, machine: string, product: string, o: Row = {}): Row =>
   ({ date, shift: "الصباحية", machine, product, material: "", client: "", goodUnits: "", ...o });
+
+/** One «التوقفات» row — a finished stoppage; «تغيير الاسطمبة» unless told otherwise. */
+export const stoppage = (date: string, machine: string, minutes: number | string, o: Row = {}): Row =>
+  ({ date, machine, reason: "تغيير الاسطمبة", minutes: String(minutes), start: "", end: "", estimated: "لا", ...o });
+
+/** One line of the store's «الرصيد الحالي» — a material in kg unless told otherwise. */
+export const stockLine = (item: string, client: string, avail: number | string, o: Row = {}): Row =>
+  ({ itemType: "خامة", item, client, loc: "A12", unit: "كجم", avail: String(avail), ...o });
 
 /** One already-shaped work order (lib/jobs.ts JobShaped). */
 export const job = (o: Row): Row => ({
@@ -127,3 +144,25 @@ export async function loadJobs() {
 /* --------------------------- stand-in for lib/db.ts ------------------------- */
 
 export async function getOpenDowntimeEvents() { return F().stops; }
+
+/* ------------------------- stand-in for lib/storage.ts ---------------------- */
+
+/** What the real one answers when the bridge is silent and no copy is kept. */
+const NO_STORE = {
+  configured: true, ok: false, balance: [] as Record<string, string>[], inLog: [], outLog: [],
+  lists: { products: [] as string[], materials: [] as string[], clients: [] as string[], locations: [] as string[], weights: {} },
+  catalog: [], supportsCatalog: false, supportsForClient: false, readAt: 0, stale: false,
+};
+
+export async function getStorageData() {
+  const f = F();
+  if (f.storeFault === "throws") throw new Error("storage_down");
+  // Never settles — what a hung bridge looks like to the caller's own bound.
+  if (f.storeFault === "hangs") return new Promise<typeof NO_STORE>(() => {});
+  if (!f.store) return NO_STORE;
+  return {
+    ...NO_STORE, ok: true, readAt: Date.now(),
+    balance: f.store.balance.map((b) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, String(v ?? "")]))),
+    lists: { ...NO_STORE.lists, materials: f.store.materials ?? [] },
+  };
+}

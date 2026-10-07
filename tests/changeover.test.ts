@@ -19,23 +19,30 @@ import {
   looseNameKey, machineKey, machineState, mapRows, materialFamily, mergeAnswers, missingFromSheet, missingToSheet,
   newestHolders, parseLayout, parseYesNo, placeTile, rankFor, removeTile, resolveNow, safeText, splitMinutes,
   stampClockMinutes, stampDay, standingFromLog, standingWithStart, validLayout, barrelOf, logSinceTold, NO_ORDER,
+  calendarHours, orderUrgency, stockState, stoppageKind, workingDaysUntil, SHIFT_HOURS, SOON_HOURS,
   type LastRun, type MapTile, type PlanMachine, type PlanOrder, type PlanStanding,
 } from "../lib/changeover.ts";
+// Only to pin the keys lib/changeover.ts COPIES (it must stay import-free).
+import { DOWNTIME_CAPTURE_REASONS } from "../lib/prod-meta.ts";
+// Only for the last test: the page's own source and strings.
+import { readFileSync } from "node:fs";
+import { co } from "../lib/i18n.changeover.ts";
 
 const machine = (o: Partial<PlanMachine> & { now?: Partial<PlanMachine["now"]> } = {}): PlanMachine => ({
   label: "PQ 5 — 100", tonnage: "100", state: "idle", stoppage: null, transparentOnly: false, bigMachine: false,
+  swapMin: null, swapSamples: 0,
   ...o,
   now: {
     products: ["غطاء"], colours: ["white"], colourNow: "", coloursGuessed: false, material: "بروبلين بيور", order: "",
     keyClient: false, orderMaybe: "", noOrder: false, alsoOn: "", mixedShift: false,
-    source: "production", since: "2026-10-01", shift: "الصباحية", ...(o.now ?? {}),
+    source: "production", since: "2026-10-01", shift: "الصباحية", startedOn: "", ...(o.now ?? {}),
   },
 });
 const order = (o: Partial<PlanOrder> & { code: string }): PlanOrder => ({
   id: o.code, product: `منتج ${o.code}`, client: "عميل", material: "بروبلين", dueDate: "2026-10-20", status: "Not Started",
-  qtyKg: 100, remaining: 50_000, runHours: 40, colours: ["white"], colourSource: "answer",
+  qtyKg: 100, remaining: 50_000, runHours: 40, runBasis: "", asOf: "", ranOn: [], colours: ["white"], colourSource: "answer",
   fits: ["PQ 5 — 100", "PQ 7 — 100"], fitsHint: [], fitsHintText: "", workers: null, oilCores: null, hotRunner: null,
-  missing: [], keyClient: false, mountedOn: "", mountedRunning: false, queuedBehind: "",
+  missing: [], keyClient: false, mountedOn: "", mountedRunning: false, queuedBehind: "", storeMaterial: "", stock: null,
   ...o,
 });
 const ctx = { today: "2026-09-30", transparentMachines: [] as string[] };
@@ -692,7 +699,9 @@ test("the owner's order (2026-10-07): an URGENT key client, then late, then date
     // A key client with weeks to go is an ordinary order now…
     order({ code: "key", keyClient: true, colours: ["transparent"], dueDate: "2026-11-30" }),
     // …and one due within three days goes first, whatever its colour costs.
-    order({ code: "key-urgent", keyClient: true, colours: ["transparent"], dueDate: "2026-10-02" }),
+    // (Ten hours of running left: it fits before its date, so it is urgent for
+    // its DATE — an order that cannot fit is the next tests' subject.)
+    order({ code: "key-urgent", keyClient: true, colours: ["transparent"], dueDate: "2026-10-02", runHours: 10 }),
   ];
   assert.deepEqual(codes(m, os), ["key-urgent", "late", "less-left", "due-sooner", "due-later", "hard-colour", "key", "no-date"]);
   // The chips say why: due soon, late, no date.
@@ -714,12 +723,85 @@ test("a key client's hard colour goes before an ordinary client's same colour �
 test("orders by their dates alone, for the orders tab: the same order, and the same chips", () => {
   const os = [
     order({ code: "c", dueDate: "" }), order({ code: "b", dueDate: "2026-10-20" }),
-    order({ code: "a", dueDate: "2026-09-25" }), order({ code: "k", keyClient: true, dueDate: "2026-09-30" }),
+    order({ code: "a", dueDate: "2026-09-25" }),
+    // Due today, and nobody knows how long it still has to run.
+    order({ code: "k", keyClient: true, dueDate: "2026-09-30", runHours: null }),
   ];
   assert.deepEqual(sortByUrgency(os, ctx.today).map((o) => o.code), ["k", "a", "b", "c"]);
   assert.deepEqual(urgencyChips(os[3], ctx.today).map((c) => c.key), ["keyClient", "dueToday"]);
   assert.deepEqual(urgencyChips(os[2], ctx.today), [{ key: "late", tone: "warn", vars: { n: 5 } }]);
   assert.deepEqual(urgencyChips(os[1], ctx.today), []);
+  // Due today with forty hours still to run: "due today" would be the kind
+  // way to say it — the chip says it will not make it.
+  assert.deepEqual(urgencyChips({ ...os[3], runHours: 40 }, ctx.today),
+    [{ key: "keyClient", tone: "good" }, { key: "atRisk", tone: "warn", vars: { need: 2, have: 0 } }]);
+});
+
+test("days to a due date are WORKING days — Friday is not counted; lateness stays the customer's calendar", () => {
+  // Wednesday 30 Sep 2026; Friday 2 Oct is the day off.
+  const u = (dueDate: string, o: Partial<PlanOrder> = {}) => orderUrgency(order({ code: "x", dueDate, runHours: null, ...o }), ctx.today);
+  assert.equal(u("2026-10-03").dueIn, 2, "Thursday and Saturday");
+  assert.equal(u("2026-10-02").dueIn, 1, "due ON the Friday: only Thursday runs before it");
+  // A key client is urgent within KEY_URGENT_DAYS *working* days: Sunday is
+  // three of them away, four on the calendar.
+  assert.equal(u("2026-10-04", { keyClient: true }).urgentKey, true);
+  assert.equal(u("2026-10-05", { keyClient: true }).urgentKey, false);
+  assert.equal(u("2026-10-04").urgentKey, false, "an ordinary client is never 'urgent key'");
+  assert.deepEqual(u("2026-09-25"), { dueIn: -5, late: 5, atRisk: false, urgentKey: false });
+  assert.deepEqual(u(""), { dueIn: null, late: 0, atRisk: false, urgentKey: false });
+  assert.deepEqual(u("غدا"), { dueIn: null, late: 0, atRisk: false, urgentKey: false }, "a date nobody can read is no date");
+
+  // The chip WORDS the date the way a calendar reads: the Friday is two days
+  // off, Sunday four — "tomorrow" must never mean the day after tomorrow.
+  const chip = (dueDate: string, today = ctx.today) => urgencyChips(order({ code: "x", dueDate, runHours: null }), today);
+  assert.deepEqual(chip("2026-10-02"), [{ key: "dueTwoDays", tone: "warn", vars: { n: 2 } }]);
+  assert.deepEqual(chip("2026-10-04"), [{ key: "dueSoon", tone: "warn", vars: { n: 4 } }]);
+  assert.deepEqual(chip("2026-10-05"), [], "four working days away: no chip yet");
+  assert.deepEqual(chip("2026-10-02", "2026-10-01").map((c) => c.key), ["dueTomorrow"], "seen on Thursday, the Friday is tomorrow — not today");
+
+  // Thursday and Friday are both one working day away; the earlier date is still first.
+  const thu = order({ code: "b", dueDate: "2026-10-01" }), fri = order({ code: "a", dueDate: "2026-10-02" });
+  assert.deepEqual(sortByUrgency([fri, thu], ctx.today).map((o) => o.code), ["b", "a"]);
+});
+
+test("a key client's order due in 5 working days that needs 8 days of running is URGENT — it will be late", () => {
+  // Wed 30 Sep → Tue 6 Oct: Thu, Sat, Sun, Mon, Tue. Five days is past
+  // KEY_URGENT_DAYS, so by its date alone this is an ordinary order.
+  const key = order({ code: "Job 512", product: "وش سمارت مباشر", keyClient: true, dueDate: "2026-10-06", runHours: 8 * 24 });
+  assert.deepEqual(orderUrgency(key, ctx.today), { dueIn: 5, late: 0, atRisk: true, urgentKey: true });
+  assert.deepEqual(orderUrgency({ ...key, runHours: 4 * 24 }, ctx.today), { dueIn: 5, late: 0, atRisk: false, urgentKey: false });
+  assert.equal(orderUrgency({ ...key, runHours: 5 * 24 }, ctx.today).atRisk, false, "exactly the time there is, is enough");
+  // The chip says what it needs against what there is — instead of a "due in" chip.
+  assert.deepEqual(urgencyChips(key, ctx.today), [{ key: "keyClient", tone: "good" }, { key: "atRisk", tone: "warn", vars: { need: 8, have: 5 } }]);
+  assert.deepEqual(urgencyChips({ ...key, runHours: 140 }, ctx.today)[1].vars, { need: 6, have: 5 }, "a part of a day is a day");
+  // What is left of TODAY runs too (half a day, on average): an order due today
+  // with three hours to go is not "going to be late".
+  assert.equal(orderUrgency({ ...key, dueDate: ctx.today, runHours: 3 }, ctx.today).atRisk, false);
+  assert.equal(orderUrgency({ ...key, dueDate: ctx.today, runHours: 20 }, ctx.today).atRisk, true);
+  // It goes ahead of an ordinary client's order that is already late.
+  const late = order({ code: "Job 498", product: "غطاء احمر بروبلين 58", dueDate: "2026-09-20" });
+  assert.deepEqual(codes(machine(), [late, key]), ["Job 512", "Job 498"]);
+  assert.deepEqual(sortByUrgency([late, key], ctx.today).map((o) => o.code), ["Job 512", "Job 498"]);
+});
+
+test("an order that WILL be late is ranked with the late ones — ahead of every order that still has time", () => {
+  const m = machine();
+  const os = [
+    // Easy, nearly finished and due SOONER: it used to go first on all three.
+    order({ code: "has-time", dueDate: "2026-10-05", remaining: 100, runHours: 2 }),
+    // Six days away, nine days of running left: not late YET.
+    order({ code: "will-be-late", product: "روزته سودة العداد الثلاثي", dueDate: "2026-10-07", runHours: 200, colours: ["transparent"] }),
+    order({ code: "late", product: "كفر شفاف فوكس", dueDate: "2026-09-28", colours: ["transparent"] }),
+  ];
+  const r = rankFor(m, os, ctx).ranked;
+  assert.deepEqual(r.map((s) => s.order.code), ["late", "will-be-late", "has-time"]);
+  const risk = r[1];
+  assert.deepEqual([risk.atRisk, risk.late, risk.dueIn, risk.urgentKey], [true, 0, 6, false]);
+  assert.deepEqual(risk.chips.find((c) => c.key === "atRisk"), { key: "atRisk", tone: "warn", vars: { need: 9, have: 6 } });
+  assert.equal(risk.chips.some((c) => /^due/.test(c.key) || c.key === "late"), false);
+  assert.equal(r[2].atRisk, false);
+  // The same order on the «الأوامر» tab, where there is no machine.
+  assert.deepEqual(sortByUrgency(os, ctx.today).map((o) => o.code), ["late", "will-be-late", "has-time"]);
 });
 
 test("a confirm survives new shift rows for as long as the log has not changed mould", () => {
@@ -940,7 +1022,7 @@ test("transparent is free to go anywhere until a machine is kept for it, and tha
   assert.deepEqual(rankFor(machine(), [mixed], c).blocked, []);
 });
 
-test("taking a RUNNING mould off: for an urgent key client or a late order — never when the job ends within a shift, or is late or a key client's itself", () => {
+test("taking a RUNNING mould off: for an urgent key client, a late order or one that will be late — never when the job ends within a shift, or is late, will be late or a key client's itself", () => {
   const P = "PQ 5 — 100";
   const running = (o: Partial<PlanOrder> = {}) => order({ code: "run", mountedOn: P, mountedRunning: true, runHours: 60, ...o });
   const interrupts = (m: PlanMachine, o: PlanOrder, on: PlanOrder | null = running()) =>
@@ -955,9 +1037,19 @@ test("taking a RUNNING mould off: for an urgent key client or a late order — n
   const late = order({ code: "late", dueDate: "2026-09-20" });
   // The running job ends within a shift: let it finish.
   assert.equal(interrupts(busy, late, running({ runHours: 5 })), false);
+  assert.equal(SHIFT_HOURS, 12);
   // The running job is late itself, or a key client's.
   assert.equal(interrupts(busy, late, running({ dueDate: "2026-09-25" })), false);
   assert.equal(interrupts(machine({ state: "running", now: { order: "run", keyClient: true } }), late), false);
+  // At risk counts as late, on both sides (approved 2026-10-07): an order that
+  // WILL be late is worth the running mould…
+  const risk = order({ code: "risk", dueDate: "2026-10-07", runHours: 200 });
+  assert.equal(interrupts(busy, risk), true);
+  assert.ok(rankFor(busy, [running(), risk], ctx).ranked[0].chips.some((c) => c.key === "worthInterrupt"));
+  // …and a running job that will itself be late (two working days to its
+  // date, sixty hours to run) is not taken off for anybody.
+  assert.equal(interrupts(busy, late, running({ dueDate: "2026-10-01" })), false);
+  assert.equal(interrupts(busy, risk, running({ dueDate: "2026-10-01" })), false);
   // Nobody knows how long the running job has left: the limit cannot be applied.
   assert.equal(interrupts(busy, late, running({ runHours: null })), true);
   // It is probably the very job that is running here; a machine that is not running has nothing to interrupt.
@@ -1034,6 +1126,113 @@ test("a machine recorded «لا يوجد أمر شغل» has FINISHED: its order
   assert.deepEqual([other.ranked.map((x) => x.order.code), other.blocked.length], [["Job 2"], 0], "said once, on its own machine");
 });
 
+test("the floor's «لا يوجد أمر شغل» against a count that says days are left: the order is NOT blocked — it stays a candidate", () => {
+  // Approved 2026-10-07: the floor's word is checked against the count. When
+  // more than a shift is still left the two disagree (`doneUnsure`), and the
+  // page asks the engineer which is right; the rules block nothing meanwhile.
+  const P = "PQ 5 — 100";
+  const done = machine({ state: "stopped", stoppage: { reason: NO_ORDER_STOPPAGE, since: 0 }, now: { products: ["وش سمارت مباشر"], order: "Job 1" } });
+  const unsure = order({ code: "Job 1", product: "وش سمارت مباشر", mountedOn: P, doneUnsure: true, runHours: 60, colours: ["black"] });
+  const r = rankFor(done, [order({ code: "Job 2" }), unsure], ctx);
+  assert.deepEqual(r.blocked, []);
+  assert.deepEqual(r.ranked.map((x) => x.order.code), ["Job 1", "Job 2"], "its mould is already up: the cheapest thing to start");
+  // …and the day's plan offers it on its own machine, like any standing mould.
+  const [e] = planDay([done], [order({ code: "Job 2" }), unsure], ctx).entries;
+  assert.deepEqual([e.need, e.pick?.order.code, e.pick?.mountedHere], ["finished", "Job 1", true]);
+});
+
+test("where a mould goes is learned from where it has RUN — until the supervisor answers", () => {
+  const P = "PQ 9 — 140";
+  const m = machine({ label: P, tonnage: "140" });
+  const r = rankFor(m, [
+    order({ code: "nobody-said", fits: null }),
+    // The shift log shows it on this machine (and, more often, on PQ 3).
+    order({ code: "ran-here", product: "غطاء امير احمر", fits: null, ranOn: ["PQ 3 — 280", "PQ 9 - 140"], colours: ["transparent"] }),
+    order({ code: "said-here", fits: [P, "PQ 3 — 280"], colours: ["transparent"] }),
+    order({ code: "ran-elsewhere", fits: null, ranOn: ["PQ 3 — 280"], remaining: 10 }),
+    // The supervisor's word beats the log: it ran here once, he says it goes on PQ 3.
+    order({ code: "said-not-here", fits: ["PQ 3 — 280"], ranOn: [P] }),
+  ], ctx);
+  // Said → ran → nobody knows; within "nobody knows" the owner's order goes on.
+  assert.deepEqual(r.ranked.map((s) => [s.order.code, s.fit]), [
+    ["said-here", "here"], ["ran-here", "ran"], ["ran-elsewhere", "unknown"], ["nobody-said", "unknown"],
+  ]);
+  assert.deepEqual(r.blocked.map((b) => [b.order.code, b.reason]), [["said-not-here", "notFit"]]);
+  const chip = (code: string) => r.ranked.find((s) => s.order.code === code)!.chips.find((c) => c.key === "ranHere");
+  assert.deepEqual(chip("ran-here"), { key: "ranHere", tone: "good" });
+  assert.equal(chip("said-here"), undefined);
+  assert.equal(chip("ran-elsewhere"), undefined);
+  // It is still a question for him: the hint on the questions button stays.
+  assert.equal(r.ranked[1].needsAnswers, true);
+  // A mould STANDING here is "here" — where it stands says more than where it ran.
+  const [standing] = rankFor(m, [order({ code: "up", fits: null, ranOn: [P], mountedOn: P })], ctx).ranked;
+  assert.deepEqual([standing.fit, standing.chips.some((c) => c.key === "ranHere")], ["here", false]);
+});
+
+test("a machine's measured change time replaces the fixed minutes — the factory's own history", () => {
+  const from = { product: "غطاء", colour: "white", material: "بروبلين" };
+  const to = { product: "قاعدة", colour: "white", material: "بروبلين" };
+  const swap = (o: Parameters<typeof estimateChange>[2]) => { const e = estimateChange(from, to, o); return [e.swapMin, e.swapMeasured, e.totalMin]; };
+  // Not measured (too few changes logged, or «التوقفات» unread): the fixed numbers.
+  assert.deepEqual(swap({}), [45, false, 45]);
+  assert.deepEqual(swap({ swapMin: null }), [45, false, 45]);
+  assert.deepEqual(swap({ bigMachine: true, swapMin: null }), [360, false, 360]);
+  // Measured: that machine's own median, ordinary and big machine alike.
+  assert.deepEqual(swap({ swapMin: 70 }), [70, true, 70]);
+  assert.deepEqual(swap({ bigMachine: true, swapMin: 240 }), [240, true, 240]);
+  // Oil cores are the MOULD's cost («ساعتين ثلاثة»): a machine that is quick
+  // with ordinary moulds does not make such a mould quick.
+  assert.deepEqual(swap({ oilCores: true, swapMin: 70 }), [150, false, 150]);
+  assert.deepEqual(swap({ oilCores: true, swapMin: 200 }), [200, true, 200]);
+  // The same mould carrying on is no change of mould, measured or not.
+  const same = estimateChange(from, { ...from, colour: "black" }, { swapMin: 70 });
+  assert.deepEqual([same.swapMin, same.swapMeasured], [0, false]);
+  // A number that is not a time is not a measurement.
+  assert.deepEqual(swap({ swapMin: 0 }), [45, false, 45]);
+  assert.deepEqual(swap({ swapMin: Number.NaN }), [45, false, 45]);
+
+  // rankFor hands the estimate the machine's own number.
+  const [measured] = rankFor(machine({ swapMin: 70, swapSamples: 5 }), [order({ code: "x" })], ctx).ranked;
+  assert.deepEqual([measured.estimate.swapMin, measured.estimate.swapMeasured], [70, true]);
+  const [fixed] = rankFor(machine(), [order({ code: "x" })], ctx).ranked;
+  assert.deepEqual([fixed.estimate.swapMin, fixed.estimate.swapMeasured], [CHANGEOVER_NUMBERS.swapMin, false]);
+});
+
+test("a mould that went on TODAY is not taken off again — whatever is waiting", () => {
+  const P = "PQ 5 — 100";
+  const job = order({ code: "run", product: "كفر شفاف فوكس", mountedOn: P, mountedRunning: true, runHours: 60 });
+  const late = order({ code: "late", product: "عدسة شفافة فوكس", dueDate: "2026-09-20" });
+  const on = (startedOn: string) => machine({ state: "running", now: { products: ["كفر شفاف فوكس"], order: "run", startedOn } });
+  const interrupt = (m: PlanMachine) => rankFor(m, [job, late], ctx).ranked[0].interrupt;
+  assert.equal(interrupt(on(ctx.today)), false, "mounted this morning");
+  assert.equal(interrupt(on("2026-09-29")), true, "yesterday's mould may come off for a late order");
+  assert.equal(interrupt(on("")), true, "nobody knows when it went on: the rule cannot be applied");
+  assert.equal(interrupt(on("2026-10-01")), false, "a start dated after today is not before today");
+  // On the day's plan the machine just runs, and the late order is SAID to have
+  // no machine — it is not quietly dropped.
+  const day = planDay([on(ctx.today)], [job, late], ctx);
+  assert.deepEqual(day.entries.map((e) => [e.need, e.pick]), [["running", null]]);
+  assert.deepEqual(day.unplaced.map((u) => [u.order.code, u.why]), [["late", "noMachine"]]);
+  const yesterday = planDay([on("2026-09-29")], [job, late], ctx);
+  assert.deepEqual([yesterday.entries[0].need, yesterday.entries[0].pick?.order.code, yesterday.unplaced], ["interrupt", "late", []]);
+});
+
+test("the store is short of an order's material: the card says so — a warning in the ranking, never a block", () => {
+  const st = (code: string, haveKg: number, needKg: number | null) =>
+    order({ code, stock: { material: "بروبلين هومو", haveKg, needKg, guessed: false } });
+  const m = machine();
+  const stockChips = (o: PlanOrder) => rankFor(m, [o], ctx).ranked[0].chips.filter((c) => c.key.startsWith("stock"));
+  assert.deepEqual(stockChips(st("x", 0, 120)), [{ key: "stockNone", tone: "bad", vars: { material: "بروبلين هومو" } }]);
+  assert.deepEqual(stockChips(st("x", 80.4, 119.6)), [{ key: "stockLow", tone: "warn", vars: { have: 80, need: 120 } }]);
+  assert.deepEqual(stockChips(st("x", 500, 120)), []);
+  assert.deepEqual(stockChips(st("x", 500, null)), [], "some is there and nothing says it is short");
+  assert.deepEqual(stockChips(order({ code: "x" })), [], "not known is not 'none': nothing is said");
+  // Stock is not a tier: the owner's order is untouched by it.
+  const r = rankFor(m, [st("b-none", 0, 120), st("a-plenty", 500, 120), st("c-low", 80, 120)], ctx);
+  assert.deepEqual(r.ranked.map((s) => [s.order.code, s.stock]), [["a-plenty", "ok"], ["b-none", "none"], ["c-low", "low"]]);
+  assert.deepEqual(r.blocked, []);
+});
+
 test("the day's plan: who needs a mould first, one order to one machine, and when to start drying", () => {
   const A = "PQ 1 — 100", B = "PQ 2 — 100", C = "PQ 3 — 100", D2 = "PQ 4 — 100", E = "PQ 5 — 100";
   const all = [A, B, C, D2, E];
@@ -1052,17 +1251,20 @@ test("the day's plan: who needs a mould first, one order to one machine, and whe
     order({ code: "w-abs", material: "ABS اسود", dueDate: "2026-10-10", fits: all }),
     order({ code: "w-plain", dueDate: "2026-10-15", fits: all }),
   ];
-  const day = planDay(ms, os, ctx);
+  const plan = planDay(ms, os, ctx);
+  const day = plan.entries;
   // Finished first, then standing, then stopped, then the one that ends soon.
   // The long job would be worth interrupting for the late order — but that
   // order already went to a machine with nothing on it, so it just runs.
   assert.deepEqual(day.map((e) => [e.machine.label, e.need]), [[A, "finished"], [B, "free"], [E, "stopped"], [C, "soon"], [D2, "running"]]);
-  const urgent = planDay([ms[0]], [os[2], os[3]], ctx);
+  const urgent = planDay([ms[0]], [os[2], os[3]], ctx).entries;
   assert.deepEqual([urgent[0].need, urgent[0].pick?.order.code], ["interrupt", "w-late"], "with no free machine, the late order is worth the running mould");
   // The late order goes to the machine that needs one most — and to no other;
   // the next machine takes the easy change (same material) before the hard one.
   assert.deepEqual(day.map((e) => e.pick?.order.code ?? null), ["w-late", "w-plain", "w-abs", null, null]);
-  assert.equal(day[3].hoursLeft, 5);
+  assert.deepEqual(plan.unplaced, [], "every urgent order found a machine");
+  assert.deepEqual([day[3].hoursLeft, day[3].finishIn], [5, 5]);
+  assert.deepEqual([day[0].hoursLeft, day[0].finishIn], [null, null], "a machine that is not running has no end to wait for");
   assert.equal(day[0].current?.code, "done-a");
   // ABS dries three hours: on a machine waiting now, before it can run at all.
   assert.equal(day[2].dryIn, 0);
@@ -1070,8 +1272,318 @@ test("the day's plan: who needs a mould first, one order to one machine, and whe
 
   // With nothing urgent, the long job just runs — and the one ending in five
   // hours is told what comes next and when its material has to go in the dryer.
-  const calm = planDay(ms.slice(0, 2), [os[1], os[2], os[4]], ctx);
+  const calm = planDay(ms.slice(0, 2), [os[1], os[2], os[4]], ctx).entries;
   assert.deepEqual(calm.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null, e.dryIn]), [[C, "soon", "w-abs", 2], [D2, "running", null, null]]);
+});
+
+test("a machine down for machine maintenance never takes an order — the late one goes to a machine that can run it", () => {
+  // Before 2026-10-07 the plan went machine by machine and «توقف» was one
+  // state: a press down for repair was handed the late order.
+  const A = "PQ 1 — 100", B = "PQ 2 — 100";
+  const down = (reason: string) => machine({ label: A, state: "stopped", stoppage: { reason, since: 0 }, now: { products: ["كرسي"] } });
+  const free = machine({ label: B });
+  const late = order({ code: "late", product: "غطاء احمر بروبلين 58", dueDate: "2026-09-20", fits: null });
+  const next = order({ code: "next", fits: null });
+
+  // Alone, the broken machine is given nothing — and the late order is SAID to have no machine.
+  const alone = planDay([down("Maintenance")], [late, next], ctx);
+  assert.deepEqual(alone.entries.map((e) => [e.need, e.pick]), [["down", null]]);
+  assert.deepEqual(alone.unplaced.map((u) => [u.order.code, u.why]), [["late", "noMachine"]]);
+  // With a machine that can run beside it, the late order goes there.
+  const both = planDay([down("Maintenance"), free], [late, next], ctx);
+  assert.deepEqual(both.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]), [[B, "free", "late"], [A, "down", null]]);
+  assert.deepEqual(both.unplaced, []);
+
+  // Every reason the downtime page can record, by what it says about the MACHINE.
+  const needOf = (reason: string) => { const [e] = planDay([down(reason)], [late, next], ctx).entries; return [e.need, e.pick?.order.code ?? null]; };
+  for (const reason of ["Maintenance", "Mold change", "Material drying", "No operator", "Setup", "Nozzle burn", "Sprue broken", "Other", "سبب جديد"]) {
+    assert.deepEqual(needOf(reason), ["down", null], reason);
+  }
+  // Its mould is out, or its job's material is: the machine itself can take another.
+  for (const reason of ["Mold maintenance", "No material"]) assert.deepEqual(needOf(reason), ["stopped", "late"], reason);
+  assert.deepEqual(needOf(NO_ORDER_STOPPAGE), ["finished", "late"]);
+});
+
+/* Where the mould STANDS (review of 2026-10-07). Every fixture above puts a
+ * stopped machine on the plan with NO order on it; on the floor a stoppage is
+ * tapped on a machine that has one. The three tests below tie the order to it. */
+
+test("an order whose mould is ON a machine that is down stays with it — no other machine is planned, or interrupted, for it", () => {
+  // The normal flow: «ركّب دي», then the floor taps «تغيير الاسطمبة» on that
+  // machine. The plan took a RUNNING mould off another machine for the order
+  // that was being mounted — and with a free machine beside it, sent it there.
+  const A = "PQ 1 — 100", B = "PQ 2 — 100", C = "PQ 3 — 100", F = "PQ 4 — 100";
+  const down = (reason: string | null) => machine({
+    label: B, state: "stopped", stoppage: reason === null ? null : { reason, since: 0 }, now: { products: ["كفر"], order: "Job 10" },
+  });
+  const busy = (label: string, code: string) => machine({ label, state: "running", now: { order: code } });
+  const late = order({ code: "Job 10", product: "كفر", dueDate: "2026-09-20", mountedOn: B, fits: null });
+  const os = [
+    late, order({ code: "next", fits: null }),
+    order({ code: "run-a", mountedOn: A, mountedRunning: true, runHours: 200 }),
+    order({ code: "run-c", mountedOn: C, mountedRunning: true, runHours: 200 }),
+  ];
+  const seen = (ms: PlanMachine[], orders: PlanOrder[] = os) => {
+    const p = planDay(ms, orders, ctx);
+    return [p.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]), p.unplaced.map((u) => [u.order.code, u.why])];
+  };
+  // Every reason but a repair of the machine itself — a key nobody knows, and
+  // a machine called stopped with no reason on record, included.
+  for (const reason of ["Mold change", "Setup", "Material drying", "No operator", "Nozzle burn", "Sprue broken", "Other", "سبب جديد", null]) {
+    assert.deepEqual(seen([busy(A, "run-a"), down(reason), busy(C, "run-c")]),
+      [[[B, "down", null], [A, "running", null], [C, "running", null]], [["Job 10", "noMachine"]]], `${reason}`);
+    // A free machine beside it takes what is WAITING — not the mould that is on PQ 2.
+    assert.deepEqual(seen([down(reason), machine({ label: F })]),
+      [[[F, "free", "next"], [B, "down", null]], [["Job 10", "noMachine"]]], `${reason}`);
+  }
+  // Not urgent: it is simply not offered anywhere — and is not "unplaced".
+  const calm = [{ ...late, dueDate: "2026-10-20" }, os[1]];
+  assert.deepEqual(seen([down("Mold change"), machine({ label: F })], calm), [[[F, "free", "next"], [B, "down", null]], []]);
+  assert.deepEqual(seen([down("Mold change"), machine({ label: F })], [calm[0]]), [[[F, "free", null], [B, "down", null]], []]);
+  // Another order of the SAME product is on that mould too: it waits with it.
+  const twin = order({ code: "Job 11", product: "كفر", mountedOn: B, fits: null });
+  assert.deepEqual(seen([down("Setup"), machine({ label: F })], [calm[0], twin]), [[[F, "free", null], [B, "down", null]], []]);
+  // «صيانة في الماكينة» is the machine itself under repair: there the plan is
+  // left as it was — the late order goes to a machine that can run it.
+  assert.deepEqual(seen([down("Maintenance"), machine({ label: F })]), [[[F, "free", "Job 10"], [B, "down", null]], []]);
+});
+
+test("a machine stopped for its MOULD or its MATERIAL takes ANOTHER mould — never the job that stoppage is about", () => {
+  // «صيانة الاسطمبة» / «عدم وجود خامة» with the order still tied to the
+  // machine: its own job topped its own list (the mould is "already up"), so
+  // the card said «اسطمبتها راكبة — تكمّل» about the mould that is out, and no
+  // other mould was offered.
+  const B = "PQ 2 — 100", F = "PQ 4 — 100";
+  const stopped = (reason: string) => machine({ label: B, state: "stopped", stoppage: { reason, since: 0 }, now: { products: ["كفر"], order: "Job 10" } });
+  const own = (o: Partial<PlanOrder> = {}) => order({ code: "Job 10", product: "كفر", mountedOn: B, fits: null, ...o });
+  const other = order({ code: "Job 40", fits: null });
+  for (const reason of ["Mold maintenance", "No material"]) {
+    // The machine's own screen still lists its mould first: only the DAY's plan decides here.
+    assert.deepEqual(codes(stopped(reason), [other, own()]), ["Job 10", "Job 40"], reason);
+    const day = planDay([stopped(reason)], [other, own()], ctx);
+    assert.deepEqual(day.entries.map((e) => [e.need, e.current?.code, e.pick?.order.code ?? null, e.pick?.mountedHere ?? null]),
+      [["stopped", "Job 10", "Job 40", false]], reason);
+    assert.deepEqual(day.unplaced, [], reason);
+    // Nothing else waits: no pick, rather than that one.
+    assert.equal(planDay([stopped(reason)], [own()], ctx).entries[0].pick, null, reason);
+    // The stopped job is not sent to a free machine either (its mould is out,
+    // or its material is) — and when it is LATE it is said to have no machine.
+    const late = planDay([stopped(reason), machine({ label: F })], [other, own({ dueDate: "2026-09-20" })], ctx);
+    assert.deepEqual(late.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]), [[F, "free", "Job 40"], [B, "stopped", null]], reason);
+    assert.deepEqual(late.unplaced.map((u) => [u.order.code, u.why]), [["Job 10", "noMachine"]], reason);
+  }
+  // «لا يوجد أمر شغل» is not such a stoppage: a mould the count still doubts is offered back there (see above).
+  const done = machine({ label: B, state: "stopped", stoppage: { reason: NO_ORDER_STOPPAGE, since: 0 }, now: { products: ["كفر"], order: "Job 10" } });
+  assert.equal(planDay([done], [other, own({ doneUnsure: true })], ctx).entries[0].pick?.order.code, "Job 10");
+});
+
+test("one mould goes on ONE machine: a second order of the product standing on an idle machine is next on that mould, not a job for another", () => {
+  // The owner's own case — one product in two colours — while the mould STANDS
+  // (`queuedBehind` is only set while it runs): the plan put Job 10 on the
+  // machine holding the mould and Job 11, the same mould, on the one beside it.
+  const B = "PQ 2 — 100", C = "PQ 3 — 100";
+  const holding = machine({ label: B, now: { products: ["كفر"], order: "Job 10" } });
+  const beside = machine({ label: C });
+  const first = (o: Partial<PlanOrder> = {}) => order({ code: "Job 10", product: "كفر", mountedOn: B, fits: null, ...o });
+  const second = (o: Partial<PlanOrder> = {}) => order({ code: "Job 11", product: "كفر", mountedOn: B, fits: null, ...o });
+  const other = order({ code: "Job 40", fits: null });
+  const picks = (os: PlanOrder[]) => {
+    const p = planDay([holding, beside], os, ctx);
+    return [p.entries.map((e) => [e.machine.label, e.pick?.order.code ?? null]), p.unplaced.map((u) => u.order.code)];
+  };
+  // PQ 3's own list has Job 11 above Job 40 — the day's plan passes over it.
+  assert.deepEqual(codes(beside, [first(), second(), other]), ["Job 10", "Job 11", "Job 40"]);
+  assert.deepEqual(picks([first(), second(), other]), [[[B, "Job 10"], [C, "Job 40"]], []]);
+  assert.deepEqual(picks([first(), second()]), [[[B, "Job 10"], [C, null]], []]);
+  // Both late — the ORDER picks: the second is still next on that mould, and is not called "unplaced".
+  const late = { dueDate: "2026-09-20" };
+  assert.deepEqual(picks([first(late), second(late), other]), [[[B, "Job 10"], [C, "Job 40"]], []]);
+  // The more urgent of the two is the one the mould carries on with.
+  assert.deepEqual(picks([first(), second(late), other]), [[[B, "Job 11"], [C, "Job 40"]], []]);
+  // Another product whose mould stands nowhere, and the same NAME with no mould up anywhere, are untouched.
+  assert.deepEqual(picks([first(), order({ code: "Job 12", product: "كفر", fits: null }), other]), [[[B, "Job 10"], [C, "Job 12"]], []]);
+});
+
+test("urgent orders choose their machine FIRST: where the supervisor said, then where the mould stands or has run, before a machine nobody has spoken for", () => {
+  const A = "PQ 1 — 100", B = "PQ 2 — 100", C = "PQ 3 — 100";
+  const ms = [A, B, C].map((label) => machine({ label }));
+  const late = (o: Partial<PlanOrder> = {}) => order({ code: "late", product: "روزته سودة العداد الثلاثي", dueDate: "2026-09-20", fits: null, ...o });
+  const plain = order({ code: "plain", fits: null });
+  const picks = (o: PlanOrder) => planDay(ms, [plain, o], ctx).entries.map((e) => [e.machine.label, e.pick?.order.code ?? null]);
+
+  // Nobody has said and it has never run: every free machine is the same
+  // guess, so the first by number.
+  assert.deepEqual(picks(late()), [[A, "late"], [B, "plain"], [C, null]]);
+  // The shift log shows it on PQ 3. Machine by machine, PQ 1 came first and
+  // took it (it tops PQ 1's own list too); now the ORDER picks, and PQ 1 gets
+  // what is left.
+  assert.deepEqual(picks(late({ ranOn: [C] })), [[A, "plain"], [B, null], [C, "late"]]);
+  // The supervisor named PQ 2 and PQ 3: his word, the first of them.
+  assert.deepEqual(picks(late({ fits: [B, C], ranOn: [C] })), [[A, "plain"], [B, "late"], [C, null]]);
+  // Its mould is STANDING on PQ 3, which the log says it never ran on: "here"
+  // beats "ran" — and nothing is cheaper to start.
+  assert.deepEqual(picks(late({ ranOn: [B], mountedOn: C })), [[A, "plain"], [B, null], [C, "late"]]);
+
+  // Equal fit: the easier change, then the shorter one, then the number.
+  const black = (label: string, o: Partial<PlanMachine> = {}) => machine({ label, ...o, now: { colours: ["black"], colourNow: "black" } });
+  const goesTo = (machines: PlanMachine[]) => planDay(machines, [late()], ctx).entries.find((e) => e.pick)?.machine.label;
+  assert.equal(goesTo([black(A), machine({ label: B })]), B, "white after white, not white after black");
+  // …the easier change even where it is the LONGER one: nothing to purge and a
+  // slow crew (90 min) before a dark barrel and a quick one (20 + 30).
+  assert.equal(goesTo([black(A, { swapMin: 30, swapSamples: 4 }), machine({ label: B, swapMin: 90, swapSamples: 4 })]), B);
+  assert.equal(goesTo([machine({ label: A, swapMin: 90, swapSamples: 4 }), machine({ label: B, swapMin: 30, swapSamples: 4 })]), B, "the machine that changes faster");
+  assert.equal(goesTo([machine({ label: "PQ 10 — 100" }), machine({ label: "PQ 9 — 100" })]), "PQ 9 — 100", "9 before 10");
+});
+
+test("an urgent order takes a free machine before one that ends soon, and one that ends soon before a mould worth taking off", () => {
+  // (The free machine has the HIGHEST number: it is chosen for being free,
+  // not for coming first.)
+  const F = "PQ 3 — 100", S = "PQ 1 — 100", L = "PQ 2 — 100";
+  const free = machine({ label: F });
+  const soon = machine({ label: S, state: "running", now: { order: "run-s" } });
+  const long = machine({ label: L, state: "running", now: { order: "run-l" } });
+  const os = [
+    order({ code: "run-s", mountedOn: S, mountedRunning: true, runHours: 6 }),
+    order({ code: "run-l", mountedOn: L, mountedRunning: true, runHours: 300 }),
+    order({ code: "late-1", dueDate: "2026-09-10" }),
+    order({ code: "late-2", dueDate: "2026-09-15" }),
+    order({ code: "late-3", product: "عظمة قشارة ثوم", material: "ABS اسود مخرز", dueDate: "2026-09-20" }),
+    order({ code: "late-4", dueDate: "2026-09-25" }),
+  ];
+  const fitsAll = os.map((o) => ({ ...o, fits: [F, S, L] }));
+  const plan = planDay([long, soon, free], fitsAll, ctx);
+  // The most urgent order gets the free machine, the next the one ending in
+  // six hours, the third is worth the long job's mould — and the fourth is
+  // told it has no machine today.
+  assert.deepEqual(plan.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]),
+    [[F, "free", "late-1"], [L, "interrupt", "late-3"], [S, "soon", "late-2"]]);
+  assert.deepEqual(plan.unplaced.map((u) => [u.order.code, u.why]), [["late-4", "noMachine"]]);
+  // A mould taken off NOW needs its ABS dry now — not when the long job would have ended.
+  assert.deepEqual(plan.entries.map((e) => e.dryIn), [null, 0, null]);
+  // With only one late order, the long job is not disturbed: it just runs.
+  const one = planDay([long, soon, free], fitsAll.slice(0, 3), ctx);
+  assert.deepEqual(one.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]),
+    [[F, "free", "late-1"], [S, "soon", null], [L, "running", null]]);
+  // An order is offered to ONE machine.
+  const given = plan.entries.map((e) => e.pick?.order.code).filter(Boolean);
+  assert.equal(new Set(given).size, given.length);
+});
+
+test("an urgent order with none of its material in the store is given to NO machine — it is said to be unplaced", () => {
+  const free = machine();
+  const empty = { material: "ABS اسود مخرز", haveKg: 0, needKg: 300, guessed: false };
+  const late = order({ code: "late", product: "عظمة قشارة ثوم", dueDate: "2026-09-20", stock: empty });
+  const plain = order({ code: "plain" });
+  const day = planDay([free], [late, plain], ctx);
+  assert.deepEqual(day.unplaced.map((u) => [u.order.code, u.why]), [["late", "noMaterial"]]);
+  assert.equal(day.entries[0].pick?.order.code, "plain", "the machine is not kept empty for it");
+  // The machine's own list still shows it first, with its red chip: only the
+  // day's plan refuses to PICK it.
+  assert.deepEqual(codes(free, [late, plain]), ["late", "plain"]);
+  assert.equal(planDay([free], [late], ctx).entries[0].pick, null, "nothing else waits: no pick, rather than that one");
+  // An order that is not urgent is simply never picked — it is not "unplaced".
+  const calm = planDay([free], [order({ code: "no-stock", stock: empty, remaining: 10 }), plain], ctx);
+  assert.deepEqual([calm.entries[0].pick?.order.code, calm.unplaced], ["plain", []]);
+  // Too little is a warning, not a refusal; and "not known" is never "none".
+  const low = planDay([free], [{ ...late, stock: { ...empty, haveKg: 100 } }, plain], ctx);
+  assert.deepEqual([low.entries[0].pick?.order.code, low.entries[0].pick?.stock, low.unplaced], ["late", "low", []]);
+  assert.equal(planDay([free], [{ ...late, stock: null }, plain], ctx).entries[0].pick?.order.code, "late");
+});
+
+test("a machine still RUNNING an order the count says is complete has overrun: it is on the plan like a free one", () => {
+  // The opposite of «لا يوجد أمر شغل»: the count says done, the floor has not said so.
+  const P = "PQ 5 — 100", Q = "PQ 7 — 100";
+  const over = machine({ label: P, state: "running", now: { products: ["غطاء جوان"], order: "made" } });
+  const made = order({ code: "made", product: "غطاء جوان", mountedOn: P, mountedRunning: true, remaining: 0, runHours: 0 });
+  const next = order({ code: "next" });
+  const day = planDay([over], [made, next], ctx);
+  assert.deepEqual(day.entries.map((e) => [e.need, e.current?.code, e.pick?.order.code]), [["overrun", "made", "next"]]);
+  // It takes a late order before a machine that only ends soon does…
+  const soon = machine({ label: Q, state: "running", now: { order: "run-q" } });
+  const late = order({ code: "late", dueDate: "2026-09-20" });
+  const two = planDay([soon, over], [made, order({ code: "run-q", mountedOn: Q, mountedRunning: true, runHours: 4 }), late], ctx);
+  assert.deepEqual(two.entries.map((e) => [e.machine.label, e.need, e.pick?.order.code ?? null]), [[P, "overrun", "late"], [Q, "soon", null]]);
+  // …and a running order with pieces still to make, or a count nobody has, is not one.
+  const need = (o: Partial<PlanOrder>) => planDay([over], [{ ...made, ...o }, next], ctx).entries[0].need;
+  assert.equal(need({ remaining: 1, runHours: 0.1 }), "soon");
+  assert.equal(need({ remaining: null, runHours: null }), "running");
+});
+
+test("«ends soon» is on the clock: a Friday before the end is a day in which nothing runs", () => {
+  const P = "PQ 5 — 100";
+  const m = machine({ label: P, state: "running", now: { order: "run" } });
+  const job = (runHours: number | null) => order({ code: "run", mountedOn: P, mountedRunning: true, runHours });
+  const abs = order({ code: "abs", product: "روزته سودة العداد الثلاثي", material: "ABS اسود مخرز", dueDate: "2026-10-30" });
+  const at = (today: string, hourNow?: number) => ({ today, transparentMachines: [] as string[], hourNow });
+  const entry = (runHours: number | null, c: ReturnType<typeof at>) => {
+    const [e] = planDay([m], [job(runHours), abs], c).entries;
+    return [e.need, e.hoursLeft, e.finishIn, e.pick?.order.code ?? null, e.dryIn];
+  };
+  assert.equal(SOON_HOURS, 24);
+  // Wednesday 7 Oct, noon: twenty hours of running end tomorrow morning —
+  // and ABS dries three hours, so it goes in the dryer in seventeen.
+  assert.deepEqual(entry(20, at("2026-10-07", 12)), ["soon", 20, 20, "abs", 17]);
+  // Thursday 8 Oct, noon: the same twenty hours are twelve today and eight on
+  // SATURDAY — forty-four hours away. Not today's decision.
+  assert.deepEqual(entry(20, at("2026-10-08", 12)), ["running", 20, 44, null, null]);
+  // Ten hours on that Thursday still end before midnight.
+  assert.deepEqual(entry(10, at("2026-10-08", 12)), ["soon", 10, 10, "abs", 7]);
+  // …but not when the plan is made at 20:00: four hours today, six on Saturday.
+  assert.deepEqual(entry(10, at("2026-10-08", 20)), ["running", 10, 34, null, null]);
+  // No hour given: noon.
+  assert.deepEqual(entry(10, at("2026-10-08")), ["soon", 10, 10, "abs", 7]);
+  // Nobody knows how long is left: it is running, with nothing to say about when.
+  assert.deepEqual(entry(null, at("2026-10-07", 12)), ["running", null, null, null, null]);
+  // A job with two hours left dries nothing "in minus one hour": now.
+  assert.deepEqual(entry(2, at("2026-10-07", 12)), ["soon", 2, 2, "abs", 0]);
+  // ON the Friday, five hours of running end at five on Saturday morning:
+  // the dryer is counted back from the clock, not from the hours of running.
+  assert.deepEqual(entry(5, at("2026-10-09", 12)), ["soon", 5, 17, "abs", 14]);
+});
+
+test("the day's plan is read top to bottom: finished, free, stopped, overrun, interrupt, soon, down, running", () => {
+  const L = (n: number) => `PQ ${n} — 100`;
+  const runs = (n: number, o: Partial<PlanOrder> = {}) => order({ code: `run-${n}`, mountedOn: L(n), mountedRunning: true, ...o });
+  const busy = (n: number) => machine({ label: L(n), state: "running", now: { order: `run-${n}` } });
+  const stop = (n: number, reason: string) => machine({ label: L(n), state: "stopped", stoppage: { reason, since: 0 }, now: { order: "" } });
+  const ms = [
+    busy(14),                                   // 60 h left
+    busy(13),                                   // 200 h left
+    busy(12),                                   // runs, nobody knows for how long
+    stop(11, "Maintenance"),                    // down
+    busy(9),                                    // ends in 3 h
+    busy(8),                                    // ends in 10 h
+    busy(7),                                    // long job — the only machine the late order goes on
+    busy(6),                                    // its order's count is complete
+    stop(5, "No material"),
+    machine({ label: L(10), state: "unknown" }),
+    machine({ label: L(2), state: "idle" }),
+    stop(1, NO_ORDER_STOPPAGE),
+  ];
+  const os = [
+    runs(14, { runHours: 60 }), runs(13, { runHours: 200 }), runs(12, { runHours: null }), runs(9, { runHours: 3 }),
+    runs(8, { runHours: 10 }), runs(7, { runHours: 100 }), runs(6, { remaining: 0, runHours: 0 }),
+    order({ code: "late", dueDate: "2026-09-20", fits: [L(7)] }),
+    order({ code: "w1", fits: null }), order({ code: "w2", fits: null }),
+  ];
+  const plan = planDay(ms, os, ctx);
+  assert.deepEqual(plan.entries.map((e) => [e.machine.label, e.need]), [
+    [L(1), "finished"],
+    [L(2), "free"], [L(10), "free"],            // 2 before 10: by number, not by letter
+    [L(5), "stopped"],
+    [L(6), "overrun"],
+    [L(7), "interrupt"],
+    [L(9), "soon"], [L(8), "soon"],             // the one that ends first, whatever its number
+    [L(11), "down"],
+    [L(14), "running"], [L(13), "running"], [L(12), "running"],   // least left first, unknown last
+  ]);
+  const pick = (n: number) => plan.entries.find((e) => e.machine.label === L(n))!.pick?.order.code ?? null;
+  assert.equal(pick(7), "late");
+  // The two waiting orders go to the two machines that need one most.
+  assert.deepEqual([pick(1), pick(2), pick(10), pick(5), pick(6), pick(8), pick(9)], ["w1", "w2", null, null, null, null, null]);
+  // A machine that is down, or simply running, is never given one.
+  assert.deepEqual([pick(11), pick(12), pick(13), pick(14)], [null, null, null, null]);
+  assert.deepEqual(plan.unplaced, []);
 });
 
 test("Friday is the day off — changes are allowed at night since 2026-10-07", () => {
@@ -1079,6 +1591,77 @@ test("Friday is the day off — changes are allowed at night since 2026-10-07", 
   assert.equal(isFriday("2026-10-08"), false);
   assert.equal(isFriday("2026-10-10"), false);
   assert.equal(isFriday(""), false);
+});
+
+test("a stoppage's reason says whether the MACHINE can take a mould — an unknown reason never can", () => {
+  assert.equal(stoppageKind(NO_ORDER_STOPPAGE), "finished");
+  // The mould is out, or the job's material is: the machine itself is fine.
+  for (const r of ["Mold maintenance", "No material"]) assert.equal(stoppageKind(r), "open", r);
+  // A repair, a change already in progress, drying, nobody to run it…
+  for (const r of ["Maintenance", "Mold change", "Material drying", "No operator", "Setup", "Nozzle burn", "Sprue broken", "Other", "a key nobody knows", ""]) {
+    assert.equal(stoppageKind(r), "blocked", r);
+  }
+  // The keys are COPIED from lib/prod-meta.ts (the rules file imports
+  // nothing): every button of the downtime page is sorted here, key by key —
+  // a renamed key would otherwise turn «لا يوجد أمر شغل» into "down" unnoticed.
+  assert.deepEqual(Object.fromEntries(DOWNTIME_CAPTURE_REASONS.map((r) => [r.key, stoppageKind(r.key)])), {
+    "Setup": "blocked", "Nozzle burn": "blocked", "Mold change": "blocked", "Mold maintenance": "open",
+    "Maintenance": "blocked", "Material drying": "blocked", "No operator": "blocked", "No material": "open",
+    "No order": "finished", "Sprue broken": "blocked", "Other": "blocked",
+  });
+});
+
+test("working time: Friday is the day off — days to a due date, and hours on the clock", () => {
+  // 2026-10-09 is a Friday.
+  assert.equal(workingDaysUntil("2026-10-08", "2026-10-08"), 0, "due today");
+  assert.equal(workingDaysUntil("2026-10-10", "2026-10-08"), 1, "the Friday between does not count");
+  assert.equal(workingDaysUntil("2026-10-09", "2026-10-08"), 0, "due ON the Friday: nothing runs before it");
+  assert.equal(workingDaysUntil("2026-10-22", "2026-10-08"), 12, "two weeks, two Fridays");
+  // Late is counted the way the customer counts it: calendar days.
+  assert.equal(workingDaysUntil("2026-10-03", "2026-10-08"), -5);
+  assert.equal(workingDaysUntil("", "2026-10-08"), null);
+  assert.equal(workingDaysUntil("2026-10-10", ""), null);
+
+  // Thursday noon: 12 hours of today are left, then a Friday of nothing.
+  assert.equal(calendarHours(5, "2026-10-08", 12), 5);
+  assert.equal(calendarHours(12, "2026-10-08", 12), 12);
+  assert.equal(calendarHours(20, "2026-10-08", 12), 44);
+  assert.equal(calendarHours(5, "2026-10-09", 12), 17, "on the Friday itself nothing runs until midnight");
+  assert.equal(calendarHours(30, "2026-10-06"), 30, "no Friday in the way; noon when no hour is given");
+  assert.equal(calendarHours(300, "2026-10-06", 8), 300 + 2 * 24, "two Fridays inside twelve and a half days of running");
+  assert.equal(calendarHours(0, "2026-10-08"), 0);
+  assert.equal(calendarHours(40, ""), 40, "no day to walk from: the hours as they are");
+  // Across the Friday, hour by hour: Thursday 20:00 leaves four hours of today.
+  assert.equal(calendarHours(4, "2026-10-08", 20), 4, "done at midnight, before the day off");
+  assert.equal(calendarHours(4.5, "2026-10-08", 20), 4.5 + 24, "half an hour short: it waits out the whole Friday");
+  assert.equal(calendarHours(24, "2026-10-09", 0), 48, "a full day of running, asked at the first minute of the Friday");
+  // A quantity typed with three zeros too many must not spin, and a clock
+  // that is not a clock is read as noon.
+  assert.equal(calendarHours(144_000, "2026-10-06", 12), 144_000 + 1000 * 24, "a thousand weeks, a thousand Fridays");
+  assert.equal(calendarHours(5, "2026-10-08", Number.NaN), 5);
+});
+
+test("at risk = WILL be late: the running left does not fit in the working days before the date", () => {
+  const at = (o: Partial<PlanOrder>) => orderUrgency(order({ code: "x", dueDate: "2026-10-10", ...o }), "2026-10-08");
+  // One working day (the Friday is off) is 24 hours of running.
+  assert.equal(at({ runHours: 40 }).atRisk, true);
+  assert.equal(at({ runHours: 24 }).atRisk, false);
+  assert.equal(at({ runHours: null }).atRisk, false, "unknown hours are never 'at risk'");
+  assert.equal(at({ runHours: 40, dueDate: "" }).atRisk, false);
+  const late = at({ runHours: 40, dueDate: "2026-10-01" });
+  assert.deepEqual([late.late, late.atRisk], [7, false], "late already is late, not at risk");
+  assert.equal(rankFor(machine(), [order({ code: "x", dueDate: "2026-10-01", runHours: 40 })], ctx).ranked[0].atRisk, true, "…and the suggestion carries it");
+});
+
+test("material in the store: unknown is never 'none', and a need that cannot be worked out is not 'low'", () => {
+  const st = (haveKg: number, needKg: number | null) => order({ code: "x", stock: { material: "بروبلين", haveKg, needKg, guessed: false } });
+  assert.equal(stockState(order({ code: "x" })), "unknown");
+  assert.equal(stockState(st(0, 120)), "none");
+  assert.equal(stockState(st(80, 120)), "low");
+  assert.equal(stockState(st(120, 120)), "ok");
+  assert.equal(stockState(st(80, null)), "ok");
+  assert.equal(rankFor(machine(), [st(80, 120)], ctx).ranked[0].stock, "low");
+  assert.equal(rankFor(machine(), [st(0, 120)], ctx).blocked.length, 0, "the ranking never blocks on stock");
 });
 
 test("ease of change is decided BEFORE what is left — the owner's order, pinned on its own", () => {
@@ -1331,4 +1914,52 @@ test("minutes split for the eye, and a cell never starts a formula", () => {
   // folded away later on the way to the sheet.
   assert.equal(safeText("\u200B=HYPERLINK(1)"), "HYPERLINK(1)");
   assert.equal(safeText("x".repeat(500), 40).length, 40);
+});
+
+/* ------------------------- what the page does with the rules ------------------------ */
+
+/**
+ * The page is not run here, so the four places where it had a rule or a number
+ * of its OWN (review of 2026-10-07) are pinned on its source and its strings:
+ * each one contradicted, or invented on top of, what the rules above decide.
+ */
+test("the page words what the rules decided \u2014 it has no rule and no number of its own", () => {
+  const page = readFileSync(new URL("../app/dashboard/changeover/page.tsx", import.meta.url), "utf8");
+  const between = (from: string, to: string) => page.slice(page.indexOf(from), page.indexOf(to, page.indexOf(from)));
+
+  // 1. A forecast that has run out. The rules say "soon" with nothing left \u2014
+  //    an order whose count still shows pieces, every one of them probably made
+  //    since the last counted day. The card read "finishes in about 10 min".
+  const P = "PQ 5 \u2014 100";
+  const spent = order({ code: "run", mountedOn: P, mountedRunning: true, remaining: 5_000, runHours: 0, asOf: "2026-09-28" });
+  const [e] = planDay([machine({ label: P, state: "running", now: { order: "run" } })], [spent], ctx).entries;
+  assert.deepEqual([e.need, e.hoursLeft, e.finishIn], ["soon", 0, 0]);
+  assert.match(page, /e\.need === "soon" && e\.hoursLeft === 0 \? s\.day\.need\.dueNow/);
+  for (const lang of ["en", "ar"] as const) assert.doesNotMatch(co[lang].day.need.dueNow, /\{|\d/, `${lang}: words, not a time`);
+
+  // 2. \u00AB\u0631\u0643\u0651\u0628 \u062F\u064A\u00BB on a running machine warns by the RANKING's word (Suggestion.interrupt),
+  //    not by "is it a key client": the plan said \u00AB\u064A\u0633\u062A\u0627\u0647\u0644 \u0646\u0641\u0643 \u0627\u0644\u0634\u063A\u0627\u0644\u00BB and the dialog said no.
+  assert.match(page, /const interrupting = machine\.state === "running" && !pick\.interrupt && !o\.queuedBehind;/);
+  for (const lang of ["en", "ar"] as const) {
+    for (const text of [co[lang].confirm.runningWarn, co[lang].rank.busyNote]) {
+      assert.match(text, lang === "en" ? /late or will be late/ : /\u0645\u062A\u0623\u062E\u0631 \u0623\u0648 \u0647\u064A\u062A\u0623\u062E\u0631/, `${lang}: a late order takes a running mould off too`);
+      assert.match(text, lang === "en" ? /went on today/ : /\u0631\u0627\u0643\u0628 \u0645\u0646 \u0627\u0644\u0646\u0647\u0627\u0631\u062F\u0629/, `${lang}: never a mould that went on today`);
+    }
+  }
+
+  // 3. A store material that is only a GUESS is said to be one wherever it reads "none" or
+  //    "short" \u2014 and the urgent order it leaves with no machine can be answered for in place.
+  const unplaced = between("dayPlan.unplaced.map(", "day.length === 0");
+  assert.match(unplaced, /why === "noMaterial" && stockGuessNote\(o\)/);
+  assert.match(unplaced, /onClick=\{\(\) => setOrderForm\(o\)\} disabled=\{!canWrite\}/);
+  assert.match(between("const card = (", "const dayCard = ("), /stockGuessNote\(o\)/);
+  assert.match(between("const dayCard = (", "const needNow ="), /stockGuessNote\(sg\.order\)/);
+
+  // 4. Where the mould is: said on a day card whose order's mould stands on ANOTHER machine,
+  //    and under an urgent order the plan holds with a stopped one.
+  assert.match(between("const DAY_CHIPS", "]);"), /"mountedElsewhere"/);
+  assert.match(unplaced, /why === "noMachine" && on &&/);
+
+  // \u2026and the question form reads the supervisor's ANSWER, not only what the store makes of it.
+  assert.match(between("function OrderForm(", "async function save()"), /order\.storeMaterial/);
 });

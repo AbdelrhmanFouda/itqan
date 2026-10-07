@@ -18,20 +18,30 @@ import { usePageTitle } from "@/components/dashboard/use-page-title";
  * The rules (what is running, order of priority, colour ladder, minutes, what
  * blocks an order, the map's grid) are in lib/changeover.ts and unit-tested;
  * this file asks, ranks with those functions in the browser, and draws.
+ *
+ * 2026-10-07 (ten changes the owner approved that day): the day's plan lets
+ * the urgent orders choose their machine first and says which of them it
+ * could not place; a machine stopped for a repair is listed, never offered a
+ * mould; times are hours on the clock (Friday is the day off) and say which
+ * day's log they were counted from; the store's stock, where a mould has run
+ * before and the machine's own recorded change time are shown where they bear
+ * on the decision — as warnings, never as blocks.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useLang } from "@/context/LangContext";
 import { authedFetch } from "@/lib/authed-fetch";
 import { co } from "@/lib/i18n.changeover";
 import { pd } from "@/lib/i18n.prod";
 import { formatClock, formatDate, todayIso } from "@/lib/dates";
-import { ageLabel, fill, fmtInt } from "@/lib/format";
+import { ageLabel, fill, fmtInt, fmtNum } from "@/lib/format";
 import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
   barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineFinished, machineKey, placeTile, planDay,
-  rankFor, removeTile, sortByUrgency, splitMinutes, tileHeightPx, tileWidthPx, turnLayout, urgencyChips, type DayEntry, type FloorFit,
+  rankFor, removeTile, sortByUrgency, splitMinutes, stockState, stoppageKind, tileHeightPx, tileWidthPx, turnLayout, urgencyChips,
+  type DayEntry, type DayNeed, type Estimate, type FloorFit,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
   type Suggestion,
 } from "@/lib/changeover";
@@ -43,14 +53,42 @@ import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCi
 
 // v3 (2026-10-05): the answer gained fields the page reads on every card; a
 // snapshot in the old shape is not shown under the new code.
-const LAST_KEY = "itqan.changeover.last.v4";
+// v5 (2026-10-07): again — `ranOn`, `stock`, `asOf` on every order, the
+// machine's own change time, the store's material list. An old snapshot has
+// no `ranOn` list at all, and the ranking reads it for every order.
+const LAST_KEY = "itqan.changeover.last.v5";
 const STALE_AFTER_MS = 60_000;
 const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "red", info: "blue" };
 const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
 const STATE_DOT: Record<MachineState, string> = { running: "bg-emerald-500", stopped: "bg-red-500", idle: "bg-amber-500", unknown: "bg-gray-300" };
 const STATES: readonly MachineState[] = ["running", "stopped", "idle", "unknown"];
-/** The chips the day's plan shows: why THIS order, and what makes the change a hard one. */
-const DAY_CHIPS = new Set(["keyClient", "late", "dueToday", "dueTomorrow", "dueTwoDays", "dueSoon", "noDueDate", "toTransparent", "lighter", "materialChange", "transparentMachine"]);
+/** The number on a day card that needs a mould now, in its machine's state colour. */
+const STATE_NUM: Record<MachineState, string> = {
+  running: "border-emerald-500 text-emerald-700", stopped: "border-red-500 text-red-700",
+  idle: "border-amber-500 text-amber-800", unknown: "border-gray-400 text-gray-600",
+};
+/** The chips the day's plan shows: why THIS order, and what makes the change a hard one —
+ *  a mould that has to come off ANOTHER machine first is one (it was not said at all). */
+const DAY_CHIPS = new Set([
+  "keyClient", "late", "atRisk", "dueToday", "dueTomorrow", "dueTwoDays", "dueSoon", "noDueDate",
+  "mountedElsewhere", "ranHere", "stockNone", "stockLow", "toTransparent", "lighter", "materialChange", "transparentMachine",
+]);
+/**
+ * The day's plan in the groups it is read in (lib/changeover.ts DayNeed, in
+ * planDay's own order). "down" is a machine whose stoppage means it cannot
+ * run anything now — listed so nobody looks for it, never given a mould
+ * (owner, 2026-10-07: the plan had given a late order to a machine that was
+ * down for repair).
+ */
+const DAY_GROUPS = {
+  now: ["finished", "free", "stopped", "overrun"],
+  soon: ["interrupt", "soon"],
+  down: ["down"],
+  running: ["running"],
+} as const satisfies Record<string, readonly DayNeed[]>;
+type DayGroup = keyof typeof DAY_GROUPS;
+const DAY_GROUP_KEYS = Object.keys(DAY_GROUPS) as DayGroup[];
+const inGroup = (g: DayGroup, need: DayNeed): boolean => (DAY_GROUPS[g] as readonly DayNeed[]).includes(need);
 const STATE_TILE: Record<MachineState, string> = {
   running: "border-emerald-400 bg-white",
   stopped: "border-red-400 bg-red-50",
@@ -99,6 +137,23 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 /** «PQ 7 — 100» → the code and the tonnage, for a tile too small for both on one line. */
 const codeOf = (label: string): string => label.split(/\s+[—–-]\s+/)[0] || label;
 const tonOf = (label: string): string => label.split(/\s+[—–-]\s+/)[1] ?? "";
+/** A list of machines inside a sentence: «PQ 3 · PQ 12», left to right, and a
+ *  code is never split over two lines («PQ» ending one and «12» starting the next). */
+const codesText = (labels: readonly string[]): string => ltr(labels.map((l) => codeOf(l).replace(/ /g, " ")).join(" · "));
+
+/** The Cairo clock right now as an hour of the day (14.5 = 14:30) — what
+ *  planDay counts "finishes in" from. Noon when the clock cannot be read, as
+ *  planDay itself assumes. Read when an answer lands, never while drawing. */
+const cairoHourNow = (): number => {
+  const [h, m] = formatClock(Date.now()).split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h + m / 60 : 12;
+};
+
+/** A name inside a chip: a chip is one line and must not push a phone sideways. */
+const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max).trimEnd()}…` : text);
+
+/** Kilograms: whole, except a small amount, where a tenth still means something. */
+const kgText = (kg: number, isAr: boolean): string => (Math.abs(kg) < 10 && kg % 1 !== 0 ? fmtNum(kg, isAr, 1) : fmtInt(kg, isAr));
 
 /* --------------------------------- colours -------------------------------- */
 
@@ -374,10 +429,14 @@ export default function ChangeoverPage() {
   const loadRef = useRef<() => Promise<void>>(async () => {});
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleRefetches = useRef(0);
+  // The Cairo hour the day's plan is made at: read when the page opens and
+  // again with every live answer — "finishes in" is hours on the clock.
+  const [hourNow, setHourNow] = useState(cairoHourNow);
   const { data, loading, failed, setFailed, fromSnapshot, reload } = useRemembered<ChangeoverResponse>({
     key: LAST_KEY,
     read: () => timedJson<ChangeoverResponse>(authedFetch, freshNext.current ? "/api/changeover?fresh=1" : "/api/changeover"),
-    valid: (snap) => Array.isArray(snap?.machines) && Array.isArray(snap?.orders) && Array.isArray(snap?.layout),
+    valid: (snap) => Array.isArray(snap?.machines) && Array.isArray(snap?.orders) && Array.isArray(snap?.layout)
+      && Array.isArray(snap?.storeMaterials),
     // A snapshot's age is the device's past, not now.
     hydrate: (snap) => ({ ...snap, dataAgeMs: 0 }),
     // A degraded answer is shown when there is nothing better, never
@@ -386,6 +445,7 @@ export default function ChangeoverPage() {
     worthRemembering: (next) => !degraded(next),
     merge: (prev, next) => (degraded(next) && prev && !degraded(prev) ? prev : next),
     onLoaded: (next) => {
+      setHourNow(cairoHourNow());
       if (degraded(next)) { setFailed({ timedOut: false }); return; }
       // An old copy was served (and is being refreshed server-side): ask once
       // more in a few seconds. Bounded, the same way the stock page does it —
@@ -478,11 +538,16 @@ export default function ChangeoverPage() {
     (m: PlanMachine) => (m.now.order ? orders.find((o) => o.code === m.now.order) ?? null : null),
     [orders],
   );
-  /** The whole floor in the order things have to be done (lib/changeover.ts planDay). */
-  const day = useMemo(
-    () => planDay(machines, orders, { today: data?.today ?? "", transparentMachines }),
-    [machines, orders, data?.today, transparentMachines],
+  /**
+   * The whole floor in the order things have to be done (lib/changeover.ts
+   * planDay): the machines, each with the mould to put on it — and the urgent
+   * orders the plan could not put anywhere, which are said, never hidden.
+   */
+  const dayPlan = useMemo(
+    () => planDay(machines, orders, { today: data?.today ?? "", transparentMachines, hourNow }),
+    [machines, orders, data?.today, transparentMachines, hourNow],
   );
+  const day = dayPlan.entries;
 
   const minutes = useCallback((min: number) => {
     const { h, m } = splitMinutes(min);
@@ -501,22 +566,31 @@ export default function ChangeoverPage() {
     if (typeof vars.machine === "string") vars.machine = ltr(vars.machine);
     if (typeof vars.machines === "string") vars.machines = ltr(vars.machines);
     if (typeof vars.order === "string") vars.order = ltr(vars.order);
+    // The store's own material names run long («بولي بروبلين كوبوليمر …») and
+    // a chip is one unbreakable line: the full name is on the «الأوامر» tab.
+    if (typeof vars.material === "string") vars.material = clip(vars.material, 16);
+    if (c.key === "stockLow") { vars.have = fmtInt(Number(vars.have), ar); vars.need = fmtInt(Number(vars.need), ar); }
     return fill((strings.chips as Record<string, string>)[key] ?? c.key, vars);
   }, [s, isAr]);
   const missingText = useCallback((keys: string) =>
     keys.split(",").map((k) => { const it = MISSING_ITEMS.find((x) => x.key === k); return it ? (isAr ? it.ar : it.en) : k; }).join(isAr ? "، " : ", "), [isAr]);
 
+  /** When a running stoppage started: «08:02», with the day when it is not today's. */
+  const stoppageSince = useCallback((m: PlanMachine) => {
+    if (!m.stoppage) return "";
+    const day = todayIso(m.stoppage.since);
+    const clock = formatClock(m.stoppage.since);
+    return day === data?.today ? clock : `${formatDate(day, lang)} ${clock}`;
+  }, [lang, data?.today]);
   /** «توقف مسجّل: لا يوجد أمر شغل — من 08:02», with the day when it is not today's. */
   const stoppageText = useCallback((m: PlanMachine) => {
     if (!m.stoppage) return "";
     const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === m.stoppage!.reason);
-    const day = todayIso(m.stoppage.since);
-    const clock = formatClock(m.stoppage.since);
     return fill(s.now.stoppage, {
       reason: r ? (isAr ? r.ar : r.en) : m.stoppage.reason,
-      since: day === data?.today ? clock : `${formatDate(day, lang)} ${clock}`,
+      since: stoppageSince(m),
     });
-  }, [s, isAr, lang, data?.today]);
+  }, [s, isAr, stoppageSince]);
 
   /** «5 س» / «3 يوم»: hours, to the precision an eye wants. */
   const roughly = useCallback((hours: number) => {
@@ -530,6 +604,38 @@ export default function ChangeoverPage() {
   }, [isAr]);
   /** A machine recorded «لا يوجد أمر شغل» has FINISHED — said in its own word. */
   const stateWord = useCallback((m: PlanMachine) => (machineFinished(m) ? s.machines.finished : s.states[m.state]), [s]);
+
+  /**
+   * What goes in small grey beside a forecast (owner, 2026-10-07: the forecast
+   * allows for the log being typed late): the day's log it was counted forward
+   * from, and — when no shift of the order has been counted yet — that it is
+   * only «الرئيسي»'s cycle time. "" when there is nothing to add.
+   */
+  const forecastNote = useCallback((o: PlanOrder | null) => (!o ? "" : [
+    o.asOf ? fill(s.day.asOf, { date: formatDate(o.asOf, lang) }) : "",
+    o.runBasis === "master" ? s.day.fromCycle : "",
+  ].filter(Boolean).join(" · ")), [s, lang]);
+  /**
+   * The floor said «لا يوجد أمر شغل» and the count says more than a shift is
+   * still to make (PlanOrder.doneUnsure): the page cannot tell which is wrong,
+   * so it says both and what to do about each. The count as it is LOGGED.
+   */
+  const unsureText = useCallback((o: PlanOrder) => fill(s.unsure.text, {
+    n: o.remaining !== null ? `${fmtInt(o.remaining, isAr)} ${s.rank.pieces}` : o.runHours !== null ? roughly(o.runHours) : s.rank.noQty,
+  }), [s, isAr, roughly]);
+  /** The mould-swap minutes are this machine's own (PlanMachine.swapMin), not a fixed number. */
+  const swapNote = useCallback((m: PlanMachine, est: Estimate) =>
+    (est.swapMeasured && !est.sameMould ? fill(s.rank.swapMeasured, { n: fmtInt(m.swapSamples, isAr) }) : ""), [s, isAr]);
+  /**
+   * The store material behind a «مفيش … في المخزن» / «الخامة ناقصة» chip is only
+   * a GUESS — nobody has answered which material the product is made of. Said
+   * beside the chip, as a guessed colour always is: it was stated as a fact of
+   * the store wherever the chip showed. "" when it is the supervisor's answer.
+   */
+  const stockGuessNote = useCallback((o: PlanOrder) => {
+    const state = stockState(o);
+    return o.stock?.guessed && (state === "none" || state === "low") ? s.ordersTab.stockGuessed : "";
+  }, [s]);
 
   /**
    * The one-tap answers to the page's own questions about a machine. Each is a
@@ -564,10 +670,11 @@ export default function ChangeoverPage() {
     setSelected(label);
     setTieError("");
     // The machine opens as its own screen — on the question the page has about
-    // it when there is one, else on what goes on it next.
-    setMtab(m && (m.now.orderMaybe || m.now.alsoOn || m.now.mixedShift) ? "now" : "next");
+    // it when there is one (a floor word the count disagrees with is one),
+    // else on what goes on it next.
+    setMtab(m && (m.now.orderMaybe || m.now.alsoOn || m.now.mixedShift || orderOf(m)?.doneUnsure) ? "now" : "next");
     requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: "start" }));
-  }, [machines]);
+  }, [machines, orderOf]);
 
   /* --------------------------------- states --------------------------------- */
 
@@ -720,6 +827,7 @@ export default function ChangeoverPage() {
   const card = (sg: Suggestion, i: number) => {
     if (!machine) return null;
     const o = sg.order;
+    const swap = swapNote(machine, sg.estimate);
     return (
       <li key={o.id} className="bg-white border border-gray-200 rounded-xl p-3 sm:p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -744,6 +852,8 @@ export default function ChangeoverPage() {
         <div className="flex flex-wrap gap-1 mt-2">
           {sg.chips.map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
         </div>
+        {stockGuessNote(o) && <p className="text-[11px] text-amber-700 mt-1.5">{stockGuessNote(o)}</p>}
+        {swap && <p className="text-[11px] text-gray-500 mt-1.5">{swap}</p>}
         <div className="flex flex-wrap gap-2 mt-3">
           <Btn onClick={() => setConfirm({ machine, pick: sg })} className="flex-1 sm:flex-none" disabled={!canWrite}>{s.rank.mount}</Btn>
           <Btn variant="outline" onClick={() => setOrderForm(o)} disabled={!canWrite}>
@@ -755,15 +865,29 @@ export default function ChangeoverPage() {
     );
   };
 
-  /** One machine on the day's plan: why it is there, what goes on, what to get ready. */
-  const dayCard = (e: DayEntry) => {
+  /**
+   * One machine on the day's plan: why it is there, what goes on, what to get
+   * ready. `n` numbers the machines that need a mould NOW, in the order they
+   * should be seen to (owner, 2026-10-07: "I am unable to understand the plan").
+   * Times are hours on the clock (`finishIn`) — a Friday in between is hours
+   * in which nothing runs.
+   */
+  const dayCard = (e: DayEntry, n?: number) => {
     const m = e.machine, sg = e.pick;
     const why =
       e.need === "finished" ? s.day.need.finished
       : e.need === "free" ? s.day.need.free
       : e.need === "stopped" ? fill(s.day.need.stopped, { reason: reasonText(m) })
+      : e.need === "overrun" ? s.day.need.overrun
+      : e.need === "down" ? fill(s.day.need.down, { reason: reasonText(m), since: stoppageSince(m) })
       : e.need === "interrupt" ? s.day.need.interrupt
-      : fill(s.day.need.soon, { t: roughly(e.hoursLeft ?? 0) });
+      // The forecast has run OUT: what was probably made since the last
+      // counted day covers all that the count still shows (the log is typed a
+      // day or two behind). Said in words — `roughly` never goes under ten
+      // minutes, and the card read "finishes in about 10 min" all day.
+      : e.need === "soon" && e.hoursLeft === 0 ? s.day.need.dueNow
+      : e.finishIn !== null ? fill(e.need === "soon" ? s.day.need.soon : s.day.need.left, { t: roughly(e.finishIn) })
+      : s.states[m.state];
     const verb = !sg ? ""
       : sg.order.queuedBehind ? s.day.act.sameMould
       : sg.mountedHere ? s.day.act.carryOn
@@ -773,6 +897,13 @@ export default function ChangeoverPage() {
       : s.day.act.mount;
     const d = sg?.estimate.drying ?? null;
     const dryH = d ? (d.minH === d.maxH ? `${d.minH}` : `${d.minH}–${d.maxH}`) : "";
+    // A forecast is on the card of a job that ends soon, and of one an urgent
+    // order may take the machine from — how long it still has is the trade.
+    const forecast = (e.need === "soon" || e.need === "interrupt") && e.finishIn !== null;
+    const note = forecast ? forecastNote(e.current) : "";
+    const swap = sg && !sg.mountedHere ? swapNote(m, sg.estimate) : "";
+    // The text under the head lines up with it: past the number, or past the dot.
+    const lead = n !== undefined ? "ps-8" : "ps-[18px]";
     return (
       <li key={m.label}>
         <button
@@ -780,18 +911,32 @@ export default function ChangeoverPage() {
           className="w-full text-start bg-white border border-gray-200 rounded-xl p-3 hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
         >
           <span className="flex items-start gap-2">
-            <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[m.state]}`} />
+            {n !== undefined
+              ? <span className={`w-6 h-6 rounded-full border-2 bg-white text-xs font-bold leading-none tabular-nums inline-flex items-center justify-center shrink-0 ${STATE_NUM[m.state]}`}>{fmtInt(n, isAr)}</span>
+              : <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[m.state]}`} />}
             <span className="min-w-0 flex-1">
               <span className="block text-sm text-gray-800">
                 <bdi dir="ltr" className="text-base font-bold text-gray-900">{codeOf(m.label)}</bdi> — {why}
               </span>
+              {e.need === "interrupt" && e.finishIn !== null && (
+                <span className="block text-xs text-gray-600 mt-0.5">{fill(s.day.need.left, { t: roughly(e.finishIn) })}</span>
+              )}
+              {note && <span className="block text-[11px] text-gray-500 mt-0.5">{note}</span>}
               {m.now.products.length > 0 && (
                 <span className="block text-xs text-gray-500 mt-0.5 break-words">{s.now.title}: {m.now.products.join(" / ")}</span>
               )}
             </span>
           </span>
+          {e.need === "overrun" && (
+            <span className={`block mt-2 ${lead} text-xs text-amber-800`}>{s.day.overrunHint}</span>
+          )}
+          {e.current?.doneUnsure && (
+            <span className={`flex items-start gap-1.5 mt-2 ${lead} text-xs text-amber-800`}>
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" /><span className="min-w-0">{unsureText(e.current)}</span>
+            </span>
+          )}
           {sg ? (
-            <span className="block mt-2 ps-[18px]">
+            <span className={`block mt-2 ${lead}`}>
               <span className="block text-xs font-semibold text-blue-700">{verb}</span>
               <span className="block font-semibold text-gray-900 break-words">
                 {sg.order.product} <span className="text-xs font-normal text-gray-400" dir="ltr">{sg.order.code}</span>
@@ -799,6 +944,7 @@ export default function ChangeoverPage() {
               <span className="flex flex-wrap gap-1 mt-1">
                 {sg.chips.filter((c) => DAY_CHIPS.has(c.key)).map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
               </span>
+              {stockGuessNote(sg.order) && <span className="block text-[11px] text-amber-700 mt-1">{stockGuessNote(sg.order)}</span>}
               {!sg.mountedHere && (
                 <span className="block text-xs text-gray-600 mt-1.5">
                   {s.day.prep.change} {s.approx} {minutes(sg.estimate.totalMin)}
@@ -807,22 +953,48 @@ export default function ChangeoverPage() {
                     : fill(e.need === "soon" ? s.day.prep.dryNow : s.day.prep.dryBefore, { h: dryH })}</>}
                 </span>
               )}
-              {(sg.fit === "unknown" || sg.needsAnswers) && (
-                <span className="block text-xs text-amber-700 mt-1">{sg.fit === "unknown" ? s.day.prep.fitAsk : s.day.prep.answers}</span>
+              {swap && <span className="block text-[11px] text-gray-500 mt-0.5">{swap}</span>}
+              {(sg.fit !== "here" || sg.needsAnswers) && (
+                <span className="block text-xs text-amber-700 mt-1">
+                  {sg.fit === "unknown" ? s.day.prep.fitAsk : sg.fit === "ran" ? s.day.prep.fitRan : s.day.prep.answers}
+                </span>
               )}
             </span>
           ) : (
-            <span className="block mt-2 ps-[18px] text-sm text-gray-500">{s.day.act.nothing}</span>
+            <span className={`block mt-2 ${lead} text-sm text-gray-500`}>{s.day.act.nothing}</span>
           )}
         </button>
       </li>
     );
   };
-  const needNow = day.filter((e) => e.need === "finished" || e.need === "free" || e.need === "stopped").length;
+  // The tab's badge: machines that need a mould now, and urgent orders no
+  // machine can take — the floor tab looked calm with two late orders unplaced.
+  const needNow = day.filter((e) => inGroup("now", e.need)).length + dayPlan.unplaced.length;
+
+  /**
+   * The order's material in «مخزن اتقان»: what the store holds of what is
+   * still needed, in kg — red when it holds none, amber when it is short.
+   * Nothing at all when the store material is not known (never a zero).
+   */
+  const stockLine = (o: PlanOrder) => {
+    const st = o.stock;
+    if (!st) return null;
+    const state = stockState(o);
+    return (
+      <p className={`text-xs mt-0.5 break-words ${state === "none" ? "text-red-700" : state === "low" ? "text-amber-700" : "text-gray-500"}`}>
+        {st.needKg !== null
+          ? fill(s.ordersTab.stock, { material: st.material, have: kgText(st.haveKg, isAr), need: kgText(st.needKg, isAr) })
+          : fill(s.ordersTab.stockNoNeed, { material: st.material, have: kgText(st.haveKg, isAr) })}
+        {st.guessed && <span className="text-amber-700"> · {s.ordersTab.stockGuessed}</span>}
+      </p>
+    );
+  };
 
   /** One open order on the «الأوامر» tab. */
   const orderRow = (o: PlanOrder) => {
     const done = !!o.doneByFloor || o.remaining === 0;
+    // An answer taken back («غير محدد») is not an answer.
+    const fitAnswered = !!o.fits && o.fits.length > 0;
     const on = ltr(codeOf(o.mountedOn));
     const where = done ? s.ordersTab.where.done
       : o.mountedRunning ? fill(s.ordersTab.where.running, { machine: on })
@@ -843,10 +1015,16 @@ export default function ChangeoverPage() {
           </p>
           <p className="text-xs text-gray-800 mt-1">{where}</p>
           {!done && (
-            <p className={`text-xs mt-0.5 ${o.fits ? "text-gray-500" : "text-amber-700"}`}>
-              {o.fits ? fill(s.ordersTab.fits, { machines: ltr(o.fits.map(codeOf).join(" · ")) }) : s.ordersTab.fitsAsk}
+            // Where a mould goes is the supervisor's answer; until he gives it,
+            // where the shift log shows it has run stands in — and is said to
+            // be only that (owner, 2026-10-07).
+            <p className={`text-xs mt-0.5 ${fitAnswered ? "text-gray-500" : "text-amber-700"}`}>
+              {fitAnswered ? fill(s.ordersTab.fits, { machines: codesText(o.fits!) })
+                : o.ranOn.length > 0 ? fill(s.ordersTab.ranOn, { machines: codesText(o.ranOn) })
+                : s.ordersTab.fitsAsk}
             </p>
           )}
+          {!done && stockLine(o)}
           <div className="flex flex-wrap gap-1 mt-1.5">
             {!done && urgencyChips(o, data.today).map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
             {o.status === "On Hold" && <Pill text={s.ordersTab.onHold} tone="gray" />}
@@ -862,6 +1040,10 @@ export default function ChangeoverPage() {
     running: sortedOrders.filter((o) => !o.doneByFloor && o.remaining !== 0 && o.mountedRunning),
     done: sortedOrders.filter((o) => !!o.doneByFloor || o.remaining === 0),
   };
+  // A key client goes first only by its DATE (late, or due within a few
+  // days): one of his orders with no date at all can never be urgent, and
+  // nothing else on the page says so.
+  const keyNoDate = orders.filter((o) => o.keyClient && !o.dueDate && !o.doneByFloor && o.remaining !== 0).length;
 
   return (
     <div dir={isAr ? "rtl" : "ltr"}>
@@ -902,6 +1084,12 @@ export default function ChangeoverPage() {
         <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.stoppagesDown}
         </p>
+      )}
+      {/* The store is a warning on a card, not what the plan stands on: a
+          quiet line. Without it, "nothing said about material" would read as
+          "the material is there". */}
+      {data.stockRead === false && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">{s.stockDown}</p>
       )}
 
       {!machine && (
@@ -1017,31 +1205,97 @@ export default function ChangeoverPage() {
       {!machine && tab === "day" && (
         <section className="mb-5">
           <p className="text-xs text-gray-500 mb-3">{s.day.intro}</p>
+          {/* The urgent orders the plan could not put on any machine — above
+              everything else, because each is a delivery about to be missed
+              and no card below mentions it. */}
+          {dayPlan.unplaced.length > 0 && (
+            <div className="mb-5 bg-red-50 border border-red-300 rounded-xl p-3">
+              <p className="text-sm font-bold text-red-800 flex items-start gap-2">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                <span className="min-w-0">{s.day.unplaced.title} <span className="font-normal tabular-nums">({fmtInt(dayPlan.unplaced.length, isAr)})</span></span>
+              </p>
+              <p className="text-xs text-red-800/90 mt-1">{s.day.unplaced.intro}</p>
+              <ul className="mt-2 divide-y divide-red-200 border-t border-red-200">
+                {dayPlan.unplaced.map(({ order: o, why }) => {
+                  // Where its mould is, when it is up somewhere: an order held on
+                  // a stopped machine is "no machine" for THAT reason, and the
+                  // page says which machine and why (lib/changeover.ts planDay).
+                  const on = o.mountedOn ? machines.find((m) => machineKey(m.label) === machineKey(o.mountedOn)) : undefined;
+                  return (
+                    <li key={o.id} className="py-2 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 break-words">{o.product} <span className="text-xs font-normal text-gray-500" dir="ltr">{o.code}</span></p>
+                        <p className="text-xs text-gray-600 mt-0.5">
+                          {o.client && <>{o.client} · </>}
+                          {o.dueDate ? <>{s.rank.due} <bdi dir="ltr">{formatDate(o.dueDate, lang)}</bdi></> : s.rank.noDue}
+                        </p>
+                        <p className="text-sm font-medium text-red-800 mt-1 break-words">
+                          {why === "noMachine" ? s.day.unplaced.noMachine
+                            : o.stock?.material ? fill(s.day.unplaced.noMaterial, { material: o.stock.material })
+                            : s.day.unplaced.noMaterialPlain}
+                          {/* A guessed material is said to be one — this is the
+                              line that takes a late order off every machine. */}
+                          {why === "noMaterial" && stockGuessNote(o) && <span className="font-normal text-amber-700"> · {stockGuessNote(o)}</span>}
+                        </p>
+                        {why === "noMachine" && on && (
+                          <p className="text-xs text-gray-600 mt-0.5 break-words">
+                            {fill(s.ordersTab.where.standing, { machine: ltr(codeOf(on.label)) })}
+                            {on.stoppage && <> · {fill(s.day.need.stopped, { reason: reasonText(on) })}</>}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {urgencyChips(o, data.today).map((c) => <Pill key={c.key} text={chipText(c)} tone={CHIP_TONE[c.tone]} />)}
+                        </div>
+                      </div>
+                      {/* The answers that would place it — which store material,
+                          which machines — are one tap away, as on «الأوامر». */}
+                      <Btn variant="ghost" onClick={() => setOrderForm(o)} disabled={!canWrite}><HelpCircle size={15} />{s.rank.questions}</Btn>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
           {day.length === 0 && <EmptyState text={s.day.empty} />}
-          {(["now", "soon", "running"] as const).map((g) => {
-            const rows = day.filter((e) =>
-              g === "now" ? e.need === "finished" || e.need === "free" || e.need === "stopped"
-              : g === "soon" ? e.need === "interrupt" || e.need === "soon"
-              : e.need === "running");
+          {DAY_GROUP_KEYS.map((g) => {
+            const rows = day.filter((e) => inGroup(g, e.need));
             if (rows.length === 0) return null;
             return (
               <div key={g} className="mb-5">
                 <h2 className="text-sm font-bold text-gray-900 mb-2">
                   {s.day.groups[g]} <span className="font-normal text-gray-400 tabular-nums">({fmtInt(rows.length, isAr)})</span>
                 </h2>
-                {g !== "running" ? <ul className="space-y-2">{rows.map(dayCard)}</ul> : (
+                {g === "now" || g === "soon" ? (
+                  <ul className="space-y-2">{rows.map((e, i) => dayCard(e, g === "now" ? i + 1 : undefined))}</ul>
+                ) : (
+                  // Machines with nothing to decide, one line each: the ones
+                  // that are down (the reason, and since when — never a pick),
+                  // and the ones that just keep running.
                   <ul className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-                    {rows.map((e) => (
-                      <li key={e.machine.label}>
-                        <button type="button" onClick={() => pick(e.machine.label)}
-                          className="w-full text-start px-3 py-2.5 min-h-11 flex items-center gap-2 hover:bg-gray-50 active:bg-gray-100">
-                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[e.machine.state]}`} />
-                          <bdi dir="ltr" className="font-bold text-gray-900 whitespace-nowrap">{codeOf(e.machine.label)}</bdi>
-                          <span className="min-w-0 flex-1 text-sm text-gray-700 truncate">{e.machine.now.products.join(" / ") || s.machines.empty}</span>
-                          {e.hoursLeft !== null && <span className="text-xs text-gray-500 whitespace-nowrap">{fill(s.day.need.left, { t: roughly(e.hoursLeft) })}</span>}
-                        </button>
-                      </li>
-                    ))}
+                    {rows.map((e) => {
+                      const note = g === "running" && e.finishIn !== null ? forecastNote(e.current) : "";
+                      return (
+                        <li key={e.machine.label}>
+                          <button type="button" onClick={() => pick(e.machine.label)}
+                            className="w-full text-start px-3 py-2.5 min-h-11 flex flex-wrap items-center gap-x-2 hover:bg-gray-50 active:bg-gray-100">
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATE_DOT[e.machine.state]}`} />
+                            <bdi dir="ltr" className="font-bold text-gray-900 whitespace-nowrap">{codeOf(e.machine.label)}</bdi>
+                            {g === "down" ? (
+                              <span className="min-w-0 flex-1 text-sm text-red-700 break-words">
+                                {fill(s.day.need.down, { reason: reasonText(e.machine), since: stoppageSince(e.machine) })}
+                              </span>
+                            ) : (
+                              <>
+                                <span className="min-w-0 flex-1 text-sm text-gray-700 truncate">{e.machine.now.products.join(" / ") || s.machines.empty}</span>
+                                {e.finishIn !== null && <span className="text-xs text-gray-500 whitespace-nowrap">{fill(s.day.need.left, { t: roughly(e.finishIn) })}</span>}
+                                {/* On a line of its own, the whole width: beside the name it was three lines of four words. */}
+                                {note && <span className="basis-full ps-[18px] text-[11px] text-gray-500 break-words">{note}</span>}
+                              </>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -1054,6 +1308,12 @@ export default function ChangeoverPage() {
       {!machine && tab === "orders" && (
         <section className="mb-5">
           <p className="text-xs text-gray-500 mb-3">{s.ordersTab.intro}</p>
+          {keyNoDate > 0 && (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span className="min-w-0">{fill(s.ordersTab.keyNoDate, { n: fmtInt(keyNoDate, isAr) })}</span>
+            </p>
+          )}
           {orders.length === 0 && <EmptyState text={s.ordersTab.none} />}
           {(["waiting", "running", "done"] as const).map((g) => orderGroups[g].length > 0 && (
             <div key={g} className="mb-5">
@@ -1127,6 +1387,22 @@ export default function ChangeoverPage() {
                       <span className="block text-xs text-red-600/90 mt-0.5">{s.now.stoppageHint}</span>
                     </p>
                   )}
+                  {/* The floor's word against the count (owner, 2026-10-07): the
+                      page cannot tell which is wrong, so it says both — and
+                      where each one is put right. */}
+                  {o?.doneUnsure && (
+                    <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <p className="flex items-start gap-2"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span className="min-w-0">{unsureText(o)}</span></p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {(["orders", "downtime"] as const).map((k) => (
+                          <Link key={k} href={k === "orders" ? "/dashboard/jobs" : "/dashboard/downtime"}
+                            className="inline-flex items-center justify-center min-h-11 sm:min-h-0 px-4 py-2 rounded-lg border border-amber-300 bg-white text-sm font-medium text-amber-900 hover:bg-amber-100 active:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                            {s.unsure[k]}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {machine.now.coloursGuessed && (
                     <p className="text-xs text-amber-700 flex items-start gap-1.5"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{s.now.coloursGuessed}</p>
                   )}
@@ -1180,6 +1456,15 @@ export default function ChangeoverPage() {
           {machine.state === "running" && plan.ranked.length > 0 && (
             <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2">{s.rank.busyNote}</p>
           )}
+          {/* The stoppage's reason decides whether the machine can take a mould
+              (owner, 2026-10-07). The day's plan offers a machine that is down
+              nothing; here the list stays — it is what goes on afterwards —
+              and says so. A warning, never a block. */}
+          {machine.stoppage && stoppageKind(machine.stoppage.reason) === "blocked" && plan.ranked.length > 0 && (
+            <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-2">
+              {fill(s.rank.downNote, { reason: reasonText(machine) })}
+            </p>
+          )}
           {plan.ranked.length === 0 && plan.blocked.length === 0 && (
             <EmptyState text={waiting === 0 ? s.rank.noOrders : s.rank.none} />
           )}
@@ -1221,7 +1506,8 @@ export default function ChangeoverPage() {
       )}
       {orderForm && (
         <OrderForm
-          order={orderForm} machines={machines} canSetKeyClient={data.canSetKeyClient} isAr={isAr} s={s} cancel={p.common.cancel}
+          order={orderForm} machines={machines} storeMaterials={data.storeMaterials} stockRead={data.stockRead}
+          canSetKeyClient={data.canSetKeyClient} isAr={isAr} s={s} cancel={p.common.cancel}
           onClose={() => setOrderForm(null)} onSaved={async () => { setOrderForm(null); await reloadFresh(); }}
         />
       )}
@@ -1652,8 +1938,9 @@ function MachineForm({ machine, orders, isAr, s, cancel, onClose, onSaved }: {
 
 /* ------------------------------- the questions ------------------------------- */
 
-function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose, onSaved }: {
-  order: PlanOrder; machines: PlanMachine[]; canSetKeyClient: boolean; isAr: boolean; s: Strings; cancel: string;
+function OrderForm({ order, machines, storeMaterials, stockRead, canSetKeyClient, isAr, s, cancel, onClose, onSaved }: {
+  order: PlanOrder; machines: PlanMachine[]; storeMaterials: readonly string[]; stockRead: boolean;
+  canSetKeyClient: boolean; isAr: boolean; s: Strings; cancel: string;
   onClose: () => void; onSaved: () => Promise<void>;
 }) {
   const [colours, setColours] = useState<string[]>(order.colours);
@@ -1661,6 +1948,18 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
   const [workers, setWorkers] = useState<number | null>(order.workers);
   const [oilCores, setOilCores] = useState<boolean | null>(order.oilCores);
   const [hotRunner, setHotRunner] = useState<boolean | null>(order.hotRunner);
+  // Which material of «مخزن اتقان» the product is made of — asked once per
+  // mould and remembered, because Master's material names do not match the
+  // store's (owner, 2026-10-07). `order.storeMaterial` is the standing answer
+  // ("" = never asked; a snapshot from before the field has none either) and
+  // `stock.material` the store's own spelling of it, or of a guess. The answer
+  // is read on its OWN: `stock` is null whenever the store cannot put a number
+  // on it (the name gone from the store, its books below zero), and the form
+  // then said «غير محددة» for an answered mould — every save added a row.
+  const answeredMaterial = order.storeMaterial || "";
+  const materialGuessed = !answeredMaterial && !!order.stock?.guessed;
+  const stockMaterial = order.stock?.material || answeredMaterial;
+  const [storeMaterial, setStoreMaterial] = useState(stockMaterial);
   const [missing, setMissing] = useState<MissingKey[] | null>(order.missing);
   const [keyClient, setKeyClient] = useState(order.keyClient);
   const [busy, setBusy] = useState(false);
@@ -1668,6 +1967,14 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
   // The answers about THIS order are keyed on its code; a row with no code
   // has nothing to key them on, and saying so beats dropping them silently.
   const noCode = order.code.startsWith("#");
+  // Where the shift log shows this mould has run, in the registry's own
+  // spelling, most shifts first — offered as the answer, never taken as it.
+  const ran = order.ranOn
+    .map((l) => machines.find((m) => machineKey(m.label) === machineKey(l))?.label ?? "")
+    .filter((l, i, all) => !!l && all.indexOf(l) === i);
+  const ranTicked = sameList(fits.map(machineKey), ran.map(machineKey));
+  // The answered material stays in the list even if the store no longer holds a line of it.
+  const materialChoices = stockMaterial && !storeMaterials.includes(stockMaterial) ? [stockMaterial, ...storeMaterials] : storeMaterials;
 
   async function save() {
     if (busy) return;
@@ -1681,6 +1988,9 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
     if (workers !== null && workers !== order.workers) moldValues.workers = workers;
     if (oilCores !== null && oilCores !== order.oilCores) moldValues.oilCores = oilCores;
     if (hotRunner !== null && hotRunner !== order.hotRunner) moldValues.hotRunner = hotRunner;
+    // «غير محددة» is not an answer and sends nothing. A guess left selected
+    // and saved becomes the answer — the form names it as a guess, below.
+    if (stockRead && storeMaterial && (storeMaterial !== stockMaterial || materialGuessed)) moldValues.storeMaterial = storeMaterial;
 
     const items: { kind: string; name: string; values: Record<string, unknown> }[] = [];
     if (Object.keys(orderValues).length > 0 && !noCode) items.push({ kind: "order", name: order.code, values: orderValues });
@@ -1720,6 +2030,15 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
 
       <p className={q}>{s.orderForm.fits}</p>
       {order.fitsHintText && <p className="text-xs text-gray-500 -mt-1 mb-2">{fill(s.orderForm.fitsHint, { t: order.fitsHintText })}</p>}
+      {/* Where a mould goes is learned from where it has run (owner,
+          2026-10-07) — one tap ticks exactly those machines, and it is still
+          the supervisor who saves the answer. */}
+      {ran.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 -mt-1 mb-2">
+          <p className="text-xs text-gray-600 min-w-0">{fill(s.orderForm.ranOn, { machines: codesText(ran) })}</p>
+          {!ranTicked && <Btn variant="outline" onClick={() => setFits(ran)}>{s.orderForm.ranOnPick}</Btn>}
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         {machines.map((m) => {
           const on = fits.some((l) => machineKey(l) === machineKey(m.label));
@@ -1744,6 +2063,25 @@ function OrderForm({ order, machines, canSetKeyClient, isAr, s, cancel, onClose,
 
       <p className={q}>{s.orderForm.hotRunner}</p>
       {yesNoRow(hotRunner, setHotRunner)}
+
+      <p className={q}>{s.orderForm.storeMaterial}</p>
+      {!stockRead ? (
+        // Not "no material": the store did not answer, and nothing can be picked from it.
+        <p className="text-xs text-gray-500">{s.orderForm.storeDown}</p>
+      ) : (
+        <>
+          <select className={inputCls} value={storeMaterial} aria-label={s.orderForm.storeMaterial} onChange={(e) => setStoreMaterial(e.target.value)}>
+            {/* An answer is corrected by picking another material; it cannot
+                be taken back to nothing (the latest non-blank cell stands), so
+                «غير محددة» is offered only while nobody has answered. */}
+            {(!stockMaterial || materialGuessed) && <option value="">{s.orderForm.storeMaterialNone}</option>}
+            {materialChoices.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          {materialGuessed && storeMaterial === stockMaterial && (
+            <p className="text-sm text-amber-700 mt-2">{fill(s.orderForm.storeMaterialGuess, { material: stockMaterial })}</p>
+          )}
+        </>
+      )}
 
       {!noCode && (
         <>
@@ -1816,13 +2154,21 @@ function ConfirmForm({ machine, pick, friday, canWrite, isAr, s, cancel, minutes
   const est = useMemo(() => estimateFrom(
     { product: standing, colours: fromColours, material: machine.now.material },
     { product: o.product, colour: startColour, material: o.material },
-    { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner },
+    // The machine's own measured change time, as the ranking priced it: the
+    // minutes confirmed here are the ones the card showed.
+    { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner, swapMin: machine.swapMin },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [machine, o, standing, startColour, fromColours.join("|")]);
   const checks: readonly string[] = o.hotRunner ? [...CHECKS, "hotRunner"] : CHECKS;
   const allTicked = checks.every((k) => ticks[k]);
   const ready = allTicked && !!startColour;
-  const interrupting = machine.state === "running" && !o.keyClient && !o.queuedBehind;
+  // The warning follows the RANKING's own word (Suggestion.interrupt: an urgent
+  // key-client order, a late one or one that will be late — and never over a
+  // job that ends within a shift, is itself late or a key client's, or went on
+  // today). It had a rule of its own, "only for a key client": the plan said
+  // «يستاهل نفك الشغال» and this dialog then said it was not allowed — and for
+  // a key client with weeks to go, or over a mould mounted today, it said nothing.
+  const interrupting = machine.state === "running" && !pick.interrupt && !o.queuedBehind;
 
   async function go() {
     if (!ready || busy) return;
@@ -1894,6 +2240,9 @@ function ConfirmForm({ machine, pick, friday, canWrite, isAr, s, cancel, minutes
 
       <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 tabular-nums">
         <p>{s.rank.mould}: {est.sameMould ? s.rank.sameMould : `${s.approx} ${minutes(est.swapMin)}`}</p>
+        {est.swapMeasured && !est.sameMould && (
+          <p className="text-[11px] text-gray-500">{fill(s.rank.swapMeasured, { n: fmtInt(machine.swapSamples, isAr) })}</p>
+        )}
         <p>{s.rank.purge}: {s.approx} {minutes(est.purgeMin)}</p>
         {est.hotRunnerMin > 0 && <p>{s.rank.hotRunner}: {s.approx} {minutes(est.hotRunnerMin)}</p>}
         {est.drying && (

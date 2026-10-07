@@ -296,6 +296,11 @@ export const ENTITIES: Record<string, EntityConfig> = {
       // «هوت رانر» (2026-10-05, owner: "some moulds may have it") — added to
       // the live tab after the map column, so it is declared after it.
       { key: "hotRunner", keywords: ["هوت رانر", "hot runner"] },
+      // «خامة المخزن» (2026-10-07) — which material of «مخزن اتقان» a product
+      // is made of, asked once per product. Declared after «هوت رانر» for the
+      // same reason. The full phrases only: a bare «الخامة» / "material"
+      // would be a keyword waiting to claim some later column.
+      { key: "storeMaterial", keywords: ["خامة المخزن", "store material"] },
     ],
   },
   // «تغييرات الاسطمبات»: one row per confirmed mould change. The LAST row for

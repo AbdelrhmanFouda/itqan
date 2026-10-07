@@ -6,6 +6,11 @@ import type { Lang } from "./i18n";
  * Use as: co[lang].xxx. en and ar keep the same shape
  * (tests/i18n-shape.test.ts). `{name}` slots are filled with lib/format.ts
  * `fill`. The chip keys are the ones lib/changeover.ts `rankFor` emits.
+ *
+ * 2026-10-07 (ten changes the owner approved that day): the words for an
+ * order that WILL be late, the store's stock, where a mould has run before,
+ * a machine that is down, the urgent orders the day's plan could not place,
+ * and the floor's «لا يوجد أمر شغل» when the count disagrees with it.
  */
 export const co = {
   en: {
@@ -20,14 +25,30 @@ export const co = {
     screen: { back: "Back", now: "On it now", next: "What comes next" },
     day: {
       intro: "Machines in the order they need a decision. Each order is offered to one machine only.",
-      groups: { now: "Need a mould now", soon: "Coming up", running: "Running — nothing to do" },
+      groups: { now: "Need a mould now", soon: "Coming up", down: "Stopped — cannot take a mould now", running: "Running — nothing to do" },
       need: {
         finished: "free now — it finished its job (no job order)",
         free: "standing — no shift logged",
         stopped: "stoppage: {reason}",
+        overrun: "running — but the count says its order is complete",
         interrupt: "running — an urgent order is waiting",
         soon: "finishes in about {t}",
+        // The forecast has run out: by its rate the job is done, and the count
+        // has not caught up. Never worded as a number of minutes.
+        dueNow: "should be finished by now — the count is behind",
+        down: "{reason} — since {since}",
         left: "about {t} left",
+      },
+      overrunHint: "Close its order on the work orders page — the quantity is made.",
+      // Beside a forecast: the log is typed a day or two behind.
+      asOf: "as of the log of {date}",
+      fromCycle: "rough — from the cycle time, nothing counted yet",
+      unplaced: {
+        title: "Urgent orders with no machine",
+        intro: "Late, about to be late, or a key client's close date — and the plan found no place for them.",
+        noMaterial: "None of «{material}» in the store",
+        noMaterialPlain: "None of its material in the store",
+        noMachine: "No machine can take it now",
       },
       act: {
         mount: "Put on",
@@ -45,6 +66,7 @@ export const co = {
         dryBefore: "dry {h} h before it runs",
         answers: "Some questions are not answered yet",
         fitAsk: "The supervisor has not said it goes on this machine",
+        fitRan: "It ran here before — the supervisor has not confirmed it yet",
       },
       hours: "{h} h",
       days: "{d} days",
@@ -62,8 +84,19 @@ export const co = {
       },
       fits: "Goes on: {machines}",
       fitsAsk: "The supervisor has not said which machines it goes on",
+      ranOn: "Ran before on: {machines} — the supervisor still has to confirm",
+      keyNoDate: "Key-client orders with no delivery date: {n}. Without a date they cannot be put first — set it on the work orders page.",
+      stock: "Store — {material}: {have} kg of {need} kg needed",
+      stockNoNeed: "Store — {material}: {have} kg (how much is needed is not known)",
+      stockGuessed: "material guessed",
       onHold: "On hold",
       none: "No open orders.",
+    },
+    // The floor said «لا يوجد أمر شغل» but the count disagrees (PlanOrder.doneUnsure).
+    unsure: {
+      text: "This machine was recorded «no job order», but the count still shows {n} left. If the order is finished, close it on the work orders page; if it is not, correct the stoppage reason on the downtime page.",
+      orders: "Work orders",
+      downtime: "Downtime",
     },
     dataAge: "Numbers from {age} ago — refreshing…",
     notLive: "This is the last view seen on this device, not the live one. Saving is off until it refreshes.",
@@ -86,6 +119,7 @@ export const co = {
     summary: { running: "Running", stopped: "Stoppage", idle: "Idle", waiting: "Orders waiting" },
     asOf: "Running and idle come from the production log up to {date}; a stoppage is one running on the downtime page right now.",
     stoppagesDown: "The running stoppages could not be read just now, so no machine shows as stopped. Refresh in a moment.",
+    stockDown: "The store could not be read just now, so the material in stock is not shown. Refresh in a moment.",
     view: { map: "Map", list: "List" },
     states: { running: "Running", stopped: "Stoppage", idle: "Idle", unknown: "No record" },
     map: {
@@ -145,9 +179,14 @@ export const co = {
       noOrders: "No work orders are waiting.",
       elsewhere: "Master puts these on another machine ({n})",
       noQty: "quantity not set",
-      busyNote: "This machine is running. The list is what to mount when it finishes — a running mould comes off only for a key client.",
+      // The interrupt rule as the owner approved it on 2026-10-07 (lib/changeover.ts
+      // rankFor) — it said "only for a key client" until the review of that day.
+      busyNote: "This machine is running. The list is what to mount when it finishes. A running mould comes off only for an order that is late or will be late, or a key client's urgent one — and not when the running job ends within a shift, is itself late (or will be) or a key client's, or went on today.",
+      downNote: "This machine is stopped ({reason}) and cannot take a mould until that ends. The list is what goes on afterwards.",
       elsewhereImportant: " — includes a key client or a late order",
       hotRunner: "Hot runner heat-up and purge",
+      // {n} is 3 or more — the machine's time is used only from 3 recorded changes up.
+      swapMeasured: "Swap time from {n} changes recorded on this machine",
       mount: "Mount this",
       questions: "Questions",
       questionsNeeded: "Answer the questions",
@@ -183,6 +222,11 @@ export const co = {
       dueTwoDays: "Due in 2 days",
       dueSoon: "Due in {n} days",
       noDueDate: "No delivery date",
+      // Working days (no Fridays): the running it needs against what is left.
+      atRisk: "Will be late: needs {need} d, has {have}",
+      ranHere: "Ran on this machine before",
+      stockNone: "No «{material}» in the store",
+      stockLow: "Material short: {have} of {need} kg",
       sameColour: "Same colour",
       anyColour: "Any colour",
       darker: "Light → dark",
@@ -241,9 +285,15 @@ export const co = {
       colour: "Which colours is this order made in?",
       fits: "Which machines does this mould fit?",
       fitsHint: "Master says machine {t}.",
+      ranOn: "It has run before on: {machines}",
+      ranOnPick: "Tick these",
       workers: "How many workers does it need?",
       oilCores: "Does the mould have oil cores?",
       hotRunner: "Does the mould have a hot runner?",
+      storeMaterial: "Which material in the store is it made of?",
+      storeMaterialNone: "Not set",
+      storeMaterialGuess: "«{material}» is a guess from Master's material — saving confirms it. Change it if it is wrong.",
+      storeDown: "The store could not be read just now, so this cannot be set. Try again in a moment.",
       noCode: "This work order has no code, so its colour and what is missing cannot be saved. Give it a code on the work orders page.",
       missing: "Is anything still missing?",
       nothingMissing: "Everything is ready",
@@ -264,7 +314,9 @@ export const co = {
       startAny: "Which colour is actually going in?",
       barrelNow: "Which colour is in the machine now?",
       barrelUnknown: "Not sure (assume the hardest)",
-      runningWarn: "This machine is running and this order is not a key client's. A running mould comes off only for a key client.",
+      // Shown when the ranking did NOT call this order worth the running mould
+      // (Suggestion.interrupt) — the same rule as rank.busyNote, never another.
+      runningWarn: "This machine is running, and the plan does not take its mould off for this order. A running mould comes off only for an order that is late or will be late, or a key client's urgent one — and not when the running job ends within a shift, is itself late (or will be) or a key client's, or went on today.",
       checklist: "Before the mould goes up",
       checks: {
         material: "Material and masterbatch are ready",
@@ -319,6 +371,10 @@ export const co = {
       no_product: "Choose what is on the machine.",
       sheet_unreadable: "The sheet could not be read just now. Try again in a moment.",
       order_closed: "That work order is closed.",
+      bad_store_material: "That material is not in the store's list. Refresh and pick it again.",
+      // What the server really answers for a name the store no longer holds
+      // (renamed there since the page loaded): trying again never works.
+      unknown_store_material: "That material is not in the store's list any more. Refresh and pick it again.",
     },
     saving: "Saving…",
   },
@@ -334,14 +390,27 @@ export const co = {
     screen: { back: "رجوع", now: "الراكب الآن", next: "اللي بعده" },
     day: {
       intro: "الماكينات بالترتيب اللي محتاجة قرار. كل أمر بيتعرض على ماكينة واحدة بس.",
-      groups: { now: "محتاجة اسطمبة دلوقتي", soon: "جاية قريب", running: "شغالة ومكملة" },
+      groups: { now: "محتاجة اسطمبة دلوقتي", soon: "جاية قريب", down: "متوقفة — مش هتاخد اسطمبة دلوقتي", running: "شغالة ومكملة" },
       need: {
         finished: "فاضية دلوقتي — خلصت اللي عليها (لا يوجد أمر شغل)",
         free: "واقفة — مفيش وردية مسجّلة",
         stopped: "توقف: {reason}",
+        overrun: "شغالة — والعدّ بيقول إن أمرها خلص",
         interrupt: "شغالة — وفيه أمر مستعجل مستني",
         soon: "هتخلص بعد حوالي {t}",
+        dueNow: "المفروض تكون خلصت — العدّ متأخر",
+        down: "{reason} — من {since}",
         left: "باقي حوالي {t}",
+      },
+      overrunHint: "اقفل أمرها من صفحة أوامر التشغيل — الكمية اتعملت.",
+      asOf: "حسب سجل يوم {date}",
+      fromCycle: "تقريبي — من زمن الدورة، لسه مفيش إنتاج متسجّل",
+      unplaced: {
+        title: "أوامر مستعجلة مالهاش ماكينة",
+        intro: "متأخرة، أو هتتأخر، أو لعميل مهم وتسليمها قرّب — والخطة ما لقتلهاش مكان.",
+        noMaterial: "مفيش «{material}» في المخزن",
+        noMaterialPlain: "خامته مش موجودة في المخزن",
+        noMachine: "مفيش ماكينة تاخده دلوقتي",
       },
       act: {
         mount: "ركّب",
@@ -359,6 +428,7 @@ export const co = {
         dryBefore: "تجفيف {h} س قبل التشغيل",
         answers: "فيه أسئلة لسه ما اتجاوبتش",
         fitAsk: "المشرف لسه ما قالش إنها تركب على الماكينة دي",
+        fitRan: "اشتغلت هنا قبل كده — والمشرف لسه ما أكّدش",
       },
       hours: "{h} س",
       days: "{d} يوم",
@@ -376,8 +446,18 @@ export const co = {
       },
       fits: "تركب على: {machines}",
       fitsAsk: "المشرف لسه ما حددش تركب على أنهي ماكينات",
+      ranOn: "اشتغل قبل كده على: {machines} — والمشرف لسه يأكّد",
+      keyNoDate: "أوامر لعملاء مهمين بدون تاريخ تسليم: {n}. من غير تاريخ مش هتتقدّم على غيرها — اكتب التاريخ من صفحة أوامر التشغيل.",
+      stock: "المخزن — {material}: {have} كجم من {need} كجم مطلوبة",
+      stockNoNeed: "المخزن — {material}: {have} كجم (المطلوب غير معروف)",
+      stockGuessed: "الخامة مستنتجة",
       onHold: "متوقف",
       none: "مفيش أوامر مفتوحة.",
+    },
+    unsure: {
+      text: "الماكينة دي اتسجّلت «لا يوجد أمر شغل»، بس العدّ لسه بيقول باقي {n}. لو الأمر خلص اقفله من صفحة أوامر التشغيل، ولو ما خلصش صحّح سبب التوقف من صفحة التوقفات.",
+      orders: "أوامر التشغيل",
+      downtime: "التوقفات",
     },
     dataAge: "الأرقام من قبل {age} — جارٍ التحديث…",
     notLive: "دي آخر نسخة ظهرت على الجهاز ده، مش النسخة الحالية. الحفظ متوقف لحد ما تتحدّث.",
@@ -400,6 +480,7 @@ export const co = {
     summary: { running: "شغالة", stopped: "توقف مسجّل", idle: "واقفة", waiting: "أوامر منتظرة" },
     asOf: "الشغالة والواقفة حسب سجل الإنتاج حتى {date}، والتوقف حسب صفحة التوقفات دلوقتي.",
     stoppagesDown: "التوقفات الشغالة لم تُقرأ الآن، فمفيش ماكينة هتظهر متوقفة. حدّث بعد لحظة.",
+    stockDown: "المخزن لم يُقرأ الآن، فرصيد الخامات مش ظاهر. حدّث بعد لحظة.",
     view: { map: "خريطة", list: "قائمة" },
     states: { running: "شغالة", stopped: "توقف", idle: "واقفة", unknown: "بدون سجل" },
     map: {
@@ -459,9 +540,11 @@ export const co = {
       noOrders: "لا توجد أوامر شغل منتظرة.",
       elsewhere: "حسب الرئيسي دي لماكينات تانية ({n})",
       noQty: "الكمية غير محددة",
-      busyNote: "الماكينة شغالة دلوقتي. ده ترتيب اللي يركب لما تخلص — ما نفكش الشغال إلا لعميل مهم.",
+      busyNote: "الماكينة شغالة دلوقتي. ده ترتيب اللي يركب لما تخلص. ما نفكش الشغال إلا لأمر متأخر أو هيتأخر، أو لأمر مستعجل لعميل مهم — ومش لو الشغال هيخلص خلال وردية، أو هو نفسه متأخر أو هيتأخر أو لعميل مهم، أو راكب من النهاردة.",
+      downNote: "الماكينة متوقفة ({reason}) ومش هتاخد اسطمبة لحد ما التوقف ينتهي. ده ترتيب اللي يركب بعدها.",
       elsewhereImportant: " — فيها عميل مهم أو أمر متأخر",
       hotRunner: "تسخين وغسيل الهوت رانر",
+      swapMeasured: "وقت الفك والتركيب من تغييرات الماكينة دي المسجّلة ({n})",
       mount: "ركّب دي",
       questions: "أسئلة",
       questionsNeeded: "جاوب على الأسئلة",
@@ -497,6 +580,10 @@ export const co = {
       dueTwoDays: "التسليم بعد يومين",
       dueSoon: "التسليم بعد {n} أيام",
       noDueDate: "بدون تاريخ تسليم",
+      atRisk: "هيتأخر — بالأيام: محتاج {need} وباقي {have}",
+      ranHere: "اشتغلت هنا قبل كده",
+      stockNone: "مفيش «{material}» في المخزن",
+      stockLow: "الخامة ناقصة: {have} من {need} كجم",
       sameColour: "نفس اللون",
       anyColour: "أي لون",
       darker: "فاتح ← غامق",
@@ -555,9 +642,15 @@ export const co = {
       colour: "أمر الشغل ده بيتعمل بأنهي ألوان؟",
       fits: "الاسطمبة دي تركب على أنهي ماكينات؟",
       fitsHint: "الرئيسي يقول ماكينة {t}.",
+      ranOn: "اشتغلت قبل كده على: {machines}",
+      ranOnPick: "علّم على دول",
       workers: "محتاجة كام عامل؟",
       oilCores: "الاسطمبة فيها بساتم زيت؟",
       hotRunner: "الاسطمبة فيها هوت رانر؟",
+      storeMaterial: "بتتعمل من أنهي خامة في المخزن؟",
+      storeMaterialNone: "غير محددة",
+      storeMaterialGuess: "«{material}» مستنتجة من خامة الرئيسي — الحفظ بيأكّدها. غيّرها لو غلط.",
+      storeDown: "المخزن لم يُقرأ الآن، فالخامة مش هتتحدد دلوقتي. حاول بعد لحظة.",
       noCode: "أمر الشغل ده من غير كود، فاللون والنواقص مش هيتحفظوا. اكتب له كود من صفحة أوامر التشغيل.",
       missing: "فيه حاجة لسه ناقصة؟",
       nothingMissing: "كل حاجة جاهزة",
@@ -578,7 +671,7 @@ export const co = {
       startAny: "هيشتغل بأنهي لون فعلاً؟",
       barrelNow: "إيه اللون اللي في الماكينة دلوقتي؟",
       barrelUnknown: "مش متأكد (احسب على الأصعب)",
-      runningWarn: "الماكينة شغالة والأمر ده مش لعميل مهم. الشغال ما يتفكش إلا لعميل مهم.",
+      runningWarn: "الماكينة شغالة، والخطة ما بتفكش الشغال عشان الأمر ده. الشغال ما يتفكش إلا لأمر متأخر أو هيتأخر، أو لأمر مستعجل لعميل مهم — ومش لو الشغال هيخلص خلال وردية، أو هو نفسه متأخر أو هيتأخر أو لعميل مهم، أو راكب من النهاردة.",
       checklist: "قبل ما الاسطمبة تطلع",
       checks: {
         material: "الخامة والماستر باتش جاهزين",
@@ -633,6 +726,8 @@ export const co = {
       no_product: "اختر الراكب على الماكينة.",
       sheet_unreadable: "الجدول لم يُقرأ الآن. حاول بعد لحظة.",
       order_closed: "أمر الشغل ده مقفول.",
+      bad_store_material: "الخامة دي مش في قائمة المخزن. حدّث الصفحة واخترها تاني.",
+      unknown_store_material: "الخامة دي ما بقتش في قائمة المخزن. حدّث الصفحة واخترها تاني.",
     },
     saving: "جارٍ الحفظ…",
   },

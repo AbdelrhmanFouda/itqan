@@ -248,7 +248,18 @@ const EASE_ORDER: Record<Ease, number> = { same: 0, easy: 1, unknown: 2, hard: 3
 
 export type Side = { product: string; colour: string; material: string };
 
-export type EstimateOptions = { bigMachine?: boolean; oilCores?: boolean | null; hotRunner?: boolean | null };
+export type EstimateOptions = {
+  bigMachine?: boolean; oilCores?: boolean | null; hotRunner?: boolean | null;
+  /**
+   * What a mould change on THIS machine has actually taken (PlanMachine.swapMin
+   * — the median of its own «تغيير الاسطمبة» stoppages). A number replaces the
+   * fixed swap minutes above, ordinary and big machine alike, for a change of
+   * mould; null / absent = not measured, the fixed numbers stand.
+   * Approved by the owner, 2026-10-07: change times come from the factory's
+   * own history.
+   */
+  swapMin?: number | null;
+};
 
 export type Estimate = {
   ease: Ease;
@@ -258,6 +269,8 @@ export type Estimate = {
   sameMould: boolean;
   purgeMin: number;
   swapMin: number;
+  /** `swapMin` is the machine's own measured time, not one of the fixed numbers. */
+  swapMeasured: boolean;
   /** Extra minutes for a hot-runner mould; 0 when it has none or nothing changes. */
   hotRunnerMin: number;
   totalMin: number;
@@ -303,13 +316,26 @@ export function estimateChange(from: Side, to: Side, opts: EstimateOptions = {})
     : b;
 
   const sameMould = !!fold(from.product) && fold(from.product) === fold(to.product);
-  const swapMin = sameMould ? 0 : opts.bigMachine ? N.swapBigMin : opts.oilCores ? N.swapOilCoresMin : N.swapMin;
+  // What a change of mould has really taken on this machine, when the server
+  // could measure it — instead of the fixed minutes, the big machine's
+  // «حوالي 6 ساعات» included (approved by the owner, 2026-10-07). Only a real
+  // number of minutes is a measurement; null, 0 and NaN are "not measured".
+  const measured = typeof opts.swapMin === "number" && Number.isFinite(opts.swapMin) && opts.swapMin > 0 ? opts.swapMin : null;
+  const fixed = opts.bigMachine ? N.swapBigMin : N.swapMin;
+  // Oil cores are the MOULD's own cost, whichever machine it goes on: the
+  // machine's history is mostly ordinary moulds, so it never brings such a
+  // mould under the owner's «ساعتين ثلاثة» (ASSUMPTION — he was not asked how
+  // the two combine; the slower of them does not flatter).
+  const swapMin = sameMould ? 0
+    : opts.oilCores ? Math.max(N.swapOilCoresMin, measured ?? fixed)
+    : measured ?? fixed;
+  const swapMeasured = !sameMould && measured !== null && swapMin === measured;
   // A hot runner is heated and purged through whenever its mould goes up or
   // the colour in it changes — not when the same mould carries on unchanged.
   const hotRunnerMin = opts.hotRunner && !(sameMould && ease === "same") ? N.hotRunnerMin : 0;
 
   return {
-    ease, colour, materialChange, sameMould, purgeMin, swapMin, hotRunnerMin,
+    ease, colour, materialChange, sameMould, purgeMin, swapMin, swapMeasured, hotRunnerMin,
     totalMin: purgeMin + swapMin + hotRunnerMin,
     drying: dryingFor(to.material),
   };
@@ -344,6 +370,10 @@ export const ANSWER_COLUMNS = {
   workers: "mold",
   oilCores: "mold",
   hotRunner: "mold",
+  // The store's own name for the material this product is made of — asked
+  // once per product and remembered, because Master's «نوع الخام» does not
+  // match the store's catalogue (approved by the owner, 2026-10-07).
+  storeMaterial: "mold",
   keyClient: "client",
   transparentOnly: "machine",
   bigMachine: "machine",
@@ -468,6 +498,9 @@ export const ANSWERS_HEADERS: string[] = [
   // columns in the order they were added.
   "ترتيب الخريطة\nMap layout",
   "هوت رانر\nHot runner",
+  // Added 2026-10-07, last again: which material of «مخزن اتقان» a product is
+  // made of. Worded so that neither half holds another field's keyword.
+  "خامة المخزن\nStore material",
 ];
 
 /** One row per confirmed change — and per «الراكب الآن» declaration, which is
@@ -751,6 +784,15 @@ export type MachineNow = {
   /** ISO day of the newest evidence behind `products`; "" when unknown. */
   since: string;
   shift: string;
+  /**
+   * The ISO day the product now on the machine STARTED there: the change
+   * confirmed on this page when there is one, else the oldest of the unbroken
+   * run of shift rows (newest first) that name one of `products`; "" when
+   * unknown. A mould that went on today is not taken off again (approved by
+   * the owner, 2026-10-07) — rankFor does not interrupt a job whose
+   * `startedOn` is today or later.
+   */
+  startedOn: string;
 };
 
 /**
@@ -777,6 +819,16 @@ export type PlanMachine = {
   stoppage: Stoppage | null;
   transparentOnly: boolean;
   bigMachine: boolean;
+  /**
+   * What a mould change on THIS machine has actually taken, in minutes: the
+   * median of its own «تغيير الاسطمبة» rows in «التوقفات», rounded to 5 (the
+   * server works it out — ASSUMPTION there: rows of 15–720 minutes from the
+   * last 90 days, and at least 3 of them). null = not enough history, or the
+   * tab could not be read: the fixed numbers of CHANGEOVER_NUMBERS stand.
+   */
+  swapMin: number | null;
+  /** How many such rows are behind `swapMin` (0 when it is null for want of any). */
+  swapSamples: number;
 };
 
 /** The downtime page's reason key for «لا يوجد أمر شغل» (lib/prod-meta.ts). */
@@ -789,6 +841,39 @@ export const NO_ORDER_STOPPAGE = "No order";
  * machine is the first one that needs a mould.
  */
 export const machineFinished = (m: { stoppage: Stoppage | null }): boolean => m.stoppage?.reason === NO_ORDER_STOPPAGE;
+
+/**
+ * What a running stoppage's REASON says about putting a mould on the machine
+ * (approved by the owner, 2026-10-07 — before it, the plan gave a late order
+ * to a machine that was down for repair):
+ *
+ * finished = «لا يوجد أمر شغل»: it has nothing to run — the first to need a mould;
+ * open     = the MACHINE is fine and can take another mould: its mould is out
+ *            for maintenance, or there is no material for the job on it;
+ * blocked  = the machine itself cannot run anything now — a repair, a change
+ *            already in progress («تغيير الاسطمبة»), drying, no operator, a
+ *            set-up, a burnt nozzle, a broken sprue, «أخرى». A reason key this
+ *            file does not know is blocked too: never offer a mould on a guess.
+ *
+ * Keys are lib/prod-meta.ts DOWNTIME_CAPTURE_REASONS (copied — zero imports).
+ */
+export type StoppageKind = "finished" | "open" | "blocked";
+const OPEN_STOPPAGES: readonly string[] = ["Mold maintenance", "No material"];
+export function stoppageKind(reason: string): StoppageKind {
+  if (reason === NO_ORDER_STOPPAGE) return "finished";
+  return OPEN_STOPPAGES.includes(reason) ? "open" : "blocked";
+}
+/**
+ * «صيانة في الماكينة» — the one blocked reason that is a repair of the MACHINE
+ * itself, with no word on how long. Under every other one the mould on the
+ * machine is about to run there again (a change in progress, a set-up, drying,
+ * nobody to run it, a nozzle, a sprue), so the day's plan keeps its order with
+ * it; under this one the plan is left as the owner approved it on 2026-10-07 —
+ * "the late order goes to a machine that can run it".
+ * ASSUMPTION (his to correct): that this holds when the late order's mould is
+ * the one standing on the machine under repair.
+ */
+const MACHINE_REPAIR = "Maintenance";
 
 /**
  * The one place a machine's state is decided.
@@ -946,10 +1031,37 @@ export type PlanOrder = {
   /** The app's status token (lib/prod-meta.ts): "In Production", "Not Started", "On Hold"… */
   status: string;
   qtyKg: number;
-  /** Pieces still to make; null when Master has no piece weight for it. */
+  /** Pieces still to make, as the shift log COUNTS them; null when Master has
+   *  no piece weight for it. Never the estimate below — see `asOf`. */
   remaining: number | null;
-  /** Hours of running left (Master's cycle, else the order's own logged rate); null when unknown. */
+  /**
+   * WORKING hours of running left; null when unknown. From the rate named by
+   * `runBasis`, and — for the order running on a running machine — after
+   * taking off what was probably made since the last day the log holds for
+   * that machine (`asOf`): the log is typed a day or two behind. (The server
+   * works that out. ASSUMPTION there: at most 72 working hours are taken off,
+   * however long the log has been silent.)
+   */
   runHours: number | null;
+  /**
+   * Where the rate behind `runHours` comes from (approved by the owner,
+   * 2026-10-07: the forecast uses the real rate). "logged" = the good pieces
+   * per shift row over this order's 5 most recent COUNTED shift rows (a row
+   * is SHIFT_HOURS); "master" = «الرئيسي»'s cycle and cavities, when nothing
+   * is counted yet; "" = neither is known and `runHours` is null.
+   */
+  runBasis: "logged" | "master" | "";
+  /** The last day the shift log holds for the machine this order is running
+   *  on — what `runHours` was estimated forward from. "" when no such
+   *  allowance was made (not running, or its machine is not). */
+  asOf: string;
+  /**
+   * Registry labels of the machines the shift log shows this PRODUCT ran on,
+   * most shift rows first; [] when it never ran (or the log was not read).
+   * Where a mould goes is learned from where it has run (approved by the
+   * owner, 2026-10-07) — it stands in for `fits` until the supervisor answers.
+   */
+  ranOn: string[];
   /** Colour keys — one order is often made in several. */
   colours: string[];
   colourSource: "answer" | "guess" | "";
@@ -979,7 +1091,70 @@ export type PlanOrder = {
   /** The machine it stands on was recorded «لا يوجد أمر شغل»: the floor says
    *  this order is finished, whatever the (late-typed) count still shows. */
   doneByFloor?: boolean;
+  /**
+   * The floor said «لا يوجد أمر شغل» on its machine, but the count says more
+   * than a shift of running was still left — the two disagree (approved by the
+   * owner, 2026-10-07: the floor's word is checked against the count). Such an
+   * order is NOT `doneByFloor` and NOT blocked: it stays an ordinary candidate,
+   * and the page tells the engineer to close the order if it is finished or to
+   * correct the stoppage reason if it is not. Nothing is stored for this.
+   *
+   * What the server compares with SHIFT_HOURS is not `runHours` as it is shown
+   * (the count, as typed): it is what was left when the machine STOPPED — the
+   * count less what was probably made between the last day that is counted
+   * and the stoppage, at the order's own rate. And only for a machine that was
+   * running until then (machineState, the stoppage aside): one that has logged
+   * nothing for weeks did not run those weeks, and its count is taken as it is.
+   * ASSUMPTION (the owner approved `runHours` > 12; the allowance is this
+   * page's reading of it, his to correct): without it every machine whose log
+   * is a day behind — which is every machine — would have its finished order
+   * doubted and offered back to it.
+   */
+  doneUnsure?: boolean;
+  /**
+   * The supervisor's standing answer to «بتتعمل من أنهي خامة في المخزن؟» for
+   * this order's product, as it was saved; "" = nobody has answered. Carried
+   * apart from `stock`, which is null whenever the store cannot put a number
+   * on it (not read, the name gone from the store, its books below zero) —
+   * the question form must still show what was answered.
+   */
+  storeMaterial: string;
+  /**
+   * The order's material in «مخزن اتقان»; null = which store material it uses
+   * is not known, or the store could not be read (ASSUMPTION on the server:
+   * it is given 6 seconds to answer). Never a zero for "unknown".
+   */
+  stock: OrderStock | null;
 };
+
+export type OrderStock = {
+  /** The store's own name for the material. */
+  material: string;
+  /** Kilograms the store holds of it, for this order's client or for the factory itself. */
+  haveKg: number;
+  /** Kilograms the pieces still to make need; null when the remaining count
+   *  or the piece weight is not known. */
+  needKg: number | null;
+  /** Nobody answered which store material this product uses: `material` is a
+   *  guess (Master's «نوع الخام» matched exactly one store name). */
+  guessed: boolean;
+};
+
+/** Where an order's material stands in the store — see `stockState`. */
+export type StockState = "unknown" | "ok" | "low" | "none";
+/**
+ * unknown = `stock` is null; none = the store holds nothing of it; low = it
+ * holds less than what is left to make needs; ok otherwise (also when the
+ * need cannot be worked out — some is there, and nothing says it is short).
+ * Approved by the owner, 2026-10-07. A warning in the ranking, never a block
+ * there; only the day's plan refuses to PICK an order with none.
+ */
+export function stockState(o: Pick<PlanOrder, "stock">): StockState {
+  const st = o.stock;
+  if (!st) return "unknown";
+  if (st.haveKg <= 0) return "none";
+  return st.needKg !== null && st.haveKg < st.needKg ? "low" : "ok";
+}
 
 /* --------------------------------- colours, plural -------------------------- */
 
@@ -1081,7 +1256,7 @@ export type Suggestion = {
   estimate: Estimate;
   /** The colour to start with, when the order has several; "" when unknown. */
   startColour: string;
-  late: number;       // whole days past due, 0 when not late
+  late: number;       // whole CALENDAR days past due, 0 when not late
   onlyHere: boolean;
   /** The order's mould is already standing on THIS machine. */
   mountedHere: boolean;
@@ -1091,13 +1266,24 @@ export type Suggestion = {
    * 2026-10-07: "what machine fits what mould is decided by the supervisor" —
    * Master's tonnage is only a hint on the question form now; it used to sort
    * a mould after the rest and fold it away.
+   * "ran" (approved the same day) = the supervisor has NOT answered, and the
+   * shift log shows this product ran on this machine (PlanOrder.ranOn): sorted
+   * between the two, with a «ranHere» chip — `needsAnswers` stays true until
+   * he answers.
    */
-  fit: "here" | "unknown";
-  /** Whole days until the due date (negative = late); null when it has none. */
+  fit: "here" | "ran" | "unknown";
+  /** WORKING days until the due date — Fridays are not counted (negative =
+   *  that many calendar days late); null when it has none. See orderUrgency. */
   dueIn: number | null;
-  /** A key client's order that is late or due within KEY_URGENT_DAYS — the
-   *  only time a key client jumps the queue (owner's choice, 2026-10-07). */
+  /** Not late yet, but the running it still needs does not fit in the working
+   *  time before its due date (see orderUrgency) — treated like a late order. */
+  atRisk: boolean;
+  /** A key client's order that is late, at risk, or due within
+   *  KEY_URGENT_DAYS working days — the only time a key client jumps the
+   *  queue (owner's choice, 2026-10-07). */
   urgentKey: boolean;
+  /** Where its material stands in the store (stockState). Never blocks here. */
+  stock: StockState;
   /** Worth taking the RUNNING mould off for (see rankFor). */
   interrupt: boolean;
   /** Something the ranking wanted to know is not answered yet (colour, which
@@ -1111,15 +1297,9 @@ export type Suggestion = {
 export type BlockReason = "finished" | "doneByFloor" | "onHold" | "notFit" | "transparentElsewhere" | "missing";
 export type Blocked = { order: PlanOrder; reason: BlockReason; vars?: Record<string, string | number> };
 
-/** Whole days from `dueIso` to `todayIso` (positive = late). */
-function daysLate(dueIso: string, todayIso: string): number {
-  if (!ISO.test(dueIso) || !ISO.test(todayIso)) return 0;
-  const d = Date.UTC(+dueIso.slice(0, 4), +dueIso.slice(5, 7) - 1, +dueIso.slice(8, 10));
-  const t = Date.UTC(+todayIso.slice(0, 4), +todayIso.slice(5, 7) - 1, +todayIso.slice(8, 10));
-  return Math.max(0, Math.round((t - d) / 86_400_000));
-}
-
-/** Whole days from `todayIso` to `dueIso` (negative = late); null without both. */
+/** Whole CALENDAR days from `todayIso` to `dueIso` (negative = late); null
+ *  without both. Only for wording a date («التسليم بكرة») — every decision
+ *  counts working days (workingDaysUntil). */
 function daysUntil(dueIso: string, todayIso: string): number | null {
   if (!ISO.test(dueIso) || !ISO.test(todayIso)) return null;
   const d = Date.UTC(+dueIso.slice(0, 4), +dueIso.slice(5, 7) - 1, +dueIso.slice(8, 10));
@@ -1127,53 +1307,182 @@ function daysUntil(dueIso: string, todayIso: string): number | null {
   return Math.round((d - t) / 86_400_000);
 }
 
-const SHIFT_HOURS = 12;
-/** A key client goes first only when its order is late or due within this many days. */
+/** One shift, in hours — also "ends within a shift" and "a short run". */
+export const SHIFT_HOURS = 12;
+/** A key client goes first only when its order is late, will be late, or is
+ *  due within this many WORKING days (Fridays are not counted). */
 export const KEY_URGENT_DAYS = 3;
-/** A running job that ends within this many hours is on the day's plan. */
+/** A running job that ends within this many hours ON THE CLOCK is on the day's plan. */
 export const SOON_HOURS = 24;
 
-/** Where an order stands by its date alone — no machine needed (the «الأوامر» tab). */
-export function orderUrgency(o: Pick<PlanOrder, "dueDate" | "keyClient">, today: string): { dueIn: number | null; late: number; urgentKey: boolean } {
-  const dueIn = o.dueDate ? daysUntil(o.dueDate, today) : null;
-  return { dueIn, late: dueIn !== null && dueIn < 0 ? -dueIn : 0, urgentKey: o.keyClient && dueIn !== null && dueIn <= KEY_URGENT_DAYS };
+/* ------------------------------- working time ------------------------------- */
+
+/**
+ * Days are counted in WORKING time (approved by the owner, 2026-10-07): Friday
+ * is the day off, every other day is two 12-hour shifts.
+ * ASSUMPTION: every day but Friday runs both shifts, all 24 hours — no other
+ * holiday, no short day. The «عطلة» rows of «الإنتاج» are not looked at here.
+ */
+const dayNumber = (iso: string): number => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86_400_000;
+
+/**
+ * Working days from `todayIso` to `dueIso`: the days d with today < d ≤ due
+ * that are not Fridays (0 = due today). An order already past its date gives
+ * the negative number of CALENDAR days (5 days late = −5) — lateness is
+ * counted the way the customer counts it. null without two ISO dates.
+ */
+export function workingDaysUntil(dueIso: string, todayIso: string): number | null {
+  if (!ISO.test(dueIso) || !ISO.test(todayIso)) return null;
+  const d = dayNumber(dueIso), t = dayNumber(todayIso);
+  if (d < t) return d - t;
+  // Day 1 (1970-01-02) was a Friday, so day n is one when n mod 7 is 1 — the
+  // Fridays in (t, d] are counted, not walked: a due date mistyped a century
+  // out must not spin in a sort.
+  const fridays = Math.floor((d - 1) / 7) - Math.floor((t - 1) / 7);
+  return d - t - fridays;
 }
 
-/** The chips that say WHY an order is where it is: key client, late, due soon, no date. */
-export function urgencyChips(o: Pick<PlanOrder, "dueDate" | "keyClient">, today: string): Chip[] {
-  const { dueIn, late } = orderUrgency(o, today);
+/**
+ * `workHours` of running, as hours on the CLOCK from now: today still has
+ * (24 − hourNow) running hours unless it is a Friday (then none), every later
+ * day has 24 unless it is a Friday — so five hours left at Thursday noon is
+ * five hours, and twenty is forty-four. `hourNow` is the Cairo hour (0–24);
+ * noon when the caller has no clock (or hands over something that is not an
+ * hour). Nothing to run → 0; without an ISO day there is no calendar to walk
+ * and the hours come back as they are.
+ */
+export function calendarHours(workHours: number, todayIso: string, hourNow = 12): number {
+  if (!(workHours > 0)) return 0;
+  if (!ISO.test(todayIso) || !Number.isFinite(workHours)) return workHours;
+  let left = workHours, idle = 0, day = todayIso;
+  // (A NaN hour would make every comparison below false and the walk endless.)
+  let room = 24 - (Number.isFinite(hourNow) ? Math.min(24, Math.max(0, hourNow)) : 12);
+  for (;;) {
+    const off = isFriday(day);
+    // The idle hours are whole Fridays (or what is left of today's), so the
+    // answer is the working hours plus them — no rounding creeps in.
+    if (!off && left <= room) return workHours + idle;
+    if (off) idle += room; else left -= room;
+    day = daysBefore(day, -1);
+    room = 24;
+    // Whole weeks in one step — six running days and one Friday, whichever
+    // weekday this is — so a mistyped quantity cannot spin here either.
+    const weeks = Math.ceil(left / 144) - 1;
+    if (weeks > 0) { left -= weeks * 144; idle += weeks * 24; }
+  }
+}
+
+/**
+ * Where an order stands by its date alone — no machine needed (the «الأوامر» tab).
+ *
+ * All of it approved by the owner on 2026-10-07:
+ *
+ * `dueIn`  WORKING days to the due date (workingDaysUntil) — a Friday in
+ *          between is not time to make anything in. Negative = late.
+ * `late`   whole CALENDAR days past the date, 0 when not late: lateness is
+ *          counted the way the customer counts it.
+ * `atRisk` at risk = WILL be late: not late yet, but the running it still
+ *          needs is more than the working time before its due date —
+ *          `runHours` > working days × 24. Unknown hours or no date is never
+ *          "at risk".
+ * `urgentKey` a key client's order that is due within KEY_URGENT_DAYS working
+ *          days, late, or at risk — the only time a key client jumps the queue.
+ */
+const REST_OF_TODAY_HOURS = 12;
+export function orderUrgency(
+  o: Pick<PlanOrder, "dueDate" | "keyClient" | "runHours">, today: string,
+): { dueIn: number | null; late: number; atRisk: boolean; urgentKey: boolean } {
+  const dueIn = o.dueDate ? workingDaysUntil(o.dueDate, today) : null;
+  const late = dueIn !== null && dueIn < 0 ? -dueIn : 0;
+  // "Due on day D" means by the END of D, and the days counted do not include
+  // today: what is left of today runs too. Half a day on average (ASSUMPTION)
+  // — without it every order due today with anything left read «هيتأخر».
+  const atRisk = late === 0 && dueIn !== null && o.runHours != null && o.runHours > dueIn * 24 + REST_OF_TODAY_HOURS;
+  return { dueIn, late, atRisk, urgentKey: o.keyClient && dueIn !== null && (dueIn <= KEY_URGENT_DAYS || atRisk) };
+}
+
+/** Late, or going to be: the two are one tier in every sort, and one reason
+ *  to take a running mould off (approved by the owner, 2026-10-07). */
+const lateOrAtRisk = (u: { late: number; atRisk: boolean }): boolean => u.late > 0 || u.atRisk;
+/** An order the day's plan places before it looks at any machine. */
+const isUrgent = (u: { urgentKey: boolean; late: number; atRisk: boolean }): boolean => u.urgentKey || lateOrAtRisk(u);
+
+/**
+ * The chips that say WHY an order is where it is: key client, late, will be
+ * late, due soon, no date.
+ *
+ * An order that is `atRisk` says so INSTEAD of "due in…": how many days of
+ * running it needs (a part of a day is a day) against the working days there
+ * are. The "due in…" chip appears within KEY_URGENT_DAYS working days, but it
+ * WORDS the date as the calendar reads — seen on a Thursday, an order due on
+ * the Friday is due tomorrow (not today), and one due on the Saturday in two
+ * days (not tomorrow).
+ */
+export function urgencyChips(o: Pick<PlanOrder, "dueDate" | "keyClient" | "runHours">, today: string): Chip[] {
+  const { dueIn, late, atRisk } = orderUrgency(o, today);
   const chips: Chip[] = [];
   if (o.keyClient) chips.push({ key: "keyClient", tone: "good" });
   if (late > 0) chips.push({ key: "late", tone: "warn", vars: { n: late } });
   else if (dueIn === null) chips.push({ key: "noDueDate", tone: "warn" });
+  else if (atRisk) chips.push({ key: "atRisk", tone: "warn", vars: { need: Math.ceil((o.runHours ?? 0) / 24), have: dueIn } });
   else if (dueIn <= KEY_URGENT_DAYS) {
-    chips.push({ key: dueIn <= 0 ? "dueToday" : dueIn === 1 ? "dueTomorrow" : dueIn === 2 ? "dueTwoDays" : "dueSoon", tone: "warn", vars: { n: dueIn } });
+    const n = daysUntil(o.dueDate, today) ?? dueIn;
+    chips.push({ key: n <= 0 ? "dueToday" : n === 1 ? "dueTomorrow" : n === 2 ? "dueTwoDays" : "dueSoon", tone: "warn", vars: { n } });
   }
   return chips;
 }
 
-/** Open orders in the owner's order, without a machine. */
+/**
+ * Open orders in the owner's order, without a machine: an urgent key client →
+ * late or going to be → dated before undated → the nearer date. Two dates the
+ * same number of WORKING days away (a Thursday and the Friday after it) are
+ * still told apart by the date itself.
+ */
 export function sortByUrgency<T extends PlanOrder>(orders: readonly T[], today: string): T[] {
   return [...orders].sort((a, b) => {
     const x = orderUrgency(a, today), y = orderUrgency(b, today);
     return Number(y.urgentKey) - Number(x.urgentKey)
-      || Number(y.late > 0) - Number(x.late > 0)
+      || Number(lateOrAtRisk(y)) - Number(lateOrAtRisk(x))
       || Number(y.dueIn !== null) - Number(x.dueIn !== null)
       || (x.dueIn ?? 0) - (y.dueIn ?? 0)
+      || (x.dueIn !== null && y.dueIn !== null ? a.dueDate.localeCompare(b.dueDate) : 0)
       || a.code.localeCompare(b.code, undefined, { numeric: true });
   });
 }
 
+/** Where a mould belongs, as a sort key: said (or standing) here → has run here → nobody knows. */
+const FIT_ORDER: Record<Suggestion["fit"], number> = { here: 0, ran: 1, unknown: 2 };
+
+/**
+ * The ease tier one suggestion sorts on, on its machine — rankFor's own, and
+ * the day's plan compares machines for one order with the same number.
+ */
+function easeOf(machine: Pick<PlanMachine, "transparentOnly">, s: Suggestion): number {
+  // The mould is already on this machine: nothing is cheaper to start.
+  if (s.mountedHere) return -1;
+  const someTransparent = s.order.colours.some((c) => colourKey(c) === "transparent");
+  // A coloured job on a machine kept for transparent sorts with the worst.
+  return machine.transparentOnly && !someTransparent ? EASE_ORDER.veryHard : EASE_ORDER[s.estimate.ease];
+}
+
 /**
  * THE OWNER'S ORDER, as he chose it on 2026-10-07 (it was «عميل مهم» always
- * first): a key client's order that is late or due within KEY_URGENT_DAYS →
- * any late order → orders that HAVE a due date before those that have none →
- * the supervisor said it goes here → fits only this machine → ease of the
- * change → least remaining → due date.
+ * first): a key client's order that is late, will be late, or is due within
+ * KEY_URGENT_DAYS working days → any order that is late or WILL be (`atRisk`)
+ * → orders that HAVE a due date before those that have none → where the mould
+ * belongs: the supervisor said it goes here, then it has run here, then
+ * nobody knows → fits only this machine → ease of the change → least
+ * remaining → due date.
  *
  * Taking a RUNNING mould off (`interrupt`) is worth it only for such an urgent
- * key-client order or a late one — and never when the running job ends within
- * a shift, or is itself late or a key client's.
+ * key-client order, a late one or one that will be late — and never when the
+ * running job ends within a shift, is itself late, at risk or a key client's,
+ * or went on TODAY (approved by the owner, 2026-10-07: a mould that went on
+ * today is not taken off).
+ *
+ * The store never takes an order out of this list: a material the store is
+ * short of is a chip («stockNone» / «stockLow») — only the day's plan refuses
+ * to PICK an order with none.
  *
  * Rank the WAITING orders for one machine.
  *
@@ -1212,9 +1521,13 @@ export function rankFor(
   // The job running here, and whether it may be interrupted at all.
   const runningHere = machine.state === "running"
     ? orders.find((x) => x.mountedRunning && !x.queuedBehind && machineKey(x.mountedOn) === mk) ?? null : null;
-  const runningLate = !!runningHere?.dueDate && daysLate(runningHere.dueDate, ctx.today) > 0;
+  // Late, or going to be: either way its mould stays where it is.
+  const runningLate = !!runningHere && lateOrAtRisk(orderUrgency(runningHere, ctx.today));
   const runningEndsSoon = runningHere?.runHours != null && runningHere.runHours < SHIFT_HOURS;
-  const mayInterrupt = machine.state === "running" && !machine.now.keyClient && !runningLate && !runningEndsSoon;
+  // A mould that went on today is not taken off again (approved by the owner,
+  // 2026-10-07). An unknown start («») cannot be held against anybody.
+  const mountedToday = !!machine.now.startedOn && machine.now.startedOn >= ctx.today;
+  const mayInterrupt = machine.state === "running" && !machine.now.keyClient && !runningLate && !runningEndsSoon && !mountedToday;
 
   for (const o of orders) {
     const here = !!o.mountedOn && machineKey(o.mountedOn) === mk;
@@ -1261,28 +1574,36 @@ export function rankFor(
     const { estimate, startColour } = bestStart(
       { product: standing, colours: barrel, material: machine.now.material },
       { product: o.product, colours: keys, material: o.material },
-      { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner },
+      // The machine's own measured change time, when it has one (null = the
+      // fixed minutes stand).
+      { bigMachine: machine.bigMachine, oilCores: o.oilCores, hotRunner: o.hotRunner, swapMin: machine.swapMin },
     );
-    const late = o.dueDate ? daysLate(o.dueDate, ctx.today) : 0;
     const onlyHere = !!o.fits && o.fits.length === 1;
     const maybeRunningHere = sameCode(machine.now.orderMaybe, o.code);
     const chips: Chip[] = [];
 
     const fitAnswered = !!o.fits && o.fits.length > 0;
-    const fit: Suggestion["fit"] = here || fitAnswered ? "here" : "unknown";
-    const { dueIn, urgentKey } = orderUrgency(o, ctx.today);
+    // Nobody has answered, and the shift log shows the product on this machine:
+    // where a mould goes is learned from where it has run (approved by the
+    // owner, 2026-10-07). His answer, once given, is the only word — a mould he
+    // said goes elsewhere was blocked above, whatever the log shows.
+    const ranHere = (o.ranOn ?? []).some((l) => machineKey(l) === mk);
+    const fit: Suggestion["fit"] = here || fitAnswered ? "here" : ranHere ? "ran" : "unknown";
+    const urgency = orderUrgency(o, ctx.today);
+    const { dueIn, late, urgentKey, atRisk } = urgency;
 
     chips.push(...urgencyChips(o, ctx.today));
     if (maybeRunningHere) chips.push({ key: "maybeRunningHere", tone: "warn" });
     if (here && o.queuedBehind) chips.push({ key: "sameMouldNext", tone: "good", vars: { order: o.queuedBehind } });
     else if (here) chips.push({ key: "mountedHere", tone: "good" });
     else if (o.mountedOn) chips.push({ key: "mountedElsewhere", tone: "warn", vars: { machine: o.mountedOn } });
+    if (fit === "ran") chips.push({ key: "ranHere", tone: "good" });
     if (onlyHere) chips.push({ key: "onlyHere", tone: "good" });
 
-    // Worth taking the running mould off: an urgent key-client order or a
-    // late one — and not when this order simply follows on the same mould.
-    // "The machine is running" is said ONCE above the list.
-    const interrupt = mayInterrupt && (urgentKey || late > 0) && !o.queuedBehind && !maybeRunningHere;
+    // Worth taking the running mould off: an urgent key-client order, a late
+    // one or one that WILL be late — and not when this order simply follows
+    // on the same mould. "The machine is running" is said ONCE above the list.
+    const interrupt = mayInterrupt && isUrgent(urgency) && !o.queuedBehind && !maybeRunningHere;
     if (interrupt) chips.push({ key: "worthInterrupt", tone: "good" });
 
     const someTransparent = keys.includes("transparent");
@@ -1312,6 +1633,14 @@ export function rankFor(
     // orders read as ready with nothing on the card saying so.
     else if (!materialFamily(o.material)) chips.push({ key: "materialUnknown", tone: "warn" });
 
+    // What the store holds of it. "Not known" says nothing at all — it is not
+    // "none" — and neither state takes the order out of this list.
+    const stock = stockState(o);
+    if (stock === "none" && o.stock) chips.push({ key: "stockNone", tone: "bad", vars: { material: o.stock.material } });
+    else if (stock === "low" && o.stock && o.stock.needKg !== null) {
+      chips.push({ key: "stockLow", tone: "warn", vars: { have: Math.round(o.stock.haveKg), need: Math.round(o.stock.needKg) } });
+    }
+
     if (estimate.drying) {
       const d = estimate.drying;
       chips.push({ key: "drying", tone: "warn", vars: { h: d.minH === d.maxH ? `${d.minH}` : `${d.minH}–${d.maxH}` } });
@@ -1324,27 +1653,23 @@ export function rankFor(
     if (o.runHours !== null && o.runHours > 0 && o.runHours < SHIFT_HOURS) chips.push({ key: "shortRun", tone: "warn" });
 
     ranked.push({
-      order: o, estimate, startColour, late, onlyHere, mountedHere: here, fit, dueIn, urgentKey, interrupt, chips,
+      order: o, estimate, startColour, late, onlyHere, mountedHere: here, fit, dueIn, atRisk, urgentKey, interrupt, chips, stock,
+      // Where it has run is a stand-in, not his answer: the hint stays.
       needsAnswers: keys.length === 0 || o.colourSource !== "answer" || !fitAnswered || o.missing === null,
     });
   }
 
-  const easeOf = (s: Suggestion) => {
-    // The mould is already on this machine: nothing is cheaper to start.
-    if (s.mountedHere) return -1;
-    const someTransparent = s.order.colours.some((c) => colourKey(c) === "transparent");
-    // A coloured job on a machine kept for transparent sorts with the worst.
-    return machine.transparentOnly && !someTransparent ? EASE_ORDER.veryHard : EASE_ORDER[s.estimate.ease];
-  };
   ranked.sort((a, b) =>
     Number(b.urgentKey) - Number(a.urgentKey)
-    || Number(b.late > 0) - Number(a.late > 0)
+    // Late, and going to be late, are one tier (at risk = WILL be late).
+    || Number(lateOrAtRisk(b)) - Number(lateOrAtRisk(a))
     || Number(b.dueIn !== null) - Number(a.dueIn !== null)
     // A mould the supervisor SAID goes here before one nobody has spoken for:
-    // with no answers at all the plan offered a small mould to the 280.
-    || Number(b.fit === "here") - Number(a.fit === "here")
+    // with no answers at all the plan offered a small mould to the 280. One
+    // the log has seen running here sits between the two.
+    || FIT_ORDER[a.fit] - FIT_ORDER[b.fit]
     || Number(b.onlyHere) - Number(a.onlyHere)
-    || easeOf(a) - easeOf(b)
+    || easeOf(machine, a) - easeOf(machine, b)
     || (a.order.remaining ?? Infinity) - (b.order.remaining ?? Infinity)
     || (a.order.dueDate || "9999").localeCompare(b.order.dueDate || "9999")
     || a.order.code.localeCompare(b.order.code, undefined, { numeric: true }),
@@ -1358,22 +1683,35 @@ export function rankFor(
  * Why a machine is on the day's plan, most pressing first:
  * finished  = recorded «لا يوجد أمر شغل» — it has nothing to run;
  * free      = a mould is standing (or nothing is known) and no shift is logged;
- * stopped   = a stoppage is running for another reason — still suggested for
+ * stopped   = a stoppage is running whose reason leaves the MACHINE able to
+ *             take a mould (stoppageKind "open") — still suggested for
  *             (owner: "it should still suggest");
+ * overrun   = running, and its order has nothing left to make (remaining 0):
+ *             the opposite of «لا يوجد أمر شغل» — the count says done and the
+ *             floor has not said so;
  * interrupt = running, and an urgent order is worth taking its mould off for;
- * soon      = running, and its job ends within SOON_HOURS;
+ * soon      = running, and its job ends within SOON_HOURS on the clock;
+ * down      = a stoppage is running whose reason means the machine itself
+ *             cannot run (stoppageKind "blocked") — never given a mould;
  * running   = running with time to go, or nothing to say about when it ends.
  */
-export type DayNeed = "finished" | "free" | "stopped" | "interrupt" | "soon" | "running";
-const DAY_ORDER: readonly DayNeed[] = ["finished", "free", "stopped", "interrupt", "soon", "running"];
+export type DayNeed = "finished" | "free" | "stopped" | "overrun" | "interrupt" | "soon" | "down" | "running";
+const DAY_ORDER: readonly DayNeed[] = ["finished", "free", "stopped", "overrun", "interrupt", "soon", "down", "running"];
+/** The machines that can take a mould NOW — the first an urgent order looks at. */
+const NEEDS_MOULD: readonly DayNeed[] = ["finished", "free", "stopped", "overrun"];
+/** «PQ 9» before «PQ 10»: by number, not by letter. */
+const byLabel = (a: { label: string }, b: { label: string }): number => a.label.localeCompare(b.label, undefined, { numeric: true });
 
 export type DayEntry = {
   machine: PlanMachine;
   need: DayNeed;
   /** The order standing on it now, when the page knows one. */
   current: PlanOrder | null;
-  /** Hours of running left on that order; null when not running or not known. */
+  /** WORKING hours of running left on that order; null when not running or not known. */
   hoursLeft: number | null;
+  /** The same on the CLOCK — calendarHours(hoursLeft): a Friday in between
+   *  is hours in which nothing runs. null when `hoursLeft` is. */
+  finishIn: number | null;
   /** The mould to put on next; null on a machine that just keeps running, or
    *  when nothing waits for it. One order is offered to ONE machine. */
   pick: Suggestion | null;
@@ -1383,57 +1721,187 @@ export type DayEntry = {
 };
 
 /**
+ * An URGENT order (a key client's close date, late, or at risk) the plan
+ * could not put anywhere: "noMaterial" = the store holds none of its material,
+ * so no machine is offered it; "noMachine" = no machine that could take it is
+ * free, ending soon or worth interrupting — or its mould is held on a machine
+ * that is stopped (see planDay; `order.mountedOn` says which, and the page
+ * says so). Said on the page, never hidden.
+ */
+export type Unplaced = { order: PlanOrder; why: "noMaterial" | "noMachine" };
+export type DayPlan = { entries: DayEntry[]; unplaced: Unplaced[] };
+
+/**
  * The whole floor in the order things have to be done (owner, 2026-10-07:
  * "I am unable to understand the plan" — the ranked list per machine answered
- * a question nobody had asked yet). Each machine gets the top of its own
- * ranking that no more pressing machine has already been given.
+ * a question nobody had asked yet).
+ *
+ * URGENT ORDERS CHOOSE THEIR MACHINE FIRST (approved by the owner, 2026-10-07).
+ * The first plan went machine by machine — each took the top of its own list —
+ * and so gave a late order to whichever machine came first, a press down for
+ * repair included. Now:
+ *
+ *  NEED, before any pick: a stoppage's reason decides (stoppageKind) —
+ *    finished → "finished", open → "stopped", blocked → "down"; else not
+ *    running → "free"; running with its order at remaining 0 → "overrun";
+ *    running with finishIn ≤ SOON_HOURS → "soon"; else "running".
+ *  PASS 1, order first: the urgent orders (urgentKey, late or atRisk) that are
+ *    in at least one machine's ranking, in sortByUrgency order. Stock "none" →
+ *    unplaced "noMaterial": no machine is held for a job that cannot be fed.
+ *    Else the machines without a pick whose ranking holds it and which are
+ *    (a) finished / free / stopped / overrun, (b) soon, or (c) running with
+ *    that suggestion's `interrupt` — the smallest by class (a, b, c), fit
+ *    (here, ran, unknown), ease (as rankFor sorts it), the estimate's
+ *    totalMin, then the label, numerically. A class (c) machine becomes
+ *    "interrupt". No candidate → unplaced "noMachine".
+ *  PASS 2, machine first: every finished / free / stopped / overrun / soon
+ *    machine still without a pick, in entry order, takes the first suggestion
+ *    of its own ranking not yet given whose stock is not "none". "down" and
+ *    "running" machines never get one — so a long job is "worth interrupting"
+ *    only when an urgent order really has nowhere better to go (five running
+ *    machines all said "an urgent order is waiting" with nothing under it,
+ *    first live look).
+ *  ORDER of entries: finished, free, stopped, overrun, interrupt, soon
+ *    (finishIn ascending), down, running (hoursLeft ascending, unknown last);
+ *    ties by label, numerically.
+ *  dryIn: when the pick needs drying, max(0, (soon ? finishIn : 0) − maxH),
+ *    to one decimal; else null.
+ *
+ * WHERE A MOULD STANDS comes before both passes (the review of 2026-10-07 —
+ * the passes above were written, and tested, with no order ON a stopped
+ * machine, which is where a stoppage is normally tapped):
+ *  - HELD. An order whose mould stands on a machine that is "stopped" (its
+ *    mould is out for maintenance, or there is no material for it), or "down"
+ *    for anything but a repair of the machine itself (MACHINE_REPAIR), is given
+ *    to NO machine: not back to its own — rule 1 says that machine can take
+ *    ANOTHER mould, and a "down" one takes none — and not to another, which
+ *    was asked to take its running mould off for an order being mounted next
+ *    door. An urgent one is unplaced "noMachine".
+ *  - ONE MOULD, ONE MACHINE. Two open orders of one product whose mould stands
+ *    on the same machine are one mould: once one of them is given, the other
+ *    is next on that mould — not a job for another machine, and not unplaced.
+ *
+ * `hourNow` is the Cairo hour the plan is made at (for `finishIn`); noon when
+ * the caller has no clock.
  */
 export function planDay(
   machines: readonly PlanMachine[],
   orders: readonly PlanOrder[],
-  ctx: { today: string; transparentMachines: readonly string[] },
-): DayEntry[] {
-  const rows = machines.map((machine) => {
+  ctx: { today: string; transparentMachines: readonly string[]; hourNow?: number },
+): DayPlan {
+  type Row = Omit<DayEntry, "dryIn"> & { ranked: Suggestion[] };
+  const rows: Row[] = machines.map((machine) => {
     const mk = machineKey(machine.label);
     const current = orders.find((o) => !!fold(o.code) && fold(o.code) === fold(machine.now.order) && machineKey(o.mountedOn) === mk) ?? null;
     const running = machine.state === "running";
-    const hoursLeft = running && current && current.runHours !== null ? current.runHours : null;
-    const { ranked } = rankFor(machine, orders, ctx);
-    const need: DayNeed = machineFinished(machine) ? "finished"
-      : machine.state === "stopped" ? "stopped"
+    const hoursLeft = running && current && current.runHours != null ? current.runHours : null;
+    const finishIn = hoursLeft === null ? null : calendarHours(hoursLeft, ctx.today, ctx.hourNow);
+    // The stoppage's reason decides. A machine called stopped with no reason
+    // on record is read like a reason nobody knows: not offered a mould.
+    const kind: StoppageKind | null = machine.stoppage ? stoppageKind(machine.stoppage.reason)
+      : machine.state === "stopped" ? "blocked" : null;
+    const need: DayNeed = kind === "finished" ? "finished"
+      : kind === "open" ? "stopped"
+      : kind === "blocked" ? "down"
       : !running ? "free"
-      : ranked.some((x) => x.interrupt) ? "interrupt"
-      : hoursLeft !== null && hoursLeft <= SOON_HOURS ? "soon"
+      : current?.remaining === 0 ? "overrun"
+      : finishIn !== null && finishIn <= SOON_HOURS ? "soon"
       : "running";
-    return { machine, need, current, hoursLeft, ranked };
+    return { machine, need, current, hoursLeft, finishIn, pick: null, ranked: rankFor(machine, orders, ctx).ranked };
   });
+
+  // PASS 1 — the ORDER picks. Every machine that lists an order, and what it
+  // would cost there.
+  const offers = new Map<string, { row: Row; s: Suggestion }[]>();
+  for (const row of rows) {
+    for (const s of row.ranked) {
+      const list = offers.get(s.order.id) ?? [];
+      list.push({ row, s });
+      offers.set(s.order.id, list);
+    }
+  }
+  // `cls`: 0 = the machine can take a mould now, 1 = it can within the day,
+  // 2 = it is running a job worth taking off for this order.
+  type Candidate = { row: Row; s: Suggestion; cls: number };
+  const better = (a: Candidate, b: Candidate): boolean => (
+    a.cls - b.cls
+    || FIT_ORDER[a.s.fit] - FIT_ORDER[b.s.fit]
+    || easeOf(a.row.machine, a.s) - easeOf(b.row.machine, b.s)
+    || a.s.estimate.totalMin - b.s.estimate.totalMin
+    || byLabel(a.row.machine, b.row.machine)
+  ) < 0;
+  const given = new Set<string>();
+  const unplaced: Unplaced[] = [];
+  // Where a mould stands (see above). `need` is settled for these rows: pass 1
+  // only ever turns a RUNNING machine into one worth interrupting.
+  const rowOf = new Map(rows.map((row) => [machineKey(row.machine.label), row] as const));
+  const held = (o: PlanOrder): boolean => {
+    const row = o.mountedOn ? rowOf.get(machineKey(o.mountedOn)) : undefined;
+    return !!row && (row.need === "stopped" || (row.need === "down" && row.machine.stoppage?.reason !== MACHINE_REPAIR));
+  };
+  // A mould is its product ON the machine it stands on; an order whose mould
+  // is up nowhere has none to share.
+  const mouldOf = (o: PlanOrder): string => (o.mountedOn ? `${fold(o.product)}|${machineKey(o.mountedOn)}` : "");
+  const mouldsGiven = new Set<string>();
+  const mouldGiven = (o: PlanOrder): boolean => mouldsGiven.has(mouldOf(o));
+  const give = (row: Row, s: Suggestion): void => {
+    row.pick = s;
+    given.add(s.order.id);
+    if (mouldOf(s.order)) mouldsGiven.add(mouldOf(s.order));
+  };
+  const urgent = sortByUrgency(orders.filter((o) => offers.has(o.id) && isUrgent(orderUrgency(o, ctx.today))), ctx.today);
+  for (const o of urgent) {
+    // (…or it is next on a mould that already has its machine.)
+    if (given.has(o.id) || mouldGiven(o)) continue;
+    // None of its material in the store: no machine is held for it, and the
+    // page says so rather than leaving it out.
+    if (stockState(o) === "none") { unplaced.push({ order: o, why: "noMaterial" }); continue; }
+    // Its mould is held where it stands: said, never moved.
+    if (held(o)) { unplaced.push({ order: o, why: "noMachine" }); continue; }
+    let best: Candidate | null = null;
+    for (const { row, s } of offers.get(o.id) ?? []) {
+      if (row.pick) continue;
+      // A machine that is "down" is no candidate at all, and a running one
+      // only for an order worth its mould.
+      const cls = NEEDS_MOULD.includes(row.need) ? 0 : row.need === "soon" ? 1 : row.need === "running" && s.interrupt ? 2 : -1;
+      if (cls < 0) continue;
+      const cand: Candidate = { row, s, cls };
+      if (!best || better(cand, best)) best = cand;
+    }
+    if (!best) { unplaced.push({ order: o, why: "noMachine" }); continue; }
+    give(best.row, best.s);
+    if (best.cls === 2) best.row.need = "interrupt";
+  }
+
+  // The order things are done in. Sorted only now: pass 1 may have turned a
+  // running machine into one worth interrupting.
+  const unknownLast = (a: number | null, b: number | null): number => (a === b ? 0 : (a ?? Infinity) - (b ?? Infinity));
   rows.sort((a, b) =>
     DAY_ORDER.indexOf(a.need) - DAY_ORDER.indexOf(b.need)
-    || (a.hoursLeft ?? Infinity) - (b.hoursLeft ?? Infinity)
-    || a.machine.label.localeCompare(b.machine.label, undefined, { numeric: true }));
-  const given = new Set<string>();
-  const take = (pool: readonly Suggestion[]): Suggestion | null => {
-    const got = pool.find((x) => !given.has(x.order.id)) ?? null;
-    if (got) given.add(got.order.id);
-    return got;
-  };
-  const out = rows.map(({ ranked, ...row }) => {
-    let need = row.need;
-    let pick: Suggestion | null = null;
-    if (need === "interrupt") {
-      pick = take(ranked.filter((x) => x.interrupt));
-      // Every urgent order already went to a machine that needs one more than
-      // this one does: it just keeps running (five running machines all said
-      // "an urgent order is waiting" with nothing under it, first live look).
-      if (!pick) need = row.hoursLeft !== null && row.hoursLeft <= SOON_HOURS ? "soon" : "running";
-    }
-    if (!pick && need !== "running") pick = take(ranked);
-    const dry = pick?.estimate.drying ?? null;
-    const before = need === "soon" ? row.hoursLeft ?? 0 : 0;
-    return { ...row, need, pick, dryIn: dry ? Math.max(0, Math.round((before - dry.maxH) * 10) / 10) : null };
+    || (a.need === "soon" ? unknownLast(a.finishIn, b.finishIn) : a.need === "running" ? unknownLast(a.hoursLeft, b.hoursLeft) : 0)
+    || byLabel(a.machine, b.machine));
+
+  // PASS 2 — the MACHINE picks: the top of its own list that nobody has, that
+  // the store can feed, and whose mould is free to go on it (not held on a
+  // stopped machine — this one included — and not already given with another
+  // order). A machine that is down, or simply running, is given nothing.
+  for (const row of rows) {
+    if (row.pick || !(NEEDS_MOULD.includes(row.need) || row.need === "soon")) continue;
+    const got = row.ranked.find((s) => !given.has(s.order.id) && s.stock !== "none" && !held(s.order) && !mouldGiven(s.order)) ?? null;
+    if (got) give(row, got);
+  }
+
+  const entries = rows.map((row): DayEntry => {
+    const dry = row.pick?.estimate.drying ?? null;
+    // The dryer has to be done when the machine is: now for one that waits,
+    // at the end of the running job for one that ends soon.
+    const before = row.need === "soon" ? row.finishIn ?? 0 : 0;
+    return {
+      machine: row.machine, need: row.need, current: row.current, hoursLeft: row.hoursLeft, finishIn: row.finishIn, pick: row.pick,
+      dryIn: dry ? Math.max(0, Math.round((before - dry.maxH) * 10) / 10) : null,
+    };
   });
-  // (Array.sort is stable: within a need the order above is kept.)
-  return out.sort((a, b) => DAY_ORDER.indexOf(a.need) - DAY_ORDER.indexOf(b.need));
+  return { entries, unplaced };
 }
 
 /* ----------------------------------- the map -------------------------------- */

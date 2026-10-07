@@ -5,21 +5,24 @@ import {
 import { loadJobs, type JobShaped } from "@/lib/jobs";
 import { nameKey } from "@/lib/master-lookup";
 import { codeKey, isOpenOrder, machineMatch } from "@/lib/work-orders";
-import { latinDigits, normalizeDate, todayIso } from "@/lib/dates";
+import { factoryDayEnd, latinDigits, normalizeDate, todayIso } from "@/lib/dates";
 import { cairoStamp } from "@/lib/customer-requests";
 import { isDayOffRow } from "@/lib/run-join";
 import { getOpenDowntimeEvents } from "@/lib/db";
+import { getStorageData } from "@/lib/storage";
+import { toNumber } from "@/lib/storage-filter";
+import { isMaterialType } from "@/lib/stock";
 import { hasFullAccess, type Role } from "@/lib/roles";
-import { jobStatusFromSheet, jobStatusToSheet } from "@/lib/prod-meta";
+import { downtimeEstimatedFromSheet, downtimeReasonFromSheet, jobStatusFromSheet, jobStatusToSheet } from "@/lib/prod-meta";
 import {
   ANSWERS_HEADERS, ANSWERS_TAB, LOG_HEADERS, LOG_TAB, ANSWER_COLUMNS, ANY_COLOUR, BASELINE_REASON, FITS_UNKNOWN,
-  MAP_NAME, MISSING_ITEMS, NO_ORDER,
+  MAP_NAME, MISSING_ITEMS, NO_ORDER, SHIFT_HOURS,
   answersFor, colourFromMaterial, colourKey, coloursFromSheet, coloursToSheet, colourToSheet, daysBefore, fold,
   formatLayout, guessColour, isBaselineRow, isFriday, kindFromSheet, kindToSheet, latestRuns, listFromSheet,
   listToSheet, logSinceTold, looseNameKey, machineFinished, machineKey, machineState, mergeAnswers, missingFromSheet, missingToSheet,
   newestHolders, parseLayout, parseYesNo, resolveNow, safeText, shiftRank, stampClockMinutes, stampDay,
   standingFromLog, standingWithStart, validLayout, yesNo,
-  type AnswerColumn, type AnswerKind, type AnswerRow, type LogRow, type MapTile, type PlanMachine,
+  type AnswerColumn, type AnswerKind, type AnswerRow, type LogRow, type MapTile, type OrderStock, type PlanMachine,
   type PlanOrder, type PlanStanding, type Stoppage,
 } from "@/lib/changeover";
 
@@ -36,6 +39,10 @@ import {
  * READS  «الإنتاج» (what each machine ran in its latest shift — the truth
  *        about "now"), «الماكينات» (which machines exist), «أوامر العمل»,
  *        «الرئيسي», the page's own two tabs, and the stoppages running now.
+ *        Since 2026-10-07 also «التوقفات» (how long a mould change has really
+ *        taken on each machine) and «مخزن اتقان» (is the order's material
+ *        there) — two reads the plan can do WITHOUT: each is bounded, and a
+ *        failed one arrives as "not known", never as an error or a zero.
  * WRITES «إجابات خطة الاسطمبات» and «تغييرات الاسطمبات» (appends only), and on
  *        a confirmed change the order's «الماكينة» cell and the machine's
  *        «أسم المنتج» cell — the two the owner asked for — and, since
@@ -77,6 +84,13 @@ export type ChangeoverResponse = {
   /** The running stoppages were read. False = Firestore did not answer in
    *  time, and no machine can show as stopped — the page says so. */
   stoppagesRead: boolean;
+  /** The material names «مخزن اتقان» holds — what the «خامة المخزن» question
+   *  picks from. [] when the store was not read. */
+  storeMaterials: string[];
+  /** The store was read. False = it did not answer in time (or failed): every
+   *  order's `stock` is null and the page says the store is not known — never
+   *  "no material". */
+  stockRead: boolean;
   /** ms since the OLDEST read behind these rows. */
   dataAgeMs: number;
 };
@@ -162,6 +176,177 @@ async function openStoppages(): Promise<{ byMachine: Map<string, Stoppage>; read
   }
 }
 
+/* --------------------- the two reads the plan can do without -------------------- */
+
+/**
+ * How long the plan waits for a read it can do WITHOUT — the store, the
+ * stoppage history. ASSUMPTION (2026-10-07): six seconds. Past it the answer
+ * is "not known" for this response; the read itself carries on and warms the
+ * copy the next refresh is served from.
+ */
+const OPTIONAL_READ_MS = 6000;
+
+/** `work`, raced against a clock: null when it throws or does not answer in
+ *  time. Never rejects — the same shape as openStoppages above, for the same
+ *  reason (bound any new read-path dependency before awaiting it). */
+async function within<T>(work: () => Promise<T>, ms: number, what: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), ms); }),
+    ]);
+  } catch (err) {
+    console.error(`[changeover] ${what} not read:`, err instanceof Error ? err.message : err);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * «مخزن اتقان», as far as this page needs it: the names the store calls its
+ * materials by, and how many kilograms of each it holds for whom.
+ *
+ * Approved by the owner, 2026-10-07 (it was the one thing "NOT built": an
+ * order names a product, and Master's «نوع الخام» does not match the store's
+ * names — so which store material a product is made of is ASKED once,
+ * `storeMaterial`, and remembered).
+ *
+ * `read: false` = the store did not answer inside its bound, threw, or
+ * answered `ok: false` (the bridge silent and no copy kept): nothing is known,
+ * and no order may be told it has "no material" on the strength of that.
+ */
+type StoreView = {
+  read: boolean;
+  /** fold(name) → the store's own spelling, in the store's own order. */
+  names: Map<string, string>;
+  /** The MATERIAL lines of «الرصيد الحالي» (a material's quantity is kilograms). */
+  lines: { item: string; client: string; kg: number }[];
+};
+const NO_STORE: StoreView = { read: false, names: new Map(), lines: [] };
+
+/** How the store writes the factory's OWN material in «العميل» (folded). */
+const HOUSE_CLIENTS: readonly string[] = ["اتقان", "itqan"].map(fold);
+
+async function readStore(): Promise<StoreView> {
+  const data = await within(() => getStorageData(), OPTIONAL_READ_MS, "store");
+  if (!data || !data.ok) return NO_STORE;
+  const names = new Map<string, string>();
+  const add = (raw: string | undefined | null) => {
+    const name = String(raw ?? "").replace(/\s+/g, " ").trim();
+    // nameKey is "" for «غير متاح / N/A» — the sheet's filler is not a material.
+    if (nameKey(name) && !names.has(fold(name))) names.set(fold(name), name);
+  };
+  // The sheet's own list first (its order is the picker's), then whatever is
+  // catalogued or actually HELD under a name that list does not carry.
+  for (const m of data.lists?.materials ?? []) add(m);
+  for (const c of data.catalog ?? []) add(c.item);
+  const lines: StoreView["lines"] = [];
+  for (const b of data.balance ?? []) {
+    if (!isMaterialType(b.itemType) || !nameKey(b.item)) continue;
+    add(b.item);
+    lines.push({ item: fold(b.item), client: fold(b.client), kg: toNumber(b.avail) });
+  }
+  return { read: true, names, lines };
+}
+
+/**
+ * What a mould change has really taken on each machine (by machineKey): the
+ * minutes of its own «تغيير الاسطمبة» rows in «التوقفات». Approved by the
+ * owner, 2026-10-07: change times come from the factory's own history, not
+ * from three fixed numbers.
+ *
+ * ASSUMPTIONS, all four his to correct: only the last 90 days (a mould or a
+ * crew of a year ago is another factory); only rows of 15 to 720 minutes
+ * (shorter is a mis-tap, longer is a stop nobody tapped — or a change that
+ * waited for something else); a row closed by an ESTIMATE («تقديري؟» = نعم) is
+ * somebody's guess, not a measurement; and fewer than three rows are not a
+ * habit — such a machine keeps the fixed numbers (`swapMin: null`).
+ */
+const SWAP_REASON = "Mold change";
+const SWAP_WINDOW_DAYS = 90;
+const SWAP_MINUTES = { min: 15, max: 720 } as const;
+const SWAP_MIN_SAMPLES = 3;
+
+function swapHistory(records: readonly SheetRecord[], today: string): Map<string, number[]> {
+  const from = daysBefore(today, SWAP_WINDOW_DAYS);
+  const out = new Map<string, number[]>();
+  for (const r of records) {
+    if (downtimeReasonFromSheet(r.reason) !== SWAP_REASON || downtimeEstimatedFromSheet(r.estimated)) continue;
+    const mk = machineKey(r.machine);
+    const day = normalizeDate(r.date);
+    const minutes = Number(latinDigits(r.minutes || "").replace(/[,\s]/g, ""));
+    if (!mk || !day || day < from || day > today) continue;
+    if (!(minutes >= SWAP_MINUTES.min && minutes <= SWAP_MINUTES.max)) continue;
+    const list = out.get(mk);
+    if (list) list.push(minutes); else out.set(mk, [minutes]);
+  }
+  return out;
+}
+
+/** The median of a machine's change times, to the nearest five minutes — or
+ *  null when there are too few to call it anything. */
+function swapOf(minutes: readonly number[] | undefined): Pick<PlanMachine, "swapMin" | "swapSamples"> {
+  const sorted = [...(minutes ?? [])].sort((a, b) => a - b);
+  if (sorted.length < SWAP_MIN_SAMPLES) return { swapMin: null, swapSamples: sorted.length };
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return { swapMin: Math.round(median / 5) * 5, swapSamples: sorted.length };
+}
+
+/* ------------------------- the log is typed a day or two behind ------------------ */
+
+/**
+ * The 5 most recent COUNTED shift rows of an order are its rate (owner,
+ * 2026-10-07: the forecast uses the real rate, not Master's cycle).
+ */
+const RATE_SHIFT_ROWS = 5;
+
+/**
+ * At most this many hours of running are assumed between a machine's last
+ * logged day and now. ASSUMPTION (2026-10-07): 72 — the log is typed "a day or
+ * two behind"; a machine with nothing typed for longer than three days is not
+ * taken to have run all of them.
+ */
+const LAG_CAP_HOURS = 72;
+
+/**
+ * Hours of RUNNING between two instants, at most `cap`.
+ * ASSUMPTION (the same one lib/changeover.ts `calendarHours` makes): two
+ * 12-hour shifts every day but Friday — the Cairo calendar Friday, midnight to
+ * midnight, read off the same clock `cairoStamp` writes the page's stamps with.
+ */
+function workingHoursBetween(fromMs: number, toMs: number, cap: number): number {
+  let hours = 0;
+  let cursor = fromMs;
+  while (cursor < toMs && hours < cap) {
+    const stamp = cairoStamp(cursor); // «yyyy-mm-dd HH:MM»
+    const intoDay = Number(stamp.slice(11, 13)) * 60 + Number(stamp.slice(14, 16));
+    // To the next Cairo midnight (always forward: at least one minute).
+    const end = Math.min(toMs, cursor + Math.max(1, 1440 - (Number.isFinite(intoDay) ? intoDay : 0)) * 60_000);
+    if (!isFriday(stamp.slice(0, 10))) hours += (end - cursor) / 3_600_000;
+    cursor = end;
+  }
+  return Math.min(cap, hours);
+}
+
+/**
+ * One of the page's own stamps → the instant it was written (epoch ms; 0 when
+ * it holds no clock). `cairoStamp` wrote the Cairo wall clock, and Cairo is
+ * UTC+2 or +3 (summer time came back in 2023) — so both are tried and the one
+ * `cairoStamp` itself agrees with is kept, rather than assuming an offset.
+ */
+function stampInstant(stamp: string | undefined | null): number {
+  const wall = stampClockMinutes(stamp);
+  if (wall === null) return 0;
+  for (const offset of [180, 120]) {
+    const t = (wall - offset) * 60_000;
+    if (stampClockMinutes(cairoStamp(t)) === wall) return t;
+  }
+  return (wall - 120) * 60_000;
+}
+
 const logRows = (records: readonly SheetRecord[]): Required<LogRow>[] => records.map((r) => ({
   machine: r.machine || "", order: unquote(r.order), toProduct: r.toProduct || "",
   toColour: r.toColour || "", material: r.material || "", date: r.date || "",
@@ -178,7 +363,7 @@ function likelierRunning(a: JobShaped, b: JobShaped): number {
 
 export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Promise<ChangeoverResponse> {
   const fresh = { fresh: !!opts.fresh };
-  const [jobsData, machinesTab, masterTab, prodTab, answersTab, logTab, stops] = await Promise.all([
+  const [jobsData, machinesTab, masterTab, prodTab, answersTab, logTab, stops, downtimeTab, store] = await Promise.all([
     // The list needs what is LEFT to make, so «الإنتاج» is joined; downtime is not.
     loadJobs({ downtime: false }),
     getRecords("machines"),
@@ -188,8 +373,14 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     getRecords("changeoverAnswers", fresh).catch(none),
     getRecords("changeoverLog", fresh).catch(none),
     openStoppages(),
+    // «التوقفات» for the change times, and the store: the plan can do without
+    // either, so each is bounded and a failure is "not known" (null / read: false).
+    within(() => getRecords("downtime"), OPTIONAL_READ_MS, "stoppage history"),
+    readStore(),
   ]);
   const today = todayIso();
+  const now = Date.now();
+  const swaps = swapHistory(downtimeTab?.records ?? [], today);
 
   // A failed read of one of the page's own tabs comes back as an EMPTY tab —
   // and would be served as "nobody has answered anything". A tab that is known
@@ -232,14 +423,50 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
   // What every machine ran in its latest shift. A row with no count yet
   // («لم يُعد بعد») still says which mould was on the machine, so only the
   // day-off markers are left out — NOT isStubRun, which is an OEE rule.
-  const shiftRows = prodTab.records.filter((r) => !isDayOffRow(r)).map((r) => ({
+  const shiftRows = prodTab.records.filter((r) => !isDayOffRow(r)).map((r, at) => ({
     date: normalizeDate(r.date), shift: r.shift || "",
     machine: r.machine || r.machineCode || "", product: r.product || "", material: r.material || "",
     client: (r.client || "").replace(/\s+/g, " ").trim(),
     good: Number(latinDigits(r.goodUnits || "").replace(/[,\s]/g, "")) || 0,
+    /** Its place in the tab — what tells two rows of one shift apart. */
+    at,
   }));
+  type ShiftLine = (typeof shiftRows)[number];
   const runs = latestRuns(shiftRows, today);
   const holders = newestHolders(shiftRows, today);
+
+  // Every dated shift row of a product, by its EXACT name key — the key an
+  // order and a shift row are joined on everywhere (never the loose one: a
+  // sister product is not this product's history). Rows dated after today are
+  // a mistyped year, as in latestRuns.
+  const rowsByName = new Map<string, ShiftLine[]>();
+  for (const r of shiftRows) {
+    const k = nameKey(r.product);
+    if (!k || !r.date || r.date > today) continue;
+    const list = rowsByName.get(k);
+    if (list) list.push(r); else rowsByName.set(k, [r]);
+  }
+
+  // Every machine's shifts, newest first, each with the products it names.
+  type ShiftSlot = { date: string; rank: number; products: Set<string> };
+  const slotsOf = new Map<string, ShiftSlot[]>();
+  {
+    const byKey = new Map<string, ShiftSlot>();
+    for (const r of shiftRows) {
+      const mk = machineKey(r.machine), pk = fold(r.product);
+      if (!mk || !pk || !r.date || r.date > today) continue;
+      const rank = shiftRank(r.shift), k = `${mk}|${r.date}|${rank}`;
+      let slot = byKey.get(k);
+      if (!slot) {
+        slot = { date: r.date, rank, products: new Set() };
+        byKey.set(k, slot);
+        const list = slotsOf.get(mk);
+        if (list) list.push(slot); else slotsOf.set(mk, [slot]);
+      }
+      slot.products.add(pk);
+    }
+    for (const list of slotsOf.values()) list.sort((a, b) => b.date.localeCompare(a.date) || b.rank - a.rank);
+  }
 
   // The material a product was last RUN in — every shift row carries its own
   // «نوع الخام», while Master's is blank for 211 of 546 products.
@@ -532,6 +759,122 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     if (!alongside.has(k)) alongside.set(k, j);
   }
 
+  /* ------------------- since when, and what was made since ------------------- */
+
+  /** A change CONFIRMED on this page is still what this machine shows (the
+   *  same test the moved-by-confirm map above applies). */
+  const confirmedHere = (s: Seat): boolean =>
+    !!startedDay(s) && !!s.plan && (s.base.source === "plan" || s.base.source === "production")
+    && s.plan.products.some((p) => s.base.products.some((b) => fold(b) === fold(p)));
+
+  /**
+   * The day the mould now on a machine STARTED there (MachineNow.startedOn):
+   * the change confirmed on this page when there is one, else the oldest of
+   * the unbroken run of shifts — newest first — that name it; "" when neither
+   * says. A mould that went on today is not taken off again (owner,
+   * 2026-10-07); the rules read this for that.
+   *
+   * Two refinements. While a mixed shift is unanswered only the NEW mould is
+   * the machine's, so it is the one walked. And a confirm stops being the
+   * start once the log shows the mould came OFF after it and went back up with
+   * no tap (11 such returns in 141 changes): the run it is on now began later.
+   */
+  const startedOnOf = (s: Seat): string => {
+    const names = held(s).map(fold).filter(Boolean);
+    if (names.length === 0) return "";
+    let first = "", brokeOn = "";
+    for (const slot of slotsOf.get(s.mk) ?? []) {
+      if (names.some((n) => slot.products.has(n))) first = slot.date;
+      else { brokeOn = slot.date; break; }
+    }
+    const confirmed = confirmedHere(s) ? startedDay(s) : "";
+    return confirmed && !(first && brokeOn > confirmed) ? confirmed : first;
+  };
+
+  /**
+   * The last day, in the run this machine is on NOW, on which one of an
+   * order's shift rows (`rows`) carries a COUNT — where what "nobody has typed
+   * yet" really starts. "" when no row of that run is counted.
+   *
+   * A row typed with no count («لم يُعد بعد») says which mould was on the
+   * machine, not how much it made: taken as the machine's last LOGGED day it
+   * left its own day in neither the count nor the allowance, and typing more
+   * of the log made the forecast worse by exactly those days (review of
+   * 2026-10-07). The run is the unbroken stretch of shifts, newest first, that
+   * name the order (in any spelling it is credited under here): a count from
+   * before another mould was on the machine is not where THIS run's hours
+   * start.
+   */
+  const countedDayOf = (s: Seat, rows: readonly ShiftLine[]): string => {
+    const mine = rows.filter((r) => machineKey(r.machine) === s.mk);
+    const names = Array.from(new Set(mine.map((r) => fold(r.product))));
+    let first = "";
+    for (const slot of slotsOf.get(s.mk) ?? []) {
+      if (!names.some((n) => slot.products.has(n))) break;
+      first = slot.date;
+    }
+    let last = "";
+    for (const r of mine) if (first && r.good > 0 && r.date >= first && r.date > last) last = r.date;
+    return last;
+  };
+
+  /**
+   * The FIRST of the page's rows, newest back, that name the mould this
+   * machine's last row names — when the page was first told it stands here.
+   * Not the last row: a tap an hour ago on which colour is running is about
+   * the same mould, and must not move the moment it went up.
+   */
+  const toldSince = (s: Seat): Required<LogRow> | null => {
+    const last = standing.get(s.mk)?.row;
+    if (!last) return null;
+    const names = listFromSheet(last.toProduct).map(fold);
+    let first = last;
+    for (let i = logs.lastIndexOf(last) - 1; i >= 0; i--) {
+      const r = logs[i];
+      if (machineKey(r.machine) !== s.mk || !r.toProduct.trim()) continue;
+      if (!listFromSheet(r.toProduct).some((p) => names.includes(fold(p)))) break;
+      first = r;
+    }
+    return first;
+  };
+
+  /**
+   * The hours this machine has probably RUN that nobody has counted yet: from
+   * the end of the factory day `countedTo` (08:00 the next morning) — the last
+   * day of this run with a count (countedDayOf), or, when none of it is
+   * counted, the last day its log holds — until `until`. Working time, capped
+   * (workingHoursBetween, LAG_CAP_HOURS). 0 when the log holds nothing for it:
+   * there is no day to count from.
+   *
+   * A mould that went up by «ركّب دي» AFTER that day has only run since the
+   * confirm — without this an order mounted an hour ago was credited with
+   * every hour since the log's last row, when the machine was still making
+   * something else, and looked nearly finished.
+   *
+   * The same for a mould the page was only TOLD stands here («تعديل», a note —
+   * no confirm behind it) while the log's last shift names another product
+   * altogether: it has run since that note at most, not since the day the
+   * machine was still making the other one (review of 2026-10-07: up to 72
+   * hours it never ran came off, and an order at risk stopped reading so).
+   * A note that ties an order to a mould the log merely SPELLS another way is
+   * not that — the mould has been running all along, and the log's day stands.
+   */
+  const untypedHours = (s: Seat, until: number, countedTo = ""): number => {
+    const day = countedTo || s.run?.date || "";
+    let from = day ? factoryDayEnd(day) : 0;
+    if (!from) return 0;
+    const confirm = confirmedHere(s) ? standing.get(s.mk)?.started : null;
+    // A stamp with no clock on it: from the end of the confirm's own factory day.
+    if (confirm) from = Math.max(from, stampInstant(confirm.date) || factoryDayEnd(startedDay(s)));
+    else if (s.base.source === "plan" && !startedDay(s)
+      && !(s.run?.products ?? []).some((x) => s.base.products.some((p) => looseNameKey(x) === looseNameKey(p)))) {
+      const note = toldSince(s);
+      // …and a note with no clock on it: from the end of its own factory day.
+      if (note) from = Math.max(from, stampInstant(note.date) || factoryDayEnd(stampDay(note.date, today)));
+    }
+    return workingHoursBetween(from, until, LAG_CAP_HOURS);
+  };
+
   const machines: PlanMachine[] = seats.map((s) => {
     const { base, run } = s;
     const job = jobOf.get(s.mk);
@@ -606,13 +949,76 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
         orderMaybe: maybeJob ? maybeJob.code.trim() : "", noOrder: !job && fold(base.order) === fold(NO_ORDER),
         alsoOn: s.alsoOn, mixedShift: s.mixedOpen,
         source: base.source, since: base.since, shift: base.shift,
+        startedOn: startedOnOf(s),
       },
       transparentOnly: parseYesNo(a.transparentOnly) === true,
       bigMachine: parseYesNo(a.bigMachine) === true,
+      // This machine's own change times («التوقفات»); null = not measured.
+      ...swapOf(swaps.get(s.mk)),
     };
   });
 
   /* -------------------------------- orders -------------------------------- */
+
+  /**
+   * The machines the shift log shows this order's PRODUCT ran on, most shift
+   * rows first (then the more recent, then the label). Approved by the owner,
+   * 2026-10-07: where a mould goes is learned from where it has run — it
+   * stands in for the supervisor's answer (`fits`) until he gives one.
+   * Only machines the registry still has; and for a name Master holds twice,
+   * not the shifts another customer's part of that name ran.
+   */
+  const ranOnOf = (j: JobShaped, client: string): string[] => {
+    const tally = new Map<string, { rows: number; last: string }>();
+    for (const r of rowsByName.get(nameKey(j.product)) ?? []) {
+      const mk = machineKey(r.machine);
+      if (!labelOf.has(mk)) continue;
+      if (j.ambiguous && r.client && fold(r.client) !== fold(client)) continue;
+      const t = tally.get(mk);
+      if (t) { t.rows++; if (r.date > t.last) t.last = r.date; } else tally.set(mk, { rows: 1, last: r.date });
+    }
+    return Array.from(tally.entries())
+      .sort((a, b) => b[1].rows - a[1].rows || b[1].last.localeCompare(a[1].last)
+        || a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([mk]) => labelOf.get(mk)!);
+  };
+
+  /**
+   * The order's material in the store (see readStore). Which store material a
+   * product is made of is the supervisor's answer; while nobody has given it,
+   * Master's «نوع الخام» is taken when it is — letter for letter, folded —
+   * exactly one of the store's names, and marked `guessed`. Otherwise null:
+   * not known is not "none".
+   *
+   * `haveKg` is what the store holds of it for THIS order's client or for the
+   * factory itself — a customer's own material is not another customer's to
+   * run. A line with no «العميل» at all is nobody else's, so it counts as the
+   * factory's. Every place is summed, a negative line included: «كوبوليمر»
+   * read −195 with no place typed while A12 held 720 — a withdrawal filed
+   * against the wrong line, and only the two together are the pile.
+   * A TOTAL below zero is a mistake in the store's books, not a quantity — it
+   * is "not known" too (the rule the customer portal follows).
+   */
+  const stockOf = (j: JobShaped, client: string, masterMaterial: string, remaining: number | null): OrderStock | null => {
+    if (!store.read) return null;
+    const said = (answersFor(answers, "mold", nameKey(j.product)).storeMaterial ?? "").trim();
+    // An answer naming a material the store no longer has is not replaced by a guess.
+    const name = store.names.get(fold(said || masterMaterial));
+    if (!name) return null;
+    const item = fold(name), mine = fold(client);
+    let kg = 0;
+    for (const l of store.lines) {
+      if (l.item === item && (!l.client || HOUSE_CLIENTS.includes(l.client) || l.client === mine)) kg += l.kg;
+    }
+    if (kg < 0) return null;
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      material: name,
+      haveKg: r2(kg),
+      needKg: remaining !== null && j.pieceWeightG > 0 ? r2((remaining * j.pieceWeightG) / 1000) : null,
+      guessed: !said,
+    };
+  };
 
   const orders: PlanOrder[] = openJobs.map((j) => {
     const code = codeOf(j);
@@ -666,6 +1072,10 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     // the spelling of the latest shift — or «الباقي» jumped back up by the
     // whole amount the day one shift was typed under the order's own name.
     let remaining = j.qtyOrdered > 0 ? j.remaining : null;
+    // The shift rows that are THIS order's: its own name from its start date
+    // on — the rule lib/jobs.ts counts «الباقي» by — plus, just below, the
+    // rows a tie under another spelling credits it with.
+    let credited: ShiftLine[] = (rowsByName.get(nameKey(j.product)) ?? []).filter((r) => !j.startDate || r.date >= j.startDate);
     if (remaining !== null && seat && !!codeKey(seat.base.order) && codeKey(seat.base.order) === codeKey(code)) {
       const own = nameKey(j.product), loose = looseNameKey(j.product);
       // …and only a spelling this machine has been LOGGED under while the tie
@@ -690,28 +1100,80 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
       const spelled = new Set(mine
         .filter((r) => !!from && r.date >= from && nameKey(r.product) !== own && looseNameKey(r.product) === loose && !withOwn.has(slot(r)))
         .map((r) => nameKey(r.product)));
-      const extra = mine
-        .filter((r) => spelled.has(nameKey(r.product)) && (!j.startDate || r.date >= j.startDate))
-        .reduce((sum, r) => sum + r.good, 0);
-      remaining = Math.max(0, remaining - extra);
+      const extraRows = mine.filter((r) => spelled.has(nameKey(r.product)) && (!j.startDate || r.date >= j.startDate));
+      remaining = Math.max(0, remaining - extraRows.reduce((sum, r) => sum + r.good, 0));
+      credited = [...credited, ...extraRows];
     }
-    // Hours of running left: Master's cycle and cavities when it has them,
-    // else the order's own logged rate (only shifts with a COUNT — a
-    // «لم يُعد بعد» row would understate it).
-    let runHours: number | null = null;
-    if (remaining !== null && j.cycleSec > 0 && j.cavities > 0) {
-      runHours = Math.round((remaining * j.cycleSec * 10) / (3600 * j.cavities)) / 10;
-    } else if (remaining !== null) {
-      const counted = jobsData.runsFor(j).filter((r) => r.goodUnits > 0);
-      const made = counted.reduce((sum, r) => sum + r.goodUnits, 0);
-      if (counted.length > 0 && made > 0) runHours = Math.round((remaining / (made / counted.length)) * 12 * 10) / 10;
+
+    // THE RATE (approved by the owner, 2026-10-07: the forecast uses the real
+    // rate). What the floor actually makes — the good pieces per shift row
+    // over this order's 5 most recent COUNTED rows, a row being one 12-hour
+    // shift on one machine (a «لم يُعد بعد» row has no count and would read as
+    // a shift that made nothing). Master's cycle and cavities only while
+    // nothing is counted yet — it was read FIRST until today, and it is what
+    // the mould should make, not what the floor has been making.
+    const counted = credited.filter((r) => r.good > 0)
+      .sort((a, b) => b.date.localeCompare(a.date) || shiftRank(b.shift) - shiftRank(a.shift) || b.at - a.at)
+      .slice(0, RATE_SHIFT_ROWS);
+    const perHour = counted.length > 0
+      ? counted.reduce((sum, r) => sum + r.good, 0) / counted.length / SHIFT_HOURS
+      : j.cycleSec > 0 && j.cavities > 0 ? (3600 * j.cavities) / j.cycleSec : 0;
+    const hoursFor = (pieces: number): number => Math.round((pieces / perHour) * 10) / 10;
+
+    // THE LOG IS TYPED LATE. The machine this order is being made on RIGHT NOW
+    // (its own, or the one it runs alongside on) has gone on running since the
+    // last day its log holds a COUNT for, so what was probably made since
+    // comes off before the hours are worked out. `remaining` stays the COUNT;
+    // `asOf` says which day the estimate was carried forward from.
+    const makingOn = seat?.running ? seat : holder?.running && !!ahead && !behind ? holder : undefined;
+    let left = remaining;
+    let asOf = "";
+    if (left !== null && perHour > 0 && makingOn?.run?.date) {
+      const countedTo = countedDayOf(makingOn, credited);
+      left = Math.max(0, left - perHour * untypedHours(makingOn, now, countedTo));
+      asOf = countedTo || makingOn.run.date;
     }
+    const runHours = left !== null && perHour > 0 ? hoursFor(left) : null;
+    const runBasis: PlanOrder["runBasis"] = runHours === null ? "" : counted.length > 0 ? "logged" : "master";
+
+    // THE FLOOR'S «لا يوجد أمر شغل», CHECKED AGAINST THE COUNT (approved by the
+    // owner, 2026-10-07). Finished is the floor's word — unless the count says
+    // more than a shift of running was still left. "Was", at the moment the
+    // machine STOPPED: it ran until then, and the days of that nobody has
+    // counted yet are allowed for the same way as above. Compared with the raw
+    // count alone, the check would doubt every machine whose log is a day
+    // behind — which is every machine — and offer the finished order back to it.
+    // ASSUMPTION (his to correct): he approved `runHours` > 12, the count as it
+    // is; this allowance is the page's reading of it.
+    // …but only for a machine that WAS running when it stopped — the one test
+    // of that (machineState), asked as if the stoppage were not there. One
+    // that has logged nothing for weeks did not run those weeks: allowing it
+    // the full 72 hours called an order with sixty hours left finished, and
+    // offered it nowhere (review of 2026-10-07).
+    // (Nothing to check against — no rate, no piece weight — and the floor's
+    // word stands, as it did before today.)
+    const floorSaysDone = !!seat && machineFinished(seat);
+    const wasRunning = !!seat && machineState({
+      source: seat.base.source, since: seat.base.since, latestDate: runs.latestDate, today, stopped: false,
+    }) === "running";
+    const ranUnlogged = floorSaysDone && seat?.stoppage && wasRunning
+      ? untypedHours(seat, seat.stoppage.since, countedDayOf(seat, credited))
+      : 0;
+    const leftAtStop = floorSaysDone && remaining !== null && perHour > 0
+      ? hoursFor(Math.max(0, remaining - perHour * ranUnlogged))
+      : null;
+    const doneUnsure = leftAtStop !== null && leftAtStop > SHIFT_HOURS;
+
     const workers = Number(latinDigits(ma.workers ?? ""));
 
     return {
       id: j.id, code, product: j.product, client,
       material, dueDate: j.dueDate, status: j.status, qtyKg: j.qtyOrderedKg,
-      remaining, runHours,
+      remaining, runHours, runBasis, asOf,
+      ranOn: ranOnOf(j, client),
+      // Master's own «نوع الخام» (the twin's, for a name held twice) is what a
+      // GUESS at the store material is made from — never the shift log's.
+      stock: stockOf(j, client, twin ? std?.material ?? "" : j.material || std?.material || "", remaining),
       colours: answered.length > 0 ? answered : guess,
       colourSource: answered.length > 0 ? "answer" : guess.length > 0 ? "guess" : "",
       fits: fits.length > 0 ? fits : null,
@@ -721,11 +1183,16 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
       workers: workers > 0 ? workers : null,
       oilCores: parseYesNo(ma.oilCores),
       hotRunner: parseYesNo(ma.hotRunner),
+      // The answer itself, whatever the store makes of it: `stock` above is
+      // null when the store cannot put a number on that name, and the question
+      // form then showed «غير محددة» for a mould that HAD been answered.
+      storeMaterial: (ma.storeMaterial ?? "").trim(),
       missing: missingFromSheet(oa.missing),
       keyClient: isKeyClient(j),
       mountedOn: seat?.label ?? holder?.label ?? "",
       mountedRunning: !!seat?.running || (!!holder?.running && !!ahead && !behind),
-      doneByFloor: !!seat && machineFinished(seat),
+      doneByFloor: floorSaysDone && !doneUnsure,
+      doneUnsure,
       queuedBehind: holder?.running && behind ? codeOf(behind) : "",
     };
   });
@@ -755,6 +1222,9 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     machines, orders,
     layout: validLayout(layout) ? layout : [],
     stoppagesRead: stops.read,
+    storeMaterials: Array.from(store.names.values()), stockRead: store.read,
+    // (The store keeps its own clock — a copy of it may be minutes old by
+    // design — so it is left out of the age of the SHEET rows below.)
     dataAgeMs: Math.max(0, Date.now() - readAt),
   };
 }
@@ -786,7 +1256,7 @@ async function appendLazy(entity: "changeoverAnswers" | "changeoverLog", values:
 
 /**
  * A column that was added to a tab AFTER the tab existed («ترتيب الخريطة»,
- * «هوت رانر», «اللون الشغال الآن»). An append silently DROPS a value whose
+ * «هوت رانر», «خامة المخزن», «اللون الشغال الآن»). An append silently DROPS a value whose
  * header the tab does not have, so the header is made sure of first — a no-op
  * once it is there; `no_tab` means the append creates the tab with them all.
  */
@@ -858,6 +1328,7 @@ export async function saveAnswers(items: readonly AnswerItem[], by: string, role
   // failed read is an empty tab, and would refuse every machine as "not in
   // the registry any more".
   if (labels.length === 0 || jobsTab.records.length === 0) return refuse("sheet_unreadable", 503);
+  let storeView: StoreView | undefined; // read on the first «خامة المخزن» answer, if any
 
   const rows: { kind: AnswerKind; row: Record<string, string> }[] = [];
   for (const it of items) {
@@ -942,6 +1413,27 @@ export async function saveAnswers(items: readonly AnswerItem[], by: string, role
           cell = formatLayout(tiles);
           break;
         }
+        case "storeMaterial": {
+          // Which material of «مخزن اتقان» this product is made of. A name like
+          // every other here: checked against the sheet it belongs to — the
+          // store, read once per request and only when it is asked about —
+          // and written in THAT sheet's spelling, which is what loadPlan
+          // matches the balance lines on.
+          if (typeof raw !== "string") return refuse("bad_store_material");
+          const asked = safeText(raw.replace(/\s+/g, " "), 160);
+          if (!asked) return refuse("bad_store_material");
+          storeView ??= await readStore();
+          // …and never against a store that was not read: an empty list would
+          // refuse every material as unknown — and refusing the whole save for
+          // it threw away the colour and the machines ticked in the same form.
+          // The name came from the store's own list on the page: it is kept as
+          // sent (loadPlan simply finds no stock for a name the store lacks).
+          if (!storeView.read) { cell = asked; break; }
+          const hit = storeView.names.get(fold(asked));
+          if (!hit) return refuse("unknown_store_material");
+          cell = safeText(hit, 160);
+          break;
+        }
         case "keyClient":
         case "oilCores":
         case "hotRunner":
@@ -959,7 +1451,7 @@ export async function saveAnswers(items: readonly AnswerItem[], by: string, role
     rows.push({ kind, row });
   }
 
-  if (rows.some((r) => r.row.layout || r.row.hotRunner) && !(await ensureColumns("changeoverAnswers"))) {
+  if (rows.some((r) => r.row.layout || r.row.hotRunner || r.row.storeMaterial) && !(await ensureColumns("changeoverAnswers"))) {
     return refuse("save_failed", 503);
   }
 

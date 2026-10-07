@@ -166,7 +166,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
 - **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
   `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
-- **Tests:** 85 for the rules, and **`tests/changeover-data.test.ts` (24) runs the
+- **Tests:** 108 for the rules, and **`tests/changeover-data.test.ts` (35) runs the
   REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
   `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
   defects were — **write the sequence there first** (dated shifts, page rows, orders → what
@@ -212,6 +212,48 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
   when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
   carried over, twice as wide as tall. Never keyed on PQ numbers in code.
+- **TEN CHANGES TO THE LOGIC — 2026-10-07/08, owner: "I think you should fix them all"**
+  (he had asked for a critique of the logic; built by a workflow — contract, three
+  builders, three reviewers, a skeptic per finding, a fixer: 13 defects confirmed and
+  fixed before anything shipped). Where this and the next bullet disagree, this wins:
+  1. **The stoppage reason decides** (`stoppageKind`): «لا يوجد أمر شغل» = finished;
+     «صيانة الاسطمبة» / «عدم وجود خامة» = "open" (the machine can take ANOTHER mould);
+     everything else = "blocked" → `DayNeed "down"`, never given an order.
+  2. **Urgent orders choose their machine first** (`planDay` pass 1: free before
+     ending-soon before interrupt; supervisor's fit, then where it ran, then unknown;
+     then the cheapest change), the other machines pick after (pass 2). Urgent orders
+     nobody can take are `unplaced` (`noMaterial` / `noMachine`) — a red box, and the
+     tab's badge counts them. An order whose mould stands on a stopped or down machine
+     is HELD: given to no machine (ASSUMPTION: except «صيانة في الماكينة», where a late
+     order is still planned elsewhere). One mould is never given to two machines.
+  3. **At risk = will be late**: `orderUrgency().atRisk` when the running left is more
+     than the WORKING time to the due date (`workingDaysUntil` — Fridays are not days;
+     what is left of today counts as 12 h, ASSUMPTION). Sorted with the late ones; a key
+     client at risk is urgent. `calendarHours` turns running hours into clock hours.
+  4. **The forecast uses the real rate**: the order's last 5 counted shifts
+     (`runBasis "logged"`), else Master's cycle (`"master"`, shown as approximate), and
+     allows for the log being typed late — what was probably made since the last COUNTED
+     day of the current run, capped at 72 h, only on a machine that is running.
+     `remaining` stays the logged count; `asOf` is shown beside the forecast.
+  5. **Where a mould goes is learned from where it ran** (`ranOn`, exact product name):
+     fit is here → ran → unknown, the form offers "the machines it ran on" in one tap,
+     and it stays the supervisor's to confirm.
+  6. **«لا يوجد أمر شغل» is checked against the count**: more than a shift still to run
+     → `doneUnsure` (not blocked; an amber warning: close the order, or correct the
+     stoppage reason). A running machine whose quantity is complete is `"overrun"`.
+  7. **Material in the store**: a «خامة المخزن» answer per product (new column, added by
+     the first save), else a guess when Master's material equals exactly one store name;
+     `stock {haveKg, needKg}` from the store's balance for that client or the factory;
+     chips `stockNone` / `stockLow`; the plan never PICKS an order with none. The store
+     read is raced against 6 s — a slow store costs the chips, never the page.
+  8. **Change times are measured**: the median of a machine's «تغيير الاسطمبة» stoppages
+     in «التوقفات» (15–720 min, 90 days, ≥ 3) replaces the fixed 45 min / 6 h
+     (`swapMin`, `Estimate.swapMeasured`).
+  9. Working time, as in 3. — 10. **A mould that went on today is not taken off**
+     (`MachineNow.startedOn`).
+  ⚠ Still the owner's: how many changes the team does at once (the plan only numbers
+  the machines 1, 2, 3); which machines are kept for transparent; the «عطلة» rows are not
+  yet working-time (only Fridays are).
 - **THE LOGIC, AS THE OWNER ANSWERED IT — 2026-10-07** (nine questions put to him; he
   picked from options for two). This supersedes the older bullets where they disagree:
   - **Three tabs, and a machine is its own screen.** «الأرضية» (the map) · «خطة اليوم» ·
@@ -303,7 +345,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 85 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 108 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,
