@@ -401,6 +401,9 @@ test("«اسأل Claude»: the listener's secret is its own, and no route calls 
   for (const src of sources) {
     // Never the bridge keys (the main one is written in apps-script.gs)…
     assert.equal(/process\.env\.(GOOGLE_APPS_SCRIPT_SECRET|STORAGE_APPS_SCRIPT_SECRET)/.test(src), false, "an ask file reads a bridge key");
+    // «التوقفات» is not a source (owner, 2026-10-10): a stoppage row holds a
+    // tapped reason, not what went wrong. The faults are in «الأعطال».
+    assert.equal(/downtime-data|loadDowntime|machineStoppages/.test(src), false, "an ask file reads the stoppage log");
     // …and the website never calls Claude: no key, no SDK, no model endpoint.
     assert.equal(/ANTHROPIC_API_KEY|GEMINI_API_KEY|@anthropic-ai|api\.anthropic\.com|generativelanguage/.test(src), false, "an ask file reaches for an AI");
   }

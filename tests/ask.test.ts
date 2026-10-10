@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ASK_ROLES, CLAIM_TTL_MS, DEFAULT_DAILY_CAP, MAX_ANSWER_CHARS, MAX_QUESTION_CHARS, ONLINE_WINDOW_MS,
-  askedToday, canAsk, capState, dailyCap, effectiveStatus, isOnline, listenerTokenOk,
+  ISSUE_KINDS, issueKind, askedToday, canAsk, capState, dailyCap, effectiveStatus, isOnline, listenerTokenOk,
   planAnswer, planClaim, planFailure, planFollowUp, planRetry, pollDelayMs, questionText,
   type AskThread,
 } from "../lib/ask.ts";
@@ -39,6 +39,16 @@ test("the page's NAV entry and the API's role list are the same list", () => {
   assert.ok(nav, "the ask page has a NAV entry of its own");
   assert.deepEqual([...nav.roles].sort(), [...ASK_ROLES].sort());
   for (const role of ALL_ROLES) assert.equal(canAccess(role, "/dashboard/ask"), canAsk(role), role);
+});
+
+/* ------------------------------- the two kinds ---------------------------- */
+
+test("logged issues are offered as two kinds: mould, and machine (incl. electrical)", () => {
+  assert.deepEqual([...ISSUE_KINDS], ["mould", "machine"], "moulds first — the log is mould-first");
+  assert.equal(issueKind("اسطمبة"), "mould");
+  assert.equal(issueKind(" ماكينة "), "machine");
+  assert.equal(issueKind("كهرباء"), "machine");
+  for (const other of ["خامة", "أخرى", "", null, undefined, "غير متاح / N/A"]) assert.equal(issueKind(other), null);
 });
 
 /* ---------------------------------- claim --------------------------------- */

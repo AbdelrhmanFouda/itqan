@@ -255,6 +255,24 @@ export function listenerTokenOk(given: string | null | undefined, expected: stri
   return diff === 0;
 }
 
+/* ------------------------------ the two kinds ----------------------------- */
+
+/**
+ * The ask page offers logged issues as two kinds (owner, 2026-10-10: "show 2
+ * types of errors (machines, molds)"): a fault of the press — «ماكينة» and
+ * «كهرباء», the same pair lib/issues.ts isMachineCategory names — or of the
+ * mould, «اسطمبة». «خامة» and «أخرى» are neither; they are still askable from
+ * the opened issue on the issues page.
+ */
+export type IssueKind = "mould" | "machine";
+export const ISSUE_KINDS: readonly IssueKind[] = ["mould", "machine"];
+export function issueKind(category: string | null | undefined): IssueKind | null {
+  const c = (category ?? "").trim();
+  if (c === "اسطمبة") return "mould";
+  if (c === "ماكينة" || c === "كهرباء") return "machine";
+  return null;
+}
+
 /* --------------------------------- display ------------------------------- */
 
 /** How long the page waits between checks: 4 s for the first minute, then 10 s. */

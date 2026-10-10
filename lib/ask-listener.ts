@@ -36,7 +36,7 @@ export async function listenerQuestion(t: AskThread, origin: string, now: number
   const file = (k: "photo" | "audio", id: string) =>
     `${origin}/api/ask/listener/file?t=${encodeURIComponent(signLink({ k, id, th: t.id }, now))}`;
   const pending = pendingQuestion(t)!;
-  const { history, historyMissing, missing } = await buildHistory(t.issue, now);
+  const { history, historyMissing, missing } = await buildHistory(t.issue);
   const i = t.issue;
   return {
     threadId: t.id,

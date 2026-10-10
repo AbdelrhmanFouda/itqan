@@ -69,9 +69,6 @@ even while answering a question (answering can take longer than three minutes).
           "number": "12", "numberSource": "code", "client": "…", "material": "PE", "cavities": "4",
           "cycleSec": "48", "weightG": "11.7", "knownDefects": null, "notes": null, "duplicatedName": false
         },
-        "machineStoppages": [
-          { "date": "2026-10-09", "reason": "صيانة الاسطمبة", "minutes": 649, "estimated": false, "loggedBy": "…", "note": null }
-        ],
         "machineShifts": [
           { "date": "2026-10-07", "shift": "المسائية", "machine": "PQ 2 — 280", "product": "…",
             "goodUnits": 154, "scrapUnits": 26, "scrapSource": "logged", "rowCheck": "سليم" }
@@ -105,11 +102,16 @@ How to read it:
   number in Master's notes). `duplicatedName: true` = Master holds this product name
   twice and the first row is shown — say so rather than trusting the standard.
 - **`historyMissing: true`** — some of the sheet did not answer within 6 seconds. `missing`
-  names the parts: `stoppages`, `shifts`, `issues`, `mould`. Those parts are empty in
+  names the parts: `shifts`, `issues`, `mould`. Those parts are empty in
   `history`; say in the answer that the history was not available rather than that there
   is none.
-- Windows: stoppages 30 days (max 40), shifts last 10 for the machine and 10 for the
-  product, issues last 10 for each. Newest first.
+- Windows: shifts last 10 for the machine and 10 for the product, issues last 10 for the
+  mould and 10 for the machine. Newest first.
+- **There is no stoppage history** (owner, 2026-10-10): «التوقفات» holds a tapped reason,
+  not the exact fault, so it is not sent. What went wrong before, and what fixed it, is in
+  the two issue lists — `mouldIssues` (same product) and `machineIssues` (same machine).
+  The page offers logged issues as two kinds: mould (`category` «اسطمبة») and machine
+  («ماكينة», «كهرباء»).
 
 ### Files — `GET <photoUrl>` / `<issueAudioUrl>` / `<solutionAudioUrl>`
 

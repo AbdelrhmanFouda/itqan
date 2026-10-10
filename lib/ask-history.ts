@@ -18,22 +18,24 @@
  *
  * A tab that could not be read answers with no fields at all (lib/sheets.ts),
  * which is how "not read" is told from "read, nothing there".
+ *
+ * «التوقفات» IS NOT READ (owner, 2026-10-10: "not related to the stoppage
+ * because the exact reason is not written in it"). A stoppage row holds one of
+ * eleven tapped reasons, not what went wrong; the fault and its fix are in
+ * «الأعطال», and that is what the listener is given — the machine's earlier
+ * issues and the mould's, as two lists.
  */
 import { getRecords, type SheetRecord } from "@/lib/sheets";
-import { loadDowntimeRecords } from "@/lib/downtime-data";
 import { loadIssues, identityOf, type Issue } from "@/lib/issues-data";
 import { sameIssue } from "@/lib/issues";
 import { normalizeDate, latinDigits } from "@/lib/dates";
 import { machineKeyOf } from "@/lib/run-join";
 import { resolveScrap } from "@/lib/scrap";
 import { moldKey, resolveMoldNumber } from "@/lib/mold-number";
-import { downtimeReasonAr } from "@/lib/prod-meta";
 import type { AskIssue } from "@/lib/ask";
 
 export const HISTORY_BUDGET_MS = 6000;
 export const VERIFY_BUDGET_MS = 4000;
-const STOPPAGE_DAYS = 30;
-const MAX_STOPPAGES = 40;
 const MAX_SHIFTS = 10;
 const MAX_ISSUES = 10;
 
@@ -112,8 +114,6 @@ export type AskHistory = {
     cavities: string | null; cycleSec: string | null; weightG: string | null;
     knownDefects: string | null; notes: string | null; duplicatedName: boolean;
   };
-  /** «التوقفات» for the machine, last 30 days, newest first. */
-  machineStoppages: { date: string; reason: string; minutes: number | null; estimated: boolean; loggedBy: string | null; note: string | null }[];
   /** «الإنتاج» — the machine's last shifts, newest first. */
   machineShifts: Shift[];
   /** «الإنتاج» — the product's last shifts, on any machine, newest first. */
@@ -130,8 +130,6 @@ type Shift = {
 type PastIssue = { date: string; machine: string | null; product: string | null; category: string | null; description: string | null; action: string | null; status: string | null };
 
 export type HistoryResult = { history: AskHistory | null; historyMissing: boolean; missing: string[] };
-
-const isoDaysAgo = (days: number, now: number) => new Date(now - days * 86_400_000).toISOString().slice(0, 10);
 
 function shiftOf(r: SheetRecord): Shift {
   const scrap = resolveScrap(r);
@@ -154,35 +152,20 @@ const newestFirst = <T extends { date: string }>(list: T[]) => [...list].reverse
  * question (no issue). Otherwise every part that answered in time is filled
  * and the rest are listed in `missing`; `historyMissing` is true when any is.
  */
-export async function buildHistory(issue: AskIssue | null, now: number = Date.now()): Promise<HistoryResult> {
+export async function buildHistory(issue: AskIssue | null): Promise<HistoryResult> {
   if (!issue) return { history: null, historyMissing: false, missing: [] };
   const machine = issue.machine.trim();
   const product = moldKey(issue.product);
   const deadline = HISTORY_BUDGET_MS;
 
-  const [stoppages, production, issues, master] = await Promise.all([
-    machine ? within(loadDowntimeRecords(), deadline) : Promise.resolve([]),
+  const [production, issues, master] = await Promise.all([
     within(getRecords("production"), deadline),
     within(loadIssues(), deadline),
     product ? within(getRecords("master"), deadline) : Promise.resolve(null),
   ]);
 
   const missing: string[] = [];
-  const h: AskHistory = { mould: null, machineStoppages: [], machineShifts: [], mouldShifts: [], mouldIssues: [], machineIssues: [] };
-
-  // An empty «التوقفات» cannot be told from a failed read here, so an empty
-  // answer is reported as missing rather than as "no stoppages".
-  if (stoppages === LATE || (machine && stoppages.length === 0)) missing.push("stoppages");
-  else {
-    const since = isoDaysAgo(STOPPAGE_DAYS, now);
-    h.machineStoppages = stoppages
-      .filter((s) => s.machine === machine && s.date >= since)
-      .slice(0, MAX_STOPPAGES)
-      .map((s) => ({
-        date: s.date, reason: downtimeReasonAr(s.reason), minutes: s.minutes > 0 ? s.minutes : null,
-        estimated: s.estimated, loggedBy: text(s.createdBy), note: text(s.notes),
-      }));
-  }
+  const h: AskHistory = { mould: null, machineShifts: [], mouldShifts: [], mouldIssues: [], machineIssues: [] };
 
   if (production === LATE || production.fields.length === 0) missing.push("shifts");
   else {

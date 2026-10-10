@@ -30,8 +30,8 @@ import { ak } from "@/lib/i18n.ask";
 import { fill } from "@/lib/format";
 import { formatClock, formatDate } from "@/lib/dates";
 import {
-  ASK_ISSUE_KEY, MAX_PHOTO_BYTES, MAX_QUESTION_CHARS, PHOTO_MAX_EDGE, PHOTO_TARGET_BYTES, pollDelayMs,
-  type AskIssue, type IssueSnap, type AskMessage, type AskStatus, type CapState,
+  ASK_ISSUE_KEY, ISSUE_KINDS, issueKind, MAX_PHOTO_BYTES, MAX_QUESTION_CHARS, PHOTO_MAX_EDGE, PHOTO_TARGET_BYTES, pollDelayMs,
+  type AskIssue, type IssueKind, type IssueSnap, type AskMessage, type AskStatus, type CapState,
 } from "@/lib/ask";
 
 type Strings = (typeof ak)["en"];
@@ -43,6 +43,9 @@ type Thread = {
 };
 type ThreadResp = { ok: boolean; thread: Thread; online: boolean; mine: boolean };
 type SendResp = { ok: boolean; reason?: string; thread?: Thread; cap?: CapState };
+/** A row of «الأعطال» as /api/issues answers it (newest first). */
+type LoggedIssue = IssueSnap & { issueAudio: unknown };
+const PICK_STEP = 6;
 type View = { kind: "list" } | { kind: "new"; issue: IssueSnap | null } | { kind: "thread"; id: string };
 type Photo = { base64: string; url: string };
 
@@ -241,6 +244,12 @@ export default function AskPage() {
   /** The question has been waiting over a minute — set by the poll, never read off the clock in render. */
   const [longWait, setLongWait] = useState(false);
   const [sendErr, setSendErr] = useState<string | null>(null);
+  // The logged issues offered on the first screen, as two kinds: moulds and
+  // machines (owner, 2026-10-10). Nothing here reads «التوقفات».
+  const [logged, setLogged] = useState<LoggedIssue[] | null>(null);
+  const [loggedErr, setLoggedErr] = useState(false);
+  const [kind, setKind] = useState<IssueKind>("mould");
+  const [shown, setShown] = useState(PICK_STEP);
   const waitingSince = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -296,11 +305,19 @@ export default function AskPage() {
     setThreadErr(null); setThread(r.data.thread); setOnline(r.data.online); setMine(r.data.mine !== false);
   }, [t]);
 
+  const loadLogged = useCallback(async () => {
+    const r = await timedJson<{ issues?: LoggedIssue[] }>(authedFetch, "/api/issues", {}, 60_000);
+    if (!r.ok || !Array.isArray(r.data.issues)) { setLoggedErr(true); return; }
+    setLoggedErr(false); setLogged(r.data.issues);
+  }, []);
+
   // authedFetch has no user for the first moments of a load.
   useEffect(() => {
     if (authLoading || !user) return;
     void Promise.resolve().then(loadList);
-  }, [authLoading, user, loadList]);
+    // Its own call, never in front of the list: the issues log is a sheet read.
+    void Promise.resolve().then(loadLogged);
+  }, [authLoading, user, loadList, loadLogged]);
 
   const threadId = view.kind === "thread" ? view.id : "";
   useEffect(() => {
@@ -390,6 +407,71 @@ export default function AskPage() {
 
           {view.kind === "list" && (
             <>
+              <section aria-label={t.pickIssue} className="rounded-2xl border border-gray-200 bg-white p-3">
+                <h2 className="mb-2 text-sm font-medium text-gray-700">{t.pickIssue}</h2>
+                <div role="tablist" className="mb-2.5 grid grid-cols-2 gap-2">
+                  {ISSUE_KINDS.map((k) => {
+                    const n = (logged ?? []).filter((i) => issueKind(i.category) === k).length;
+                    return (
+                      <button
+                        key={k} type="button" role="tab" aria-selected={kind === k}
+                        onClick={() => { setKind(k); setShown(PICK_STEP); }}
+                        className={`min-h-12 rounded-xl border px-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                          kind === k ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white text-gray-700 hover:border-blue-400"
+                        }`}
+                      >
+                        {t.kinds[k]}{logged ? <span className="ms-1.5 tabular-nums opacity-80">{n}</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!logged && !loggedErr && <div className="py-4"><Spinner text={t.pickIssue} /></div>}
+                {loggedErr && !logged && (
+                  <p role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                    {t.issuesFailed}
+                    <Btn variant="outline" onClick={() => { setLoggedErr(false); void loadLogged(); }}><RotateCw size={14} /> {t.reload}</Btn>
+                  </p>
+                )}
+                {logged && (() => {
+                  const ofKind = logged.filter((i) => issueKind(i.category) === kind);
+                  if (ofKind.length === 0) return <p className="py-3 text-center text-sm text-gray-500">{t.noIssues}</p>;
+                  return (
+                    <>
+                      <ul className="space-y-2">
+                        {ofKind.slice(0, shown).map((i) => (
+                          <li key={i.row}>
+                            <button
+                              type="button"
+                              onClick={() => go({ kind: "new", issue: {
+                                row: i.row, date: i.date, machine: i.machine, product: i.product, category: i.category,
+                                description: i.description, action: i.action, status: i.status, note: i.note,
+                              } })}
+                              className="block min-h-14 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-start hover:border-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                            >
+                              <span className="flex items-start justify-between gap-2">
+                                <span className="min-w-0 break-words font-medium text-gray-900">
+                                  {kind === "machine"
+                                    ? (i.machine ? <bdi dir="ltr">{i.machine}</bdi> : i.product || "—")
+                                    : (i.product || (i.machine ? <bdi dir="ltr">{i.machine}</bdi> : "—"))}
+                                </span>
+                                <span className="shrink-0 text-xs tabular-nums text-gray-500">{formatDate(i.date, isAr ? "ar" : "en") || i.date}</span>
+                              </span>
+                              <span className="mt-0.5 block truncate text-sm text-gray-600" dir="auto">
+                                {kind === "machine" && i.machine && i.product ? `${i.product} · ` : ""}
+                                {i.description || (i.issueAudio ? t.voiceOnly : "—")}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {ofKind.length > shown && (
+                        <Btn variant="ghost" onClick={() => setShown((n) => n + PICK_STEP)} className="mt-1 w-full">{t.showMore}</Btn>
+                      )}
+                    </>
+                  );
+                })()}
+              </section>
+
               <Btn onClick={() => go({ kind: "new", issue: null })} className="min-h-14 w-full text-base">
                 <Plus size={20} /> {t.general}
               </Btn>
