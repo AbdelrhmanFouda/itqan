@@ -166,7 +166,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   an emptied «تغييرات الاسطمبات» had locked the page out of the write that would refill it.
 - **`/api/sheet/changeoverAnswers|changeoverLog` are production-only** (`PRODUCTION_ONLY` in
   `lib/open-reads.ts`) — registering the tabs in `ENTITIES` had opened them to every role.
-- **Tests:** 108 for the rules, and **`tests/changeover-data.test.ts` (35) runs the
+- **Tests:** 112 for the rules, and **`tests/changeover-data.test.ts` (36) runs the
   REAL `loadPlan` / `recordMount`** over in-memory tabs (`tests/_changeover-harness.ts` swaps
   `lib/sheets`, `lib/jobs`, `lib/db`). The server glue had none, and that is where the
   defects were — **write the sequence there first** (dated shifts, page rows, orders → what
@@ -212,6 +212,22 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   cell WITHOUT that word is the 7-column map and `parseLayout` scales it onto the sheet
   when read (edges rounded, so tiles that touched still touch) — the owner's arrangement
   carried over, twice as wide as tall. Never keyed on PQ numbers in code.
+- **TWO TEAMS, AND WHO IS AT FAULT — 2026-10-10, owner:** *"the team can do 2 changes at
+  the same time"* and *"sometimes the mould is good but on a bad machine and sometimes
+  the mould is bad but is put on the machine."*
+  - `CHANGE_TEAMS = 2`: `planDay` gives every pick that needs a change of mould a `turn`
+    and a `startIn` (minutes until a team is free; a «تغيير الاسطمبة» already running holds
+    a team for the rest of its usual time). The card says «الدور 2 — فريق يبدأ دلوقتي».
+  - `stoppageFault(reason)`: «صيانة في الماكينة» = the MACHINE is bad, the mould on it is
+    good → its order may go to another machine (`DayEntry.movedFrom` / `movesTo`), the
+    machine takes nothing; «صيانة الاسطمبة» = the MOULD is bad → the machine takes another
+    mould and the order waits for its mould wherever it stands; «عدم وجود خامة» = both
+    good, the order waits for material. Said in words on the plan and on the orders tab.
+  - A «عطلة» row for today (`dayOff`, `daysOff`) is a day nothing runs: the banner, the
+    forecast (`planDay` ctx.daysOff) and the late-log allowance all skip it.
+  - Two one-tap confirmations, each a write only on the tap: the machines the log says
+    mostly run transparent (`transparentHint`: ≥ 5 of the last 20 shifts, 70% — a
+    SUGGESTION while none is marked), and «أكّد» beside a guessed store material.
 - **TEN CHANGES TO THE LOGIC — 2026-10-07/08, owner: "I think you should fix them all"**
   (he had asked for a critique of the logic; built by a workflow — contract, three
   builders, three reviewers, a skeptic per finding, a fixer: 13 defects confirmed and
@@ -251,9 +267,8 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
      (`swapMin`, `Estimate.swapMeasured`).
   9. Working time, as in 3. — 10. **A mould that went on today is not taken off**
      (`MachineNow.startedOn`).
-  ⚠ Still the owner's: how many changes the team does at once (the plan only numbers
-  the machines 1, 2, 3); which machines are kept for transparent; the «عطلة» rows are not
-  yet working-time (only Fridays are).
+  *(Answered or built 2026-10-10 — see the bullet above: two teams, «عطلة» days, and a
+  one-tap suggestion for the transparent machines.)*
 - **THE LOGIC, AS THE OWNER ANSWERED IT — 2026-10-07** (nine questions put to him; he
   picked from options for two). This supersedes the older bullets where they disagree:
   - **Three tabs, and a machine is its own screen.** «الأرضية» (the map) · «خطة اليوم» ·
@@ -345,7 +360,7 @@ fixed, several of them introduced by the fix for an earlier one. What that left:
   PQ 12 «شفاف» saved through «تعديل», which created «تغييرات الاسطمبات». ⚠ A real
   «ركّب دي» confirm has still not been run.
 
-- **Rules: `lib/changeover.ts`** — pure, zero imports, 108 tests, and the page ranks with
+- **Rules: `lib/changeover.ts`** — pure, zero imports, 112 tests, and the page ranks with
   the same functions in the browser. Order (his): عميل مهم → متأخر → سهولة التغيير →
   الكمية المتبقية → تاريخ التسليم. Colour ladder (light → dark easy, dark → light hard,
   anything → transparent worst), material family from Master's free text, drying hours,

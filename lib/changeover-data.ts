@@ -7,7 +7,7 @@ import { nameKey } from "@/lib/master-lookup";
 import { codeKey, isOpenOrder, machineMatch } from "@/lib/work-orders";
 import { factoryDayEnd, latinDigits, normalizeDate, todayIso } from "@/lib/dates";
 import { cairoStamp } from "@/lib/customer-requests";
-import { isDayOffRow } from "@/lib/run-join";
+import { dayOffDates, isDayOffRow } from "@/lib/run-join";
 import { getOpenDowntimeEvents } from "@/lib/db";
 import { getStorageData } from "@/lib/storage";
 import { toNumber } from "@/lib/storage-filter";
@@ -72,6 +72,13 @@ export type ChangeoverResponse = {
   /** Today is a Friday — the factory's day off: no mould changes (a warning,
    *  never a block). Night changes are allowed since 2026-10-07. */
   friday: boolean;
+  /** Today has a «عطلة» row in «الإنتاج»: every machine is off, like a Friday. */
+  dayOff: boolean;
+  /** The days off of the last fortnight (ISO), for the plan's working time. */
+  daysOff: string[];
+  /** Machines whose recent shifts are mostly transparent work — offered as a
+   *  one-tap answer while no machine is marked as kept for transparent. */
+  transparentHint: string[];
   /** Only the owner and a manager mark a client as important. */
   canSetKeyClient: boolean;
   /** How many clients are marked important — 0 means the first tier of the
@@ -317,7 +324,31 @@ const LAG_CAP_HOURS = 72;
  * 12-hour shifts every day but Friday — the Cairo calendar Friday, midnight to
  * midnight, read off the same clock `cairoStamp` writes the page's stamps with.
  */
-function workingHoursBetween(fromMs: number, toMs: number, cap: number): number {
+/**
+ * The machines whose last shifts were mostly transparent work (a product named
+ * «… شفاف …»): at least 5 of the last 20 shift rows on record, and 70% of them
+ * (ASSUMPTION). Only a SUGGESTION — which machines are kept for transparent is
+ * the owner's to say, and nothing is marked until somebody taps it. Empty once
+ * any machine is marked.
+ */
+function transparentHintFor(rows: readonly { date: string; machine: string; product: string }[], machines: readonly PlanMachine[]): string[] {
+  if (machines.some((m) => m.transparentOnly)) return [];
+  const seen = new Map<string, { all: number; clear: number }>();
+  for (const r of [...rows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))) {
+    const k = machineKey(r.machine);
+    const c = seen.get(k) ?? { all: 0, clear: 0 };
+    if (c.all >= 20) continue;
+    c.all += 1;
+    if (fold(r.product).includes(fold("شفاف"))) c.clear += 1;
+    seen.set(k, c);
+  }
+  return machines.filter((m) => {
+    const c = seen.get(machineKey(m.label));
+    return !!c && c.all >= 5 && c.clear / c.all >= 0.7;
+  }).map((m) => m.label);
+}
+
+function workingHoursBetween(fromMs: number, toMs: number, cap: number, off: ReadonlySet<string> = new Set()): number {
   let hours = 0;
   let cursor = fromMs;
   while (cursor < toMs && hours < cap) {
@@ -325,7 +356,8 @@ function workingHoursBetween(fromMs: number, toMs: number, cap: number): number 
     const intoDay = Number(stamp.slice(11, 13)) * 60 + Number(stamp.slice(14, 16));
     // To the next Cairo midnight (always forward: at least one minute).
     const end = Math.min(toMs, cursor + Math.max(1, 1440 - (Number.isFinite(intoDay) ? intoDay : 0)) * 60_000);
-    if (!isFriday(stamp.slice(0, 10))) hours += (end - cursor) / 3_600_000;
+    // A «عطلة» day is every machine's day off, like a Friday: nothing was made.
+    if (!isFriday(stamp.slice(0, 10)) && !off.has(stamp.slice(0, 10))) hours += (end - cursor) / 3_600_000;
     cursor = end;
   }
   return Math.min(cap, hours);
@@ -423,6 +455,8 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
   // What every machine ran in its latest shift. A row with no count yet
   // («لم يُعد بعد») still says which mould was on the machine, so only the
   // day-off markers are left out — NOT isStubRun, which is an OEE rule.
+  // The «عطلة» / «يوم جمعة» rows: one row = every machine off that day.
+  const offDays = dayOffDates(prodTab.records, normalizeDate);
   const shiftRows = prodTab.records.filter((r) => !isDayOffRow(r)).map((r, at) => ({
     date: normalizeDate(r.date), shift: r.shift || "",
     machine: r.machine || r.machineCode || "", product: r.product || "", material: r.material || "",
@@ -872,7 +906,7 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
       // …and a note with no clock on it: from the end of its own factory day.
       if (note) from = Math.max(from, stampInstant(note.date) || factoryDayEnd(stampDay(note.date, today)));
     }
-    return workingHoursBetween(from, until, LAG_CAP_HOURS);
+    return workingHoursBetween(from, until, LAG_CAP_HOURS, offDays);
   };
 
   const machines: PlanMachine[] = seats.map((s) => {
@@ -1217,6 +1251,9 @@ export async function loadPlan(opts: { fresh?: boolean; role?: Role } = {}): Pro
     masterRead: masterTab.records.length > 0,
     plannerRead,
     friday: isFriday(today),
+    dayOff: offDays.has(today),
+    daysOff: Array.from(offDays).filter((d) => d >= daysBefore(today, 14)).sort(),
+    transparentHint: transparentHintFor(shiftRows, machines),
     canSetKeyClient: !!opts.role && hasFullAccess(opts.role),
     keyClients: Array.from(answers.entries()).filter(([k, v]) => k.startsWith("client:") && parseYesNo(v.keyClient) === true).length,
     machines, orders,

@@ -996,3 +996,19 @@ test("«خامة المخزن» is saved in the STORE's own spelling, only when 
   assert.equal(f.appends.length, 2);
   assert.equal(f.appends[1].values.storeMaterial, "ABS أسود");
 });
+
+test("today's «عطلة» row, the fortnight's days off, and the machines the log says run transparent", async () => {
+  const f = floor(); // 5 Oct 2026, 13:00 in Cairo
+  f.tabs.production = [
+    ...["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-03"].map((d) => shift(d, P2, "كفر شفاف فوكس")),
+    shift("2026-10-04", P1, "كرسي"),
+    { ...shift("2026-10-05", "", ""), shift: "عطلة" },
+    { ...shift("2026-09-10", "", ""), shift: "عطلة" },
+  ];
+  const p = await D.loadPlan();
+  assert.equal(p.dayOff, true);
+  assert.deepEqual(p.daysOff, ["2026-10-05"], "a day off of a month ago is not sent");
+  // Five shifts, all «شفاف»: suggested — and only suggested; nothing is marked.
+  assert.deepEqual(p.transparentHint, [P2]);
+  assert.equal(M(p, P2).transparentOnly, false);
+});

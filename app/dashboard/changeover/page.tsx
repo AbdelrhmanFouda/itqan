@@ -39,7 +39,7 @@ import { ageLabel, fill, fmtInt, fmtNum } from "@/lib/format";
 import { DOWNTIME_CAPTURE_REASONS, type Tone } from "@/lib/prod-meta";
 import {
   ANY_COLOUR, COLOURS, MAP_COLS, MAP_MAX_ROWS, MAP_NAME, MAP_TILE, MISSING_ITEMS,
-  barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineFinished, machineKey, placeTile, planDay,
+  barrelOf, colourDef, colourKey, estimateFrom, fitFloor, fold, freeSpot, machineFinished, machineKey, stoppageFault, placeTile, planDay,
   rankFor, removeTile, sortByUrgency, splitMinutes, stockState, stoppageKind, tileHeightPx, tileWidthPx, turnLayout, urgencyChips,
   type DayEntry, type DayNeed, type Estimate, type FloorFit,
   type Chip, type ChipTone, type MachineState, type MapTile, type MissingKey, type PlanMachine, type PlanOrder,
@@ -56,7 +56,7 @@ import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, HelpCi
 // v5 (2026-10-07): again — `ranOn`, `stock`, `asOf` on every order, the
 // machine's own change time, the store's material list. An old snapshot has
 // no `ranOn` list at all, and the ranking reads it for every order.
-const LAST_KEY = "itqan.changeover.last.v5";
+const LAST_KEY = "itqan.changeover.last.v6";
 const STALE_AFTER_MS = 60_000;
 const CHIP_TONE: Record<ChipTone, Tone> = { good: "green", warn: "amber", bad: "red", info: "blue" };
 const STATE_TONE: Record<MachineState, Tone> = { running: "green", stopped: "red", idle: "amber", unknown: "gray" };
@@ -544,8 +544,10 @@ export default function ChangeoverPage() {
    * orders the plan could not put anywhere, which are said, never hidden.
    */
   const dayPlan = useMemo(
-    () => planDay(machines, orders, { today: data?.today ?? "", transparentMachines, hourNow }),
-    [machines, orders, data?.today, transparentMachines, hourNow],
+    // (nowMs is read when the data changes — a change in progress frees its
+    // team to the minute the plan was last worked out, which is close enough.)
+    () => planDay(machines, orders, { today: data?.today ?? "", transparentMachines, hourNow, nowMs: Date.now(), daysOff: data?.daysOff ?? [] }),
+    [machines, orders, data?.today, data?.daysOff, transparentMachines, hourNow],
   );
   const day = dayPlan.entries;
 
@@ -602,6 +604,23 @@ export default function ChangeoverPage() {
     const r = DOWNTIME_CAPTURE_REASONS.find((x) => x.key === m.stoppage?.reason);
     return r ? (isAr ? r.ar : r.en) : m.stoppage?.reason ?? "";
   }, [isAr]);
+  /** Who is at fault on the machine a mould stands on (lib/changeover.ts stoppageFault). */
+  const faultAt = useCallback((label: string) => {
+    const m = machines.find((x) => machineKey(x.label) === machineKey(label));
+    return m ? stoppageFault(m.stoppage?.reason) : "none";
+  }, [machines]);
+  // The one-tap answers outside a form (a guessed store material, the machines
+  // the log says run transparent): which one is being saved, "" when none.
+  const [quick, setQuick] = useState("");
+  const [quickError, setQuickError] = useState("");
+  const quickSave = useCallback(async (id: string, items: { kind: string; name: string; values: Record<string, unknown> }[]) => {
+    setQuick(id); setQuickError("");
+    const r = await post({ action: "answers", items });
+    if (!r.ok) setQuickError(errorText(s, r.reason));
+    else await reloadFresh();
+    setQuick("");
+  }, [s, reloadFresh]);
+
   /** A machine recorded «لا يوجد أمر شغل» has FINISHED — said in its own word. */
   const stateWord = useCallback((m: PlanMachine) => (machineFinished(m) ? s.machines.finished : s.states[m.state]), [s]);
 
@@ -877,6 +896,8 @@ export default function ChangeoverPage() {
     const why =
       e.need === "finished" ? s.day.need.finished
       : e.need === "free" ? s.day.need.free
+      // «صيانة الاسطمبة»: the mould is the bad one, the machine is fine.
+      : e.need === "stopped" && stoppageFault(m.stoppage?.reason) === "mould" ? s.more.mouldBad
       : e.need === "stopped" ? fill(s.day.need.stopped, { reason: reasonText(m) })
       : e.need === "overrun" ? s.day.need.overrun
       : e.need === "down" ? fill(s.day.need.down, { reason: reasonText(m), since: stoppageSince(m) })
@@ -937,6 +958,12 @@ export default function ChangeoverPage() {
           )}
           {sg ? (
             <span className={`block mt-2 ${lead}`}>
+              {e.turn !== null && e.startIn !== null && (
+                <span className="block text-xs text-gray-600 mb-1">
+                  {e.startIn <= 0 ? fill(s.more.turnNow, { n: fmtInt(e.turn, isAr) }) : fill(s.more.turnLater, { n: fmtInt(e.turn, isAr), t: roughly(e.startIn / 60) })}
+                </span>
+              )}
+              {e.movedFrom && <span className="block text-xs text-emerald-700 mb-1">{fill(s.more.movedFrom, { machine: ltr(codeOf(e.movedFrom)) })}</span>}
               <span className="block text-xs font-semibold text-blue-700">{verb}</span>
               <span className="block font-semibold text-gray-900 break-words">
                 {sg.order.product} <span className="text-xs font-normal text-gray-400" dir="ltr">{sg.order.code}</span>
@@ -986,6 +1013,13 @@ export default function ChangeoverPage() {
           ? fill(s.ordersTab.stock, { material: st.material, have: kgText(st.haveKg, isAr), need: kgText(st.needKg, isAr) })
           : fill(s.ordersTab.stockNoNeed, { material: st.material, have: kgText(st.haveKg, isAr) })}
         {st.guessed && <span className="text-amber-700"> · {s.ordersTab.stockGuessed}</span>}
+        {/* One tap turns the guess into the answer (owner, 2026-10-10: "do the rest"). */}
+        {st.guessed && canWrite && (
+          <button type="button" disabled={quick !== ""} onClick={() => quickSave(`stock:${o.product}`, [{ kind: "mold", name: o.product, values: { storeMaterial: st.material } }])}
+            className="ms-2 inline-flex items-center min-h-8 px-2.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-800 bg-white hover:bg-gray-50 active:bg-gray-100 disabled:opacity-50">
+            {quick === `stock:${o.product}` ? s.more.saving : s.more.stockConfirm}
+          </button>
+        )}
       </p>
     );
   };
@@ -999,6 +1033,8 @@ export default function ChangeoverPage() {
     const where = done ? s.ordersTab.where.done
       : o.mountedRunning ? fill(s.ordersTab.where.running, { machine: on })
       : o.queuedBehind ? fill(s.ordersTab.where.queued, { machine: on })
+      : o.mountedOn && faultAt(o.mountedOn) === "mould" ? fill(s.more.orderMouldRepair, { machine: on })
+      : o.mountedOn && faultAt(o.mountedOn) === "machine" ? fill(s.more.orderMachineRepair, { machine: on })
       : o.mountedOn ? fill(s.ordersTab.where.standing, { machine: on })
       : s.ordersTab.where.waiting;
     return (
@@ -1069,9 +1105,10 @@ export default function ChangeoverPage() {
           {fill(s.dataAge, { age: ageLabel(data.dataAgeMs, isAr) })}
         </p>
       )}
-      {data.friday && (
+      {quickError && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3" role="alert">{quickError}</p>}
+      {(data.friday || data.dayOff) && (
         <p className="text-sm text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{s.friday}
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />{data.friday ? s.friday : s.more.dayOff}
         </p>
       )}
       {data.logRead === false && (
@@ -1192,6 +1229,16 @@ export default function ChangeoverPage() {
         {transparentMachines.length === 0 && (
           <p className="text-xs text-gray-500 mt-1">{s.hints.noTransparentMachine}</p>
         )}
+        {/* …and what the log suggests, to be confirmed with one tap — never marked by itself. */}
+        {transparentMachines.length === 0 && (data.transparentHint ?? []).length > 0 && (
+          <div className="mt-2 text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0">{fill(s.more.transparentSuggest, { machines: ltr((data.transparentHint ?? []).map(codeOf).join(" · ")) })}</span>
+            <Btn variant="outline" disabled={!canWrite || quick !== ""}
+              onClick={() => quickSave("transparent", (data.transparentHint ?? []).map((label) => ({ kind: "machine", name: label, values: { transparentOnly: true } })))}>
+              {quick === "transparent" ? s.more.saving : (data.transparentHint ?? []).length === 1 ? s.more.transparentMarkOne : s.more.transparentMark}
+            </Btn>
+          </div>
+        )}
         {machines.every((m) => !m.bigMachine) && (
           <p className="text-xs text-gray-500 mt-1">{s.hints.noBigMachine}</p>
         )}
@@ -1204,7 +1251,7 @@ export default function ChangeoverPage() {
       {/* ------------------------------ the day's plan ------------------------------ */}
       {!machine && tab === "day" && (
         <section className="mb-5">
-          <p className="text-xs text-gray-500 mb-3">{s.day.intro}</p>
+          <p className="text-xs text-gray-500 mb-3">{s.day.intro} {s.more.teams}</p>
           {/* The urgent orders the plan could not put on any machine — above
               everything else, because each is a delivery about to be missed
               and no card below mentions it. */}
@@ -1283,6 +1330,11 @@ export default function ChangeoverPage() {
                             {g === "down" ? (
                               <span className="min-w-0 flex-1 text-sm text-red-700 break-words">
                                 {fill(s.day.need.down, { reason: reasonText(e.machine), since: stoppageSince(e.machine) })}
+                                {stoppageFault(e.machine.stoppage?.reason) === "machine" && e.machine.now.products.length > 0 && (
+                                  <span className="block text-xs text-emerald-700">
+                                    {e.movesTo ? fill(s.more.mouldGoes, { machine: ltr(codeOf(e.movesTo)) }) : s.more.mouldGood}
+                                  </span>
+                                )}
                               </span>
                             ) : (
                               <>
@@ -1513,7 +1565,7 @@ export default function ChangeoverPage() {
       )}
       {confirm && (
         <ConfirmForm
-          machine={confirm.machine} pick={confirm.pick} friday={data.friday} canWrite={canWrite} isAr={isAr} s={s} cancel={p.common.cancel}
+          machine={confirm.machine} pick={confirm.pick} friday={data.friday || !!data.dayOff} canWrite={canWrite} isAr={isAr} s={s} cancel={p.common.cancel}
           minutes={minutes} reasons={confirm.pick.chips.map((c) => chipText(c, co.ar, true)).join(" · ")}
           onClose={() => setConfirm(null)}
           onDone={async (r) => { setConfirm(null); setDone(r); await reloadFresh(); }}

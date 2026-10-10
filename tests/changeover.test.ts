@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANY_COLOUR, BASELINE_REASON, CHANGEOVER_NUMBERS, FITS_UNKNOWN, MAP_COLS, MAP_MAX_ROWS, MAP_TILE, MISSING_ITEMS,
-  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE, standsTall, turnLayout, isFriday, machineFinished, planDay, sortByUrgency, urgencyChips, KEY_URGENT_DAYS, NO_ORDER_STOPPAGE,
+  NOTHING_MISSING, freeSpot, fitFloor, tileHeightPx, tileWidthPx, MAP_READABLE, standsTall, turnLayout, stoppageFault, CHANGE_TEAMS, isFriday, machineFinished, planDay, sortByUrgency, urgencyChips, KEY_URGENT_DAYS, NO_ORDER_STOPPAGE,
   answersFor, barrelColours, bestStart, colourFromMaterial, colourKey, colourRelation, colourToSheet,
   coloursFromSheet, coloursIn, coloursToSheet, dryingFor, estimateChange, estimateFrom, formatLayout, guessColour,
   isBaselineRow, isNightHour, isRecent, kindFromSheet, kindToSheet, latestRuns, listFromSheet, listToSheet,
@@ -1962,4 +1962,77 @@ test("the page words what the rules decided \u2014 it has no rule and no number 
 
   // \u2026and the question form reads the supervisor's ANSWER, not only what the store makes of it.
   assert.match(between("function OrderForm(", "async function save()"), /order\.storeMaterial/);
+});
+
+/* ------------------- 2026-10-10: two teams, and who is at fault ------------------- */
+
+test("who is at fault when a machine stands: the machine, the mould, the material — or the reason does not say", () => {
+  assert.equal(stoppageFault("Maintenance"), "machine");
+  assert.equal(stoppageFault("Mold maintenance"), "mould");
+  assert.equal(stoppageFault("No material"), "material");
+  for (const r of ["No order", "Mold change", "Setup", "Nozzle burn", "Sprue broken", "Material drying", "No operator", "Other", "", undefined]) {
+    assert.equal(stoppageFault(r), "none", String(r));
+  }
+});
+
+test("a good mould on a machine under repair is moved to another machine; a bad mould holds its order and frees its machine", () => {
+  const A = "PQ 5 — 100", B = "PQ 7 — 100";
+  const floor = (reason: string) => [
+    machine({ label: A, state: "stopped", stoppage: { reason, since: 0 }, now: { order: "Job 1", products: ["غطاء امير ابيض"] } }),
+    machine({ label: B, state: "idle", now: { order: "", products: [] } }),
+  ];
+  const os = [
+    order({ code: "Job 1", product: "غطاء امير ابيض", mountedOn: A, fits: [A, B] }),
+    order({ code: "Job 2", product: "قشارة ثوم", fits: [A, B], dueDate: "2026-10-25" }),
+  ];
+  const at = (plan: ReturnType<typeof planDay>, label: string) => plan.entries.find((e) => e.machine.label === label)!;
+
+  // «صيانة في الماكينة»: the MACHINE is the bad one. Its mould is good — it
+  // goes to the free machine, and the machine under repair takes nothing.
+  const repair = planDay(floor("Maintenance"), os, ctx);
+  assert.deepEqual([at(repair, A).need, at(repair, A).pick, at(repair, A).movesTo], ["down", null, B]);
+  assert.deepEqual([at(repair, B).pick?.order.code, at(repair, B).movedFrom], ["Job 1", A]);
+
+  // «صيانة الاسطمبة»: the MOULD is the bad one. Its order waits for it and is
+  // given to nobody; the machines take what else there is.
+  const mould = planDay(floor("Mold maintenance"), os, ctx);
+  assert.equal(at(mould, A).need, "stopped");
+  assert.deepEqual(mould.entries.map((e) => e.pick?.order.code ?? null).filter(Boolean), ["Job 2"]);
+  assert.ok(mould.entries.every((e) => e.movedFrom === "" && e.movesTo === ""));
+});
+
+test("two changes at a time: the third machine waits for a team, and a change already in progress holds one", () => {
+  const L = ["PQ 1 — 100", "PQ 2 — 100", "PQ 3 — 100", "PQ 4 — 100"];
+  const idle = (label: string) => machine({ label, state: "idle", now: { order: "", products: [] } });
+  const os = [1, 2, 3].map((n) => order({ code: `Job ${n}`, product: `منتج ${n}`, fits: L, dueDate: `2026-10-1${n}` }));
+  assert.equal(CHANGE_TEAMS, 2);
+  const plan = planDay([idle(L[0]), idle(L[1]), idle(L[2])], os, ctx).entries;
+  assert.deepEqual(plan.map((e) => e.turn), [1, 2, 3]);
+  assert.deepEqual(plan.slice(0, 2).map((e) => e.startIn), [0, 0]);
+  assert.equal(plan[2].startIn, Math.min(plan[0].pick!.estimate.totalMin, plan[1].pick!.estimate.totalMin));
+  assert.ok(plan[2].startIn! > 0);
+
+  // A change in progress on a fourth machine, started ten minutes ago, holds
+  // one of the two teams for the rest of the time a change usually takes.
+  const now = 1_000_000_000_000;
+  const busy = machine({ label: L[3], state: "stopped", stoppage: { reason: "Mold change", since: now - 10 * 60_000 }, now: { order: "", products: [] } });
+  const withBusy = planDay([idle(L[0]), idle(L[1]), busy], os, { ...ctx, nowMs: now }).entries;
+  assert.deepEqual(withBusy.filter((e) => e.turn !== null).map((e) => e.startIn), [0, 35]);
+  assert.equal(withBusy.find((e) => e.machine.label === L[3])!.turn, null, "a machine being changed is not given another change");
+
+  // A pick whose mould is already on the machine needs no team at all.
+  const own = planDay(
+    [machine({ label: L[0], state: "idle", now: { order: "Job 1", products: ["منتج 1"] } })],
+    [order({ code: "Job 1", product: "منتج 1", mountedOn: L[0], fits: L })], ctx,
+  ).entries[0];
+  assert.deepEqual([own.pick?.order.code, own.turn, own.startIn], ["Job 1", null, null]);
+});
+
+test("a «عطلة» day is a day nothing runs: what is left of today does not count towards a forecast", () => {
+  const P = "PQ 5 — 100";
+  const m = machine({ label: P, state: "running", now: { order: "run" } });
+  const o = order({ code: "run", mountedOn: P, mountedRunning: true, runHours: 10 });
+  assert.equal(planDay([m], [o], { ...ctx, hourNow: 8 }).entries[0].finishIn, 10);
+  // The rest of today (16 h), then ten hours of tomorrow.
+  assert.equal(planDay([m], [o], { ...ctx, hourNow: 8, daysOff: [ctx.today] }).entries[0].finishIn, 26);
 });

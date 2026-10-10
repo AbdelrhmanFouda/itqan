@@ -874,6 +874,29 @@ export function stoppageKind(reason: string): StoppageKind {
  * the one standing on the machine under repair.
  */
 const MACHINE_REPAIR = "Maintenance";
+const MOULD_REPAIR = "Mold maintenance";
+const MOULD_CHANGE = "Mold change";
+const NO_MATERIAL = "No material";
+
+/** Owner, 2026-10-10: "the team can do 2 changes at the same time." */
+export const CHANGE_TEAMS = 2;
+
+/**
+ * WHO is at fault when a machine stands — owner, 2026-10-10: "sometimes the
+ * mould is good but on a bad machine, and sometimes the mould is bad but is
+ * put on the machine." The floor's own stoppage reason says which:
+ *   machine  «صيانة في الماكينة» — the mould on it is GOOD: it can go to
+ *            another machine, and this one takes nothing until it is repaired;
+ *   mould    «صيانة الاسطمبة» — the MACHINE is good: it takes another mould,
+ *            and the order of the bad mould waits for it wherever it stands;
+ *   material «عدم وجود خامة» — both are good; the order waits for material
+ *            and the machine takes another mould;
+ *   none     any other reason says nothing about either.
+ */
+export type StoppageFault = "machine" | "mould" | "material" | "none";
+export function stoppageFault(reason: string | undefined | null): StoppageFault {
+  return reason === MACHINE_REPAIR ? "machine" : reason === MOULD_REPAIR ? "mould" : reason === NO_MATERIAL ? "material" : "none";
+}
 
 /**
  * The one place a machine's state is decided.
@@ -1718,6 +1741,16 @@ export type DayEntry = {
   /** Hours from now at which the pick's material has to start drying
    *  (0 = now); null when it needs none, or there is no pick. */
   dryIn: number | null;
+  /** Its place in the queue of mould changes (1, 2, 3 …) and the minutes from
+   *  now until one of the CHANGE_TEAMS teams can start it (0 = now). null when
+   *  the pick needs no change of mould, or there is no pick. */
+  turn: number | null;
+  startIn: number | null;
+  /** The pick's mould is GOOD and stands on this machine, which is under
+   *  repair itself: it is moved from there ("" otherwise). */
+  movedFrom: string;
+  /** On a machine under repair: where its good mould was planned ("" = nowhere yet). */
+  movesTo: string;
 };
 
 /**
@@ -1787,15 +1820,21 @@ export type DayPlan = { entries: DayEntry[]; unplaced: Unplaced[] };
 export function planDay(
   machines: readonly PlanMachine[],
   orders: readonly PlanOrder[],
-  ctx: { today: string; transparentMachines: readonly string[]; hourNow?: number },
+  ctx: { today: string; transparentMachines: readonly string[]; hourNow?: number; nowMs?: number; daysOff?: readonly string[] },
 ): DayPlan {
-  type Row = Omit<DayEntry, "dryIn"> & { ranked: Suggestion[] };
+  type Row = Pick<DayEntry, "machine" | "need" | "current" | "hoursLeft" | "finishIn" | "pick"> & { ranked: Suggestion[] };
+  // A «عطلة» day (one row in «الإنتاج» = every machine off) is a day nothing
+  // runs, like a Friday: what is left of today does not count.
+  const offToday = !!ctx.daysOff?.includes(ctx.today);
+  const hour = ctx.hourNow ?? 12;
   const rows: Row[] = machines.map((machine) => {
     const mk = machineKey(machine.label);
     const current = orders.find((o) => !!fold(o.code) && fold(o.code) === fold(machine.now.order) && machineKey(o.mountedOn) === mk) ?? null;
     const running = machine.state === "running";
     const hoursLeft = running && current && current.runHours != null ? current.runHours : null;
-    const finishIn = hoursLeft === null ? null : calendarHours(hoursLeft, ctx.today, ctx.hourNow);
+    const finishIn = hoursLeft === null ? null
+      : offToday && hoursLeft > 0 ? (24 - hour) + calendarHours(hoursLeft, ctx.today, 24)
+      : calendarHours(hoursLeft, ctx.today, ctx.hourNow);
     // The stoppage's reason decides. A machine called stopped with no reason
     // on record is read like a reason nobody knows: not offered a mould.
     const kind: StoppageKind | null = machine.stoppage ? stoppageKind(machine.stoppage.reason)
@@ -1837,7 +1876,9 @@ export function planDay(
   const rowOf = new Map(rows.map((row) => [machineKey(row.machine.label), row] as const));
   const held = (o: PlanOrder): boolean => {
     const row = o.mountedOn ? rowOf.get(machineKey(o.mountedOn)) : undefined;
-    return !!row && (row.need === "stopped" || (row.need === "down" && row.machine.stoppage?.reason !== MACHINE_REPAIR));
+    // …unless the MACHINE is what is being repaired: then its mould is good
+    // and free to go to another machine (stoppageFault).
+    return !!row && (row.need === "stopped" || (row.need === "down" && stoppageFault(row.machine.stoppage?.reason) !== "machine"));
   };
   // A mould is its product ON the machine it stands on; an order whose mould
   // is up nowhere has none to share.
@@ -1891,16 +1932,46 @@ export function planDay(
     if (got) give(row, got);
   }
 
+  // WHO STARTS WHEN — CHANGE_TEAMS changes at a time, in the order above. A
+  // change already in progress («تغيير الاسطمبة» running on a machine) holds
+  // a team for what is left of the time a change usually takes there.
+  const teams: number[] = new Array<number>(CHANGE_TEAMS).fill(0);
+  const freest = (): number => teams.indexOf(Math.min(...teams));
+  for (const row of rows) {
+    if (row.machine.stoppage?.reason !== MOULD_CHANGE) continue;
+    const usual = row.machine.swapMin ?? (row.machine.bigMachine ? CHANGEOVER_NUMBERS.swapBigMin : CHANGEOVER_NUMBERS.swapMin);
+    const spent = ctx.nowMs ? Math.max(0, (ctx.nowMs - row.machine.stoppage.since) / 60_000) : 0;
+    teams[freest()] += Math.max(0, Math.round(usual - spent));
+  }
+  let turns = 0;
   const entries = rows.map((row): DayEntry => {
     const dry = row.pick?.estimate.drying ?? null;
     // The dryer has to be done when the machine is: now for one that waits,
     // at the end of the running job for one that ends soon.
     const before = row.need === "soon" ? row.finishIn ?? 0 : 0;
+    // A change of mould needs a team; a pick whose mould is already on the
+    // machine does not.
+    let turn: number | null = null, startIn: number | null = null;
+    if (row.pick && !row.pick.mountedHere) {
+      const team = freest();
+      startIn = Math.max(teams[team], Math.round(before * 60));
+      teams[team] = startIn + row.pick.estimate.totalMin;
+      turn = ++turns;
+    }
+    const from = row.pick?.order.mountedOn ? rowOf.get(machineKey(row.pick.order.mountedOn)) : undefined;
+    const movedFrom = from && from !== row && from.need === "down" && stoppageFault(from.machine.stoppage?.reason) === "machine"
+      ? from.machine.label : "";
     return {
       machine: row.machine, need: row.need, current: row.current, hoursLeft: row.hoursLeft, finishIn: row.finishIn, pick: row.pick,
       dryIn: dry ? Math.max(0, Math.round((before - dry.maxH) * 10) / 10) : null,
+      turn, startIn, movedFrom, movesTo: "",
     };
   });
+  // Where the good mould of a machine under repair is going.
+  for (const e of entries) {
+    const src = e.movedFrom ? entries.find((x) => machineKey(x.machine.label) === machineKey(e.movedFrom)) : undefined;
+    if (src) src.movesTo = e.machine.label;
+  }
   return { entries, unplaced };
 }
 
