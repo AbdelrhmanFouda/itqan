@@ -80,7 +80,7 @@ export function landingFor(role: Role): string {
 export type NavKey =
   | "overview" | "finance" | "quality" | "sales"
   | "machines" | "molds" | "products" | "jobs" | "requests" | "production" | "performance"
-  | "downtime" | "issues" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock" | "changeover";
+  | "downtime" | "issues" | "ask" | "assistant" | "reports" | "clients" | "approvals" | "storage" | "stock" | "changeover";
 
 /**
  * Sidebar entries with the (non-full-access) roles allowed to see/visit them.
@@ -141,6 +141,11 @@ export const NAV: { href: string; key: NavKey; roles: Role[] }[] = [
   { href: "/dashboard/downtime", key: "downtime", roles: ["production", "worker", "maintenance"] },
   { href: "/dashboard/storage", key: "storage", roles: ["storage"] },
   { href: "/dashboard/issues", key: "issues", roles: ["production", "quality", "worker", "maintenance"] },
+  // «اسأل Claude» (2026-10-10): a maintenance question about a logged issue,
+  // answered by a listener on the owner's laptop. Owner, manager and
+  // maintenance only (owner's word) — the same list as ASK_ROLES in lib/ask.ts,
+  // which is what the API checks; a test pins that the two agree.
+  { href: "/dashboard/ask", key: "ask", roles: ["maintenance"] },
   { href: "/dashboard/performance", key: "performance", roles: ["production", "quality"] },
   { href: "/dashboard/assistant", key: "assistant", roles: ["production", "quality", "worker", "storage"] },
   { href: "/dashboard/reports", key: "reports", roles: ["finance"] },

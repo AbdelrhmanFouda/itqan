@@ -44,12 +44,29 @@ type Kind =
   // ---- the Claude connector (2026-09-28). Claude is not a Firebase user, so
   // it carries a token the site sealed itself (lib/mcp-auth.ts), owner-only.
   | "connector"   // mcp: verifies the sealed access token + the owner email, before the body
-  | "oauth";      // mcp/oauth/register + token: stateless OAuth, no factory data in reach
+  | "oauth"       // mcp/oauth/register + token: stateless OAuth, no factory data in reach
+  // ---- «اسأل Claude» (2026-10-10). Staff ask; a listener on the owner's
+  // laptop answers. The listener is not a Firebase user either: it carries
+  // ASK_LISTENER_TOKEN, and a file link carries the server's own signature.
+  | "maintenance" // requireRole(req, ["maintenance"]): maintenance + owner/manager
+  | "listener"    // requireListener(req): the laptop's bearer token, before the body
+  | "signedLink"; // openLink(): a ten-minute link this server signed — no token, no role
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 const ROUTES: Record<string, Partial<Record<Method, Kind>>> = {
   "agent":               { GET: "token", POST: "token" },
+  // «اسأل Claude» (2026-10-10): owner, manager and maintenance — never a bare
+  // requireRole(req), which would hand it to every approved role. The
+  // listener's five routes take the laptop's secret, or a link signed here.
+  "ask":                 { GET: "maintenance", POST: "maintenance" },
+  "ask/[id]":            { GET: "maintenance", POST: "maintenance" },
+  "ask/photo":           { GET: "maintenance" },
+  "ask/listener/answer":    { POST: "listener" },
+  "ask/listener/claim":     { POST: "listener" },
+  "ask/listener/file":      { GET: "signedLink" },
+  "ask/listener/heartbeat": { POST: "listener" },
+  "ask/listener/next":      { GET: "listener" },
   "ai-review":           { GET: "guard" },
   "contact":             { POST: "public" },
   // «إنشاء حساب عميل» (2026-10-07): the owner makes a customer's login
@@ -279,6 +296,27 @@ test("each handler does what its classification says", () => {
           assert.equal(guarded, false, `${where}: Claude has no Firebase session to guard with`);
           break;
         }
+        case "maintenance":
+          assert.ok(/requireRole\(\s*req\s*,\s*\[\s*"maintenance"\s*\]\s*\)/.test(body), `${where}: must call requireRole(req, ["maintenance"])`);
+          assert.ok(denies, `${where}: must return g.deny`);
+          break;
+        case "listener": {
+          const tokenAt = body.search(/requireListener\(\s*req\s*\)/);
+          assert.ok(tokenAt >= 0, `${where}: must call requireListener(req)`);
+          assert.ok(denies, `${where}: must return g.deny`);
+          const readAt = body.search(/req\.(json|text|formData)\(\)/);
+          assert.ok(readAt < 0 || tokenAt < readAt, `${where}: reads the body before the token`);
+          assert.equal(guarded, false, `${where}: the listener has no Firebase session to guard with`);
+          break;
+        }
+        case "signedLink": {
+          const linkAt = body.search(/openLink\(/);
+          assert.ok(linkAt >= 0, `${where}: must verify the signed link`);
+          assert.ok(/if \(!link\) return/.test(body), `${where}: an unsigned or expired link must be refused`);
+          const storeAt = body.search(/askStore\(\)/);
+          assert.ok(storeAt < 0 || linkAt < storeAt, `${where}: touches the store before the link is verified`);
+          break;
+        }
         case "oauth":
           assert.equal(guarded, false, `${where}: OAuth endpoints are reached before any sign-in`);
           assert.equal(/@\/lib\/(sheets|mcp-tools|storage|jobs|oee-data|stock-data)"/.test(FILES[route]), false,
@@ -317,7 +355,7 @@ test("a mutating handler that is guarded checks the guard BEFORE reading the bod
   for (const [route, kinds] of Object.entries(ROUTES)) {
     const hs = handlers(FILES[route]);
     for (const [method, kind] of Object.entries(kinds) as [Method, Kind][]) {
-      if (method === "GET" || !["guard", "owner", "sales", "prodSales", "storage", "production", "customer", "customerAccount", "customerRegister"].includes(kind)) continue;
+      if (method === "GET" || !["guard", "owner", "sales", "prodSales", "storage", "production", "maintenance", "customer", "customerAccount", "customerRegister"].includes(kind)) continue;
       const body = hs[method];
       // Whatever this route's guard is — a role, a customer document, or the
       // token verification the register route does itself — it must be the
@@ -350,6 +388,22 @@ test("the reads closed on 2026-09-23 for the customer portal stay closed", () =>
   assert.equal(ROUTES["machines"].GET, "guard", "the registry and its count");
   assert.equal(ROUTES["machines/[id]"].GET, "guard");
   assert.equal(ROUTES["machines/[id]/notes"].GET, "guard", "a fitter's own words");
+});
+
+test("«اسأل Claude»: the listener's secret is its own, and no route calls an AI", () => {
+  const guard = fs.readFileSync(path.join(ROOT, "lib", "ask-guard.ts"), "utf8");
+  assert.ok(/process\.env\.ASK_LISTENER_TOKEN/.test(guard));
+  const askLibs = fs.readdirSync(path.join(ROOT, "lib")).filter((f) => /^ask(-|\.)/.test(f));
+  const sources = [
+    ...askLibs.map((f) => fs.readFileSync(path.join(ROOT, "lib", f), "utf8")),
+    ...Object.entries(FILES).filter(([r]) => r === "ask" || r.startsWith("ask/")).map(([, src]) => src),
+  ];
+  for (const src of sources) {
+    // Never the bridge keys (the main one is written in apps-script.gs)…
+    assert.equal(/process\.env\.(GOOGLE_APPS_SCRIPT_SECRET|STORAGE_APPS_SCRIPT_SECRET)/.test(src), false, "an ask file reads a bridge key");
+    // …and the website never calls Claude: no key, no SDK, no model endpoint.
+    assert.equal(/ANTHROPIC_API_KEY|GEMINI_API_KEY|@anthropic-ai|api\.anthropic\.com|generativelanguage/.test(src), false, "an ask file reaches for an AI");
+  }
 });
 
 test("the showcase endpoint serves counts only — no names", () => {

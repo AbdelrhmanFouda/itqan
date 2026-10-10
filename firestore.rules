@@ -81,6 +81,17 @@ service cloud.firestore {
     // requireRole; the server reaches Firestore through the unauthenticated
     // client SDK, so this must stay open exactly like the collections above.
     match /downtimeEvents/{doc}   { allow read, write: if true; }
+    // «اسأل Claude» (2026-10-10) — questions, photos and the listener's
+    // heartbeat. Written by /api/ask/* (staff: ID token + role; listener: its
+    // own secret), through the same unauthenticated client SDK as the
+    // collections above, so these must be open too. What is stored is
+    // AES-256-GCM ciphertext under a key only the server holds
+    // (lib/ask-crypto.ts): open rules leak nothing readable and a document
+    // written by anyone else fails authentication and is ignored. They can
+    // still be deleted from outside — the same exposure as downtimeEvents.
+    match /askThreads/{doc}       { allow read, write: if true; }
+    match /askPhotos/{doc}        { allow read, write: if true; }
+    match /askMeta/{doc}          { allow read, write: if true; }
     // Daily AI-review cache (one doc per day per period) — written by /api/ai-review.
     match /aiReviews/{doc}        { allow read, write: if true; }
 

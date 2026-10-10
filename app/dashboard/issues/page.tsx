@@ -30,10 +30,13 @@ import { uniqueByLabel } from "@/lib/run-row";
  */
 import { usePageTitle } from "@/components/dashboard/use-page-title";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { pd } from "@/lib/i18n.prod";
-import { Plus, Pencil, Mic, ChevronDown, ChevronUp, X } from "lucide-react";
+import { ak } from "@/lib/i18n.ask";
+import { ASK_ISSUE_KEY, canAsk, type IssueSnap } from "@/lib/ask";
+import { Plus, Pencil, Mic, ChevronDown, ChevronUp, X, MessageCircleQuestionMark } from "lucide-react";
 import { Field, inputCls, Btn, Modal, Spinner, EmptyState, LoadError, StatTile, type TileTone } from "@/components/dashboard/ui";
 import { authedFetch } from "@/lib/authed-fetch";
 import { readLastSeen, writeLastSeen, timedJson } from "@/components/dashboard/last-seen";
@@ -99,7 +102,14 @@ const identity = (i: Issue) => ({
 
 export default function IssuesPage() {
   const { lang } = useLang();
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
+  const router = useRouter();
+  // «اسأل Claude» — owner, manager and maintenance only (lib/ask.ts canAsk; the
+  // API checks the same list). Everyone else sees this page exactly as before.
+  const mayAsk = canAsk(profile?.role);
+  const askT = ak[lang];
+  /** The issue just logged, offered to Claude until dismissed. */
+  const [askOffer, setAskOffer] = useState<Draft | null>(null);
   const p = pd[lang];
   const t = p.issues;
   const isAr = lang === "ar";
@@ -258,6 +268,22 @@ export default function IssuesPage() {
     return r;
   }
 
+  /** Hand one issue to the ask page: a snapshot in sessionStorage, one hop. */
+  function askAbout(i: IssueSnap) {
+    try { sessionStorage.setItem(ASK_ISSUE_KEY, JSON.stringify(i)); } catch { /* private window: it opens as a general question */ }
+    router.push("/dashboard/ask?new=issue");
+  }
+  const snapOf = (i: Issue): IssueSnap => ({
+    row: i.row, date: i.date, machine: i.machine, product: i.product, category: i.category,
+    description: i.description, action: i.action, status: i.status, note: i.note,
+  });
+  /** The issue just saved: its row once the list shows it, else as it was typed (row 0). */
+  function askAboutSaved(d: Draft) {
+    const same = (a: string, b: string) => a.trim() === b.trim();
+    const hit = (issues ?? []).find((i) => same(i.date, d.date) && same(i.machine, d.machine) && same(i.product, d.product) && same(i.description, d.description));
+    askAbout(hit ? snapOf(hit) : { row: 0, ...d });
+  }
+
   const counts = useMemo(() => countByStatus(issues ?? []), [issues]);
   // The moulds the log names, each once (by productKey), in the log's own
   // spelling, with how many issues it carries — the mould filter.
@@ -358,6 +384,18 @@ export default function IssuesPage() {
         </button>
       </div>
 
+      {mayAsk && askOffer && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <span className="min-w-0 flex-1">{askT.askAboutSaved}</span>
+          <Btn onClick={() => askAboutSaved(askOffer)}><MessageCircleQuestionMark size={16} /> {askT.askAbout}</Btn>
+          <button
+            type="button" onClick={() => setAskOffer(null)} aria-label={p.common.cancel}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-blue-700 hover:bg-blue-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
       {notice && (
         <div
           role="status"
@@ -558,7 +596,7 @@ export default function IssuesPage() {
         <NewIssueSheet
           open
           onClose={() => setAdding(false)}
-          onSaved={() => { notify("ok", t.logged); load(); }}
+          onSaved={(d) => { notify("ok", t.logged); setAskOffer(d); load(); }}
           onRefresh={load}
           machines={machines}
           master={master}
@@ -589,6 +627,8 @@ export default function IssuesPage() {
           moldNumber={moldNumberOf(selected.product)}
           othersOnMold={otherOnMold(selected)}
           onShowMold={() => { setOpenRow(null); showMold(selected.product); }}
+          onAsk={mayAsk ? () => askAbout(snapOf(selected)) : undefined}
+          askLabel={askT.askAbout}
           audioOk={audioOk}
           t={t}
           c={p.common}
@@ -684,7 +724,7 @@ function MachineSelect({ label, value, onChange, machines }: { label: string; va
 function NewIssueSheet({
   open, onClose, onSaved, onRefresh, machines, master, masterFailed, onRetryMaster, audioOk, t, c, isAr, errorText,
 }: {
-  open: boolean; onClose: () => void; onSaved: () => void; onRefresh: () => void;
+  open: boolean; onClose: () => void; onSaved: (saved: Draft) => void; onRefresh: () => void;
   machines: Machine[]; master: MasterRow[] | null; masterFailed: boolean; onRetryMaster: () => void; audioOk: boolean;
   t: Strings; c: Common; isAr: boolean; errorText: (reason: string) => string;
 }) {
@@ -732,7 +772,7 @@ function NewIssueSheet({
         return;
       }
       setSaving(false);
-      onSaved();
+      onSaved(draft);
       onClose();
     } catch {
       setErr(t.saveFailed); setSaving(false);
@@ -866,7 +906,7 @@ function NewIssueSheet({
 
 function IssueDrawer({
   issue, onClose, onStatus, onSave, machines, master, masterFailed, onRetryMaster, onReloadMaster, onMasterNotes, changeLabel,
-  moldNumber, othersOnMold, onShowMold, audioOk, t, c, isAr, lang, errorText, dateText,
+  moldNumber, othersOnMold, onShowMold, onAsk, askLabel, audioOk, t, c, isAr, lang, errorText, dateText,
 }: {
   issue: Issue | null;
   onClose: () => void;
@@ -876,6 +916,8 @@ function IssueDrawer({
   onMasterNotes: (row: number, notes: string) => void;
   changeLabel: string;
   moldNumber: string; othersOnMold: number; onShowMold: () => void;
+  /** «اسأل Claude» about this issue — absent for a role that may not ask. */
+  onAsk?: () => void; askLabel: string;
   audioOk: boolean;
   t: Strings; c: Common; isAr: boolean; lang: "ar" | "en";
   errorText: (reason: string) => string;
@@ -1025,6 +1067,7 @@ function IssueDrawer({
           )}
 
           <div className="flex flex-wrap items-center gap-3 mt-2">
+            {onAsk && <Btn onClick={onAsk}><MessageCircleQuestionMark size={16} /> {askLabel}</Btn>}
             <Btn variant="outline" onClick={() => startEditing(false)}><Pencil size={14} /> {c.edit}</Btn>
             <Btn variant="ghost" onClick={onClose}>{c.cancel}</Btn>
           </div>

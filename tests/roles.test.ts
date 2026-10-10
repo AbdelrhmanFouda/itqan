@@ -123,7 +123,8 @@ test("the pages production and quality lost are really gone", () => {
 
 test("maintenance, sales, finance and storage are unchanged", () => {
   // `molds` is a DELIBERATE move of this pin (owner, 2026-10-07), not drift.
-  assert.deepEqual(keysFor("maintenance").sort(), ["downtime", "issues", "machines", "molds"]);
+  // «اسأل Claude» added 2026-10-10 (owner: owner + maintenance staff).
+  assert.deepEqual(keysFor("maintenance").sort(), ["ask", "downtime", "issues", "machines", "molds"]);
   // Sales gained `requests` on 2026-09-23 — a DELIBERATE move of this pin, not
   // drift: the customer portal's review queue is theirs, the owner's and the
   // manager's, and nobody else's (owner's decision 6). The matrix row is in

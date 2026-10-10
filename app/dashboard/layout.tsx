@@ -9,6 +9,7 @@ import { pd } from "@/lib/i18n.prod";
 import { t } from "@/lib/i18n";
 import { ad } from "@/lib/i18n.auth";
 import { cp } from "@/lib/i18n.portal";
+import { ak } from "@/lib/i18n.ask";
 import { navFor, canAccess, landingFor, type NavKey } from "@/lib/roles";
 import { Spinner } from "@/components/dashboard/ui";
 // Lifted out of this file on 2026-09-23 so the customer portal can show the
@@ -17,7 +18,7 @@ import { StatusScreen } from "@/components/dashboard/status-screen";
 import {
   LayoutDashboard, Settings, Box, FileText, Layers,
   BarChart3, CheckCircle2, Mail, Building2, Globe, Gauge, Menu, X, Sparkles, AlertTriangle, Warehouse,
-  TimerOff, Boxes, Inbox, Replace,
+  TimerOff, Boxes, Inbox, Replace, MessageCircleQuestionMark,
 } from "lucide-react";
 
 const ICON: Record<NavKey, React.ElementType> = {
@@ -33,6 +34,7 @@ const ICON: Record<NavKey, React.ElementType> = {
   production: Layers,
   downtime: TimerOff,
   issues: AlertTriangle,
+  ask: MessageCircleQuestionMark,
   storage: Warehouse,
   stock: Boxes,
   changeover: Replace,
@@ -101,6 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       case "production": return p.nav.production;
       case "downtime": return p.nav.downtime;
       case "issues": return p.nav.issues;
+      case "ask": return ak[lang].nav;
       case "storage": return p.nav.storage;
       case "stock": return p.nav.stock;
       case "changeover": return p.nav.changeover;

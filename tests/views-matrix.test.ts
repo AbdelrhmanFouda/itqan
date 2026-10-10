@@ -56,6 +56,8 @@ const MATRIX: Record<NavKey, Role[]> = {
   downtime:    ["owner", "manager", "production", "worker", "maintenance"],
   storage:     ["owner", "manager", "storage"],
   issues:      ["owner", "manager", "production", "quality", "worker", "maintenance"],
+  // «اسأل Claude» (2026-10-10): owner, manager and maintenance — the owner's word.
+  ask:         ["owner", "manager", "maintenance"],
   performance: ["owner", "manager", "production", "quality"],
   assistant:   ["owner", "manager", "production", "quality", "worker", "storage"], // storage added 2026-10-05 (owner)
   reports:     ["owner", "manager", "finance"],

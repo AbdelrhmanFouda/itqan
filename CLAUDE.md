@@ -46,6 +46,20 @@ npm run speed        # speed report against a RUNNING site: every page's HTML an
 Deploy = push to `main` → Vercel auto-deploys (project `itqan`, domain itqan-taupe.vercel.app).
 Secrets live in `.env.local` (gitignored) and are mirrored to Vercel env vars.
 
+## Recently landed (2026-10-10) — «اسأل Claude»: a question about a logged issue, answered from the owner's laptop
+
+Owner: no Claude API, no key, no AI SDK — "the website never calls Claude. It only stores questions and shows answers. A listener on my laptop answers them using my Claude Code subscription." **Contract for the listener: `docs/ASK-CLAUDE-LISTENER.md`** — change it and `lib/ask-listener.ts` together.
+- **Source = a logged issue in «الأعطال»** (owner's correction; not a stoppage). `/dashboard/issues`: «اسأل Claude» in the opened issue and on a blue line right after a save — both only for `canAsk` roles. It hands a snapshot over in sessionStorage (`ASK_ISSUE_KEY`) to **`/dashboard/ask`** (NAV key `ask`), which also holds «سؤال عام» and «أسئلتي». The downtime page is untouched.
+- **Who:** owner, manager, maintenance — `ASK_ROLES` / `canAsk` in `lib/ask.ts`, `requireRole(req, ["maintenance"])` on every staff route, and a test pins NAV to the same list.
+- **Rules are `lib/ask.ts`** (pure, `tests/ask.test.ts`); **the server sequence is `lib/ask-core.ts`** over an `AskStore` (`tests/ask-core.test.ts` runs the real thing on the in-memory store). A thread is ONE document with its messages inside, so a claim is one transaction. Status `waiting → claimed → answered | failed`; **a claim older than 5 min IS waiting** (`effectiveStatus` — no timer, no cron); a late answer is kept unless somebody re-claimed (`claim_lost`); a failure keeps the question and «حاول تاني» re-queues it (not counted against the cap).
+- **Firestore, encrypted** (`lib/ask-store.ts`, `lib/ask-crypto.ts`): `askThreads`, `askPhotos`, `askMeta` are open in `firestore.rules` like every collection the server writes, so everything in them is AES-256-GCM under `ASK_DATA_KEY`, the document id bound in. An outsider reads ciphertext and cannot forge an answer or a heartbeat; he can still delete documents. ⚠ The plain `uid` / `status` fields are only an index — every read re-checks them against the blob. Do not start trusting them.
+- **Listener routes** (`/api/ask/listener/next|claim|answer|heartbeat`) take `ASK_LISTENER_TOKEN` (`lib/ask-guard.ts`) — its own secret, never a bridge key (pinned in tests/api-guards.test.ts, with "no ask file reaches for an AI"). `…/file?t=` serves a photo or the issue's voice note by a link the server signed for 10 minutes. Unset secrets = 503 `not_configured` everywhere, and the page says so.
+- **History for the listener** (`lib/ask-history.ts`): Master row, 30 days of the machine's stoppages, last 10 shifts for machine and for product (scrap through `resolveScrap`), last 10 issues each — ONE 6 s budget; a part that is late is left out and named (`historyMissing`, `missing`). «غير متاح» stays `null`, never 0. The issue itself is verified against the sheet in 4 s or kept as the phone sent it (`verified: false`, no recording links). No sheet tab is created or written.
+- **Cap:** `ASK_DAILY_CAP` per user per Cairo day (default 20, owner unlimited), counted from the user's own threads — follow-ups count, retries do not.
+- **Page:** photo resized in the browser (1280 px JPEG, ≤ 300 KB aim, 450 KB cap); the draft is cleared only after the server said yes; polls 4 s for a minute then 10 s; «دي نصيحة — القرار للفني» always on screen.
+- **`ASK_STORE=memory`** (dev only, ignored in production) keeps threads in the dev process — for running the flow with no Firestore. `.env.local` no longer sets it. ⚠ `.env.local` holds its OWN test `ASK_DATA_KEY`, so a thread made on localhost is unreadable to production (and the reverse): one answered test thread, its photo and a heartbeat from 2026-10-10 sit in Firestore that way and are ignored.
+- **Run on localhost 2026-10-10 (memory store, live sheet for the history, curl as the listener):** ask from an issue with a photo at 375 px, heartbeat, next, photo by link, two claims at once (one 200, one 409), answer, replay (409), follow-up, failure + retry, a general question, a failed send keeping its draft, the offline light, the 5-minute return. **Re-run the same day on REAL Firestore** after the owner published the rules (same round, incl. the two-claims race through a real transaction; the stored document read from outside is ciphertext). ⚠ NOT run: a non-owner account in the browser, the cap message on screen, the after-save line (it needs a real issue written), a voice-note link, a real phone camera, a preview deploy.
+
 ## Recently landed (2026-10-07) — the issues log is MOULD-first, and writes into Master's notes
 
 Owner: "the problem is with the mold more than machine … i want to write in the master notes about each issue for each product".
@@ -1012,7 +1026,7 @@ sidebar and `canAccess()`.
 | `worker` (عامل) | downtime, issues, assistant, **molds** (added 2026-09-04, owner's word; editing open to every role) |
 | `production` | overview, production, jobs, downtime, performance, assistant, issues, **requests** (2026-09-23), **changeover** (2026-09-30) |
 | `quality` | overview, quality, issues, performance, assistant |
-| `maintenance` | machines, downtime, issues |
+| `maintenance` | machines, molds, downtime, issues, **ask** (2026-10-10) |
 | `sales` | sales, products, jobs, clients, **requests** (2026-09-23) |
 | `finance` | finance, reports |
 | `storage` | storage, **stock, jobs, products, assistant** (2026-10-05, owner's word; also in `/api/agent` `ALLOWED`) |
